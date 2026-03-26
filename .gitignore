@@ -1,0 +1,52 @@
+# ==================== Environment & Secrets ====================
+.env
+.env.local
+.env.*.local
+
+# ==================== Python ====================
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+*.egg
+
+# ==================== Node.js ====================
+node_modules/
+
+# ==================== Flutter / Dart ====================
+**/build/
+.dart_tool/
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+
+# ==================== IDE ====================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================== Logs & Temp ====================
+*.log
+dart_errors.txt
+flutter_errors.txt
+uvicorn_log.txt
+error_log.txt
+build_log.txt
+npm-debug.log*
+yarn-debug.log*
+
+# ==================== Build Outputs ====================
+dist/
+dist-ssr/
+*.local

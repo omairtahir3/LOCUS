@@ -1,0 +1,12 @@
+{
+  "venvPath": "c:/Users/dell/Desktop/LOCUS",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows",
+  "reportMissingModuleSource": false,
+  "reportMissingImports": false,
+  "extraPaths": [
+    ".",
+    "c:/Users/dell/Desktop/LOCUS/.venv/Lib/site-packages"
+  ]
+}
