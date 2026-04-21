@@ -16,6 +16,7 @@ import KeyframeAudit from './pages/KeyframeAudit';
 import UserDashboard from './pages/UserDashboard';
 import UserMedications from './pages/UserMedications';
 import UserHistory from './pages/UserHistory';
+import MemorySearch from './pages/MemorySearch';
 
 function App() {
   return (
@@ -44,6 +45,9 @@ function App() {
             <Route path="my-dashboard" element={<UserDashboard />} />
             <Route path="my-medications" element={<UserMedications />} />
             <Route path="my-history" element={<UserHistory />} />
+            <Route path="my-activity" element={<ActivityFeed />} />
+            <Route path="my-detection" element={<Detection />} />
+            <Route path="memory-search" element={<MemorySearch />} />
           </Route>
 
           {/* Catch-all */}

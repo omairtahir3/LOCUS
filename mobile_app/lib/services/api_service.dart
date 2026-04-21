@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 class ApiService {
-  // For Chrome/web: use localhost. For Android emulator: use 10.0.2.2
-  static const String baseUrl = 'http://localhost:8000/api';
+  // Automatically switch between localhost for Web/iOS and 10.0.2.2 for Android emulator
+  static String get baseUrl {
+    if (kIsWeb) return 'http://localhost:8000/api';
+    if (Platform.isAndroid) return 'http://10.0.2.2:8000/api';
+    return 'http://localhost:8000/api';
+  }
 
   static late SharedPreferences _prefs;
   static String? _token;

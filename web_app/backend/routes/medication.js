@@ -56,7 +56,7 @@ router.delete('/:id', async (req, res) => {
 // ── Today's Schedule ──────────────────────────────────────────────────────────
 
 // GET /api/medications/schedule/today  — optionally ?userId= for caregiver access
-router.get('/schedule/today', caregiverAccessCheck, async (req, res) => {
+router.get('/schedule/today', async (req, res) => {
   try {
     const userId = req.query.userId || req.user._id;
     const today = new Date();
@@ -173,7 +173,7 @@ router.patch('/logs/:logId', async (req, res) => {
 });
 
 // GET /api/medications/logs/history — with filters
-router.get('/logs/history', caregiverAccessCheck, async (req, res) => {
+router.get('/logs/history', async (req, res) => {
   try {
     const { userId, medication_id, status, start_date, end_date, limit = 50 } = req.query;
     const targetUser = userId || req.user._id;
@@ -200,7 +200,7 @@ router.get('/logs/history', caregiverAccessCheck, async (req, res) => {
 // ── Daily Adherence Summary ───────────────────────────────────────────────────
 
 // GET /api/medications/summary/daily?date=YYYY-MM-DD&userId=
-router.get('/summary/daily', caregiverAccessCheck, async (req, res) => {
+router.get('/summary/daily', async (req, res) => {
   try {
     const targetUser = req.query.userId || req.user._id;
     const targetDate = req.query.date ? new Date(req.query.date) : new Date();

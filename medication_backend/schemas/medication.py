@@ -150,6 +150,7 @@ class DailyAdherenceSummary(BaseModel):
 
 
 class MedicationScheduleItem(BaseModel):
+    id: Optional[str] = None            # log entry ID if it exists
     medication_id: str
     medication_name: str
     dosage: str

@@ -22,7 +22,7 @@ export default function UserDashboard() {
     try {
       const [schedRes, adhRes] = await Promise.all([
         userAPI.getSchedule(),
-        userAPI.getDailySummary(),
+        userAPI.getAdherence(),
       ]);
       setSchedule(schedRes.data || []);
       setAdherence(adhRes.data || null);
@@ -35,20 +35,28 @@ export default function UserDashboard() {
 
   const markAsTaken = async (item) => {
     try {
-      // Reconstruct the correct date matching the schedule slot, not just 'now'
-      const timeParts = item.scheduled_time.split(':');
-      const dt = new Date();
-      dt.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), 0, 0);
+      if (item.id) {
+        await userAPI.updateLog(item.id, {
+          status: 'taken',
+          verification_method: 'manual',
+          notes: 'Manually verified after AI failure'
+        });
+      } else {
+        // Reconstruct the correct date matching the schedule slot, not just 'now'
+        const timeParts = item.scheduled_time.split(':');
+        const dt = new Date();
+        dt.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), 0, 0);
 
-      await userAPI.createLog({
-        medication_id: item.medication_id,
-        scheduled_time: dt.toISOString(),
-        status: 'taken',
-        verification_method: 'manual',
-      });
+        await userAPI.createLog({
+          medication_id: item.medication_id,
+          scheduled_time: dt.toISOString(),
+          status: 'taken',
+          verification_method: 'manual',
+        });
+      }
       loadData();
     } catch (err) {
-      console.error('Failed to mark as taken:', err);
+      console.error('Failed to update medication status:', err);
     }
   };
 
@@ -73,8 +81,14 @@ export default function UserDashboard() {
     })[0];
 
   const adherencePercent = adherence?.adherence_percentage || 0;
-  const taken = adherence?.taken || 0;
-  const total = adherence?.total_scheduled || schedule.length;
+  const takenWeek = adherence?.taken || 0;
+  const totalWeek = adherence?.total_scheduled || 0;
+  const missedWeek = adherence?.missed || 0;
+
+  const todayTotal = schedule.length;
+  const todayTaken = schedule.filter(s => s.status === 'taken').length;
+  const todayMissed = schedule.filter(s => s.status === 'missed').length;
+
   const circumference = 2 * Math.PI * 36;
   const offset = circumference - (adherencePercent / 100) * circumference;
 
@@ -99,29 +113,29 @@ export default function UserDashboard() {
         <div className="stat-card">
           <div className="stat-icon primary"><Pill size={20} /></div>
           <div>
-            <div className="stat-value">{total}</div>
+            <div className="stat-value">{todayTotal}</div>
             <div className="stat-label">Total Doses Today</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon success"><CheckCircle size={20} /></div>
           <div>
-            <div className="stat-value" style={{ color: 'var(--success)' }}>{taken}</div>
-            <div className="stat-label">Taken</div>
+            <div className="stat-value" style={{ color: 'var(--success)' }}>{todayTaken}</div>
+            <div className="stat-label">Taken Today</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon danger"><XCircle size={20} /></div>
           <div>
-            <div className="stat-value" style={{ color: 'var(--danger)' }}>{adherence?.missed || 0}</div>
-            <div className="stat-label">Missed</div>
+            <div className="stat-value" style={{ color: 'var(--danger)' }}>{todayMissed}</div>
+            <div className="stat-label">Missed Today</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon warning"><TrendingUp size={20} /></div>
           <div>
             <div className="stat-value">{adherencePercent.toFixed(0)}%</div>
-            <div className="stat-label">Adherence</div>
+            <div className="stat-label">7-Day Adherence</div>
           </div>
         </div>
       </div>
@@ -168,14 +182,28 @@ export default function UserDashboard() {
                     }`}>
                       {statusIcon(s.status)} {s.status}
                     </span>
-                    {s.status === 'scheduled' && (
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => markAsTaken(s)}
-                        style={{ padding: '4px 12px', fontSize: '0.75rem' }}
-                      >
-                        <CheckCircle size={12} /> Take
-                      </button>
+                    {s.status === 'needs_verification' && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => markAsTaken(s)}
+                          style={{ padding: '4px 12px', fontSize: '0.75rem', background: 'var(--success)', border: 'none' }}
+                        >
+                          <CheckCircle size={12} /> Yes
+                        </button>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={async () => {
+                            try {
+                              await userAPI.updateLog(s.id, { status: 'missed', verification_method: 'manual', notes: 'Manually marked as missed' });
+                              loadData();
+                            } catch(e) { }
+                          }}
+                          style={{ padding: '4px 12px', fontSize: '0.75rem', background: 'var(--danger)', border: 'none' }}
+                        >
+                          <XCircle size={12} /> No
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -189,7 +217,7 @@ export default function UserDashboard() {
           {/* Adherence Ring */}
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="card-header" style={{ justifyContent: 'center' }}>
-              <div className="card-title">Today's Adherence</div>
+              <div className="card-title">Adherence (Past 7 Days)</div>
             </div>
             <div className="progress-ring" style={{ margin: '12px auto' }}>
               <svg width="80" height="80" viewBox="0 0 80 80">
@@ -204,7 +232,7 @@ export default function UserDashboard() {
               </svg>
               <div className="progress-ring-text">{adherencePercent.toFixed(0)}%</div>
             </div>
-            <div className="text-muted text-sm">{taken} of {total} doses completed</div>
+            <div className="text-muted text-sm">{takenWeek} of {totalWeek} doses taken this week</div>
           </div>
 
           {/* Next Upcoming Dose */}

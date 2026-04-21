@@ -26,6 +26,12 @@ const userNavItems = [
   { path: '/notifications',  icon: Bell,   label: 'Notifications' },
 ];
 
+const userMonitorItems = [
+  { path: '/my-detection',   icon: Shield,   label: 'Auto Verification' },
+  { path: '/my-activity',    icon: Activity, label: 'Activity Feed', comingSoon: true },
+  { path: '/memory-search',  icon: Shield,   label: 'Memory Search', comingSoon: true },
+];
+
 export default function Sidebar() {
   const { logout, user } = useAuth();
   const location = useLocation();
@@ -33,7 +39,7 @@ export default function Sidebar() {
   const isCaregiver = user?.role === 'caregiver' || user?.role === 'admin';
 
   const mainNav = isCaregiver ? caregiverNavItems : userNavItems;
-  const monitorNav = isCaregiver ? caregiverMonitorItems : [];
+  const monitorNav = isCaregiver ? caregiverMonitorItems : userMonitorItems;
 
   return (
     <aside className="sidebar">
@@ -66,7 +72,7 @@ export default function Sidebar() {
               >
                 <Icon size={18} />
                 <span>{label}</span>
-                {comingSoon && <span className="coming-soon-badge" style={{fontSize:'0.55rem',padding:'2px 6px',marginLeft:'auto'}}>Soon</span>}
+                {comingSoon && <span className="dev-badge" style={{ fontSize: '10px' }}>Coming Soon</span>}
               </NavLink>
             ))}
           </>

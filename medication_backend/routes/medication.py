@@ -182,6 +182,7 @@ async def get_todays_schedule(
             log = log_map.get(key)
             status = DoseStatus(log["status"]) if log else DoseStatus.scheduled
             schedule.append(MedicationScheduleItem(
+                id=str(log["_id"]) if log else None,
                 medication_id=str(med["_id"]),
                 medication_name=med["name"],
                 dosage=med["dosage"],

@@ -33,7 +33,12 @@ export default function UserHistory() {
   // Group by date
   const grouped = {};
   filtered.forEach(log => {
-    const dt = log.scheduled_time ? new Date(log.scheduled_time).toLocaleDateString() : 'Unknown';
+    let dt = 'Unknown';
+    if (log.scheduled_time) {
+      const iso = log.scheduled_time.endsWith('Z') ? log.scheduled_time : log.scheduled_time + 'Z';
+      const d = new Date(iso);
+      dt = isNaN(d.getTime()) ? log.scheduled_time.split('T')[0] : d.toLocaleDateString();
+    }
     if (!grouped[dt]) grouped[dt] = [];
     grouped[dt].push(log);
   });
@@ -153,7 +158,12 @@ export default function UserHistory() {
                               log.status === 'missed' ? 'var(--danger-light)' : 'var(--surface-hover)',
                 }}>
                   <div style={{ minWidth: 70, fontWeight: 600, fontSize: '0.85rem' }}>
-                    {log.scheduled_time ? new Date(log.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                    {(() => {
+                        if (!log.scheduled_time) return '-';
+                        const iso = log.scheduled_time.endsWith('Z') ? log.scheduled_time : log.scheduled_time + 'Z';
+                        const d = new Date(iso);
+                        return isNaN(d.getTime()) ? log.scheduled_time : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    })()}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{log.medication_name || 'Unknown'}</div>

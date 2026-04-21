@@ -39,11 +39,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# from routes.memory import router as memory_router
+
 # Register routes
 app.include_router(auth_router)
 app.include_router(medication_router)
 app.include_router(detection_router)
 app.include_router(caregiver_router)
+# app.include_router(memory_router)
 
 
 @app.get("/", tags=["Health"])
