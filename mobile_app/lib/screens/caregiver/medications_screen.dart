@@ -172,7 +172,10 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                           children: [
                             Expanded(
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(h['medication_id']?['name'] ?? h['medication_name'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                Text(
+                                  h['medication_name'] ?? (h['medication_id'] is Map ? h['medication_id']['name'] : null) ?? '—',
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                ),
                                 Text(_formatTime(h['scheduled_time'] ?? h['createdAt']), style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
                               ]),
                             ),

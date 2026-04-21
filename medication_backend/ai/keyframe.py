@@ -60,7 +60,7 @@ class KeyframeStorage:
         meta = {
             **metadata,
             "file": f"{keyframe_id}.jpg",
-            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "saved_at": datetime.now().astimezone().isoformat(),
         }
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
@@ -153,26 +153,29 @@ class KeyframeExtractor:
       per 1-second window.
     """
 
-    def __init__(self, target_fps=10, buffer_seconds=10, save_locally=True,
-                 blur_threshold=100.0, window_duration=1.0):
+    def __init__(self, target_fps=5, buffer_seconds=5, save_locally=True,
+                 blur_threshold=50.0, window_duration=1.0, top_n_per_window=5):
         self.target_fps = target_fps
         self.buffer_seconds = buffer_seconds
-        self.buffer = deque(maxlen=target_fps * buffer_seconds)
-        self._lock = threading.Lock()  # Thread-safe buffer access
+        # Buffer holds ALL frames for AI analysis — no cap.
+        # For video files, all frames stay until analysis is done.
+        self.buffer = deque()
+        self._lock = threading.Lock()
         self.prev_frame = None
         self.motion_threshold = 10
         self.frame_count = 0
 
-        # Blur detection threshold — frames below this are rejected
-        # Higher value = stricter (only very sharp frames pass)
         self.blur_threshold = blur_threshold
 
-        # Best-frame-per-window: collect candidates over this duration
-        # Assuming a ~30fps camera, 1 second = 30 frames.
-        self.window_frames = int(30 * window_duration)
-        self._window_candidates = []   # list of (blur_score, keyframe_id, frame, metadata)
+        # Window: flush every window_duration seconds using wall-clock time
+        self.window_duration = window_duration
+        self._window_start_time = time.time()
+        self._window_candidates = []
 
-        # Local storage (enabled by default)
+        # Save the top N sharpest frames per 1-second window to disk
+        self.top_n_per_window = top_n_per_window
+
+        # Local storage
         self.save_locally = save_locally
         self.storage = KeyframeStorage() if save_locally else None
 
@@ -205,8 +208,8 @@ class KeyframeExtractor:
         """
         if motion_score > self.motion_threshold:
             return True
-        # Capture 1 frame per ~3 frames during low motion for gesture tracking
-        return self.frame_count % 3 == 0
+        # Capture 1 frame per ~6 frames during low motion (saves CPU)
+        return self.frame_count % 6 == 0
 
     def extract_keyframe(self, frame, motion_score, blur_score):
         """
@@ -235,23 +238,34 @@ class KeyframeExtractor:
 
     def _flush_window(self):
         """
-        Save the sharpest frame from the current 1-second window to disk.
-        Called when the window duration expires.
+        Save the top N sharpest frames from the current window to disk.
+        Always saves top 5 sharpest — no blur rejection.
         """
         if not self._window_candidates or not self.storage:
             self._window_candidates = []
             return
 
-        # Pick the candidate with the highest blur score (sharpest)
-        best = max(self._window_candidates, key=lambda c: c[0])
-        blur_score, keyframe_id, frame, metadata = best
+        # Sort by blur score (sharpest first) and save top N
+        sorted_candidates = sorted(self._window_candidates, key=lambda c: c[0], reverse=True)
+        top_candidates = sorted_candidates[:self.top_n_per_window]
 
-        self.storage.save(keyframe_id, frame, metadata)
-        
-        # CLEAR the candidates list to start fresh for the next window
-        self._window_candidates = []
+        for blur_score, keyframe_id, frame, metadata in top_candidates:
+            self.storage.save(keyframe_id, frame, metadata)
+
+        print(f"[Keyframe] Saved {len(top_candidates)} best of {len(self._window_candidates)} frames "
+              f"(sharpest={top_candidates[0][0]:.1f})")
 
         self._window_candidates = []
+        self._window_start_time = time.time()
+
+    def flush_remaining(self):
+        """
+        Flush any remaining window candidates when the video ends.
+        Without this, the last incomplete window is lost.
+        """
+        if self._window_candidates and self.storage:
+            print(f"[KeyframeExtractor] Flushing remaining {len(self._window_candidates)} candidates from final window")
+            self._flush_window()
 
     def get_buffer(self):
         """Return current temporal buffer as list (thread-safe)."""
@@ -259,76 +273,74 @@ class KeyframeExtractor:
             return list(self.buffer)
 
     def get_frames_for_analysis(self):
-        """Return decoded frames from buffer for model inference (thread-safe)."""
+        """
+        Return frames from buffer for model inference (thread-safe).
+        Takes every 6th frame (~5fps from 30fps) — enough to catch
+        every action while keeping analysis fast (~30 frames max).
+        Always includes the first and last frame for temporal coverage.
+        """
         with self._lock:
             snapshot = list(self.buffer)
+        if not snapshot:
+            return []
+
+        n = len(snapshot)
+        # Calculate step to get ~30 frames max
+        step = max(6, n // 30)
+
+        selected = []
+        for i in range(0, n, step):
+            selected.append(snapshot[i])
+        # Always include last frame
+        if n > 1 and selected[-1] is not snapshot[-1]:
+            selected.append(snapshot[-1])
+
         frames = []
-        for kf in snapshot:
-            img_data = base64.b64decode(kf["frame_data"])
-            nparr = np.frombuffer(img_data, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        for kf in selected:
+            frame = kf["raw_frame"]
             frames.append({"frame": frame, "timestamp": kf["timestamp"], "id": kf["id"]})
+        
+        print(f"[Analysis] Analyzing {len(frames)} frames (from {n} in buffer, step={step})")
         return frames
 
     def process_frame(self, frame):
         """
-        Main method — call this for every frame from the camera.
+        Main method — call for every frame from the camera.
 
-        Flow:
-        1. Compute motion score & blur score for the frame.
-        2. Best-frame-per-window: Consider EVERY frame for disk persistence,
-           collecting candidates in a 1-second window to save the absolute sharpest.
-        3. In-memory buffer: Apply adaptive capture (motion-based FPS reduction).
-           All captured frames (even blurry ones) go to the AI models.
-
-        Returns keyframe if captured into buffer, None otherwise.
+        1. ALL frames go into in-memory buffer for AI analysis.
+        2. Top 5 sharpest frames per second are saved to disk.
         """
         self.frame_count += 1
         motion_score = self.compute_motion_score(frame)
         blur_score = self.compute_blur_score(frame)
 
-        # 1. Best-frame-per-window: Always collect candidates for disk persistence,
-        #    even if they are blurry. We want the best frame of the window, period.
+        keyframe_id = str(uuid.uuid4())
+        timestamp = datetime.now().astimezone().isoformat()
+
+        # 1. Disk: collect candidates, flush every 1 second by wall-clock
         if self.save_locally and self.storage:
-            # We need an ID and timestamp even if we don't put it in the buffer yet
-            temp_id = str(uuid.uuid4())
-            temp_time = datetime.now(timezone.utc).isoformat()
-            
             metadata = {
-                "id": temp_id,
-                "timestamp": temp_time,
+                "id": keyframe_id,
+                "timestamp": timestamp,
                 "motion_score": round(float(motion_score), 2),
                 "blur_score": round(blur_score, 2),
                 "width": frame.shape[1],
                 "height": frame.shape[0],
             }
-            self._window_candidates.append((blur_score, temp_id, frame.copy(), metadata))
+            self._window_candidates.append((blur_score, keyframe_id, frame.copy(), metadata))
 
-            # Flush based on frame count rather than wall-clock time.
-            # This ensures consistent extraction even if processing slows down.
-            if self.frame_count % self.window_frames == 0:
+            # Flush when 1 second of wall-clock time has passed
+            elapsed = time.time() - self._window_start_time
+            if elapsed >= self.window_duration:
                 self._flush_window()
 
-        # 2. In-memory buffer for AI pipeline
-        #    - Apply adaptive capture (skip frames during low motion)
-        #    - We no longer reject blurry frames here per user request.
-        if not self.should_capture(motion_score):
-            return None
-
-        # Frame passed motion check — add to in-memory buffer
-        # We reuse the temp_id/temp_time if we created them above
-        keyframe_id = temp_id if 'temp_id' in locals() else str(uuid.uuid4())
-        timestamp = temp_time if 'temp_time' in locals() else datetime.now(timezone.utc).isoformat()
-        
-        _, jpg_buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        encoded = base64.b64encode(jpg_buffer).decode('utf-8')
-
+        # 2. AI buffer: ALL frames go in for analysis
         keyframe = {
             "id": keyframe_id,
             "timestamp": timestamp,
             "motion_score": round(float(motion_score), 2),
             "blur_score": round(blur_score, 2),
-            "frame_data": encoded,
+            "raw_frame": frame,
             "width": frame.shape[1],
             "height": frame.shape[0],
         }

@@ -17,6 +17,7 @@ import 'screens/caregiver/notifications_screen.dart';
 import 'screens/caregiver/location_screen.dart';
 import 'screens/caregiver/activity_feed_screen.dart';
 import 'screens/caregiver/detection_screen.dart';
+import 'screens/caregiver/keyframe_audit_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +60,8 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
+  final _medScreenKey = GlobalKey<MedicationScreenState>();
+  final _homeScreenKey = GlobalKey<HomeScreenState>();
 
   bool get _isCaregiver => ApiService.userRole == 'caregiver';
 
@@ -70,12 +73,12 @@ class _MainShellState extends State<MainShell> {
           NotificationsScreen(),
           _MoreScreen(),
         ]
-      : const [
-          HomeScreen(),
-          MedicationScreen(),
-          ActivityScreen(),
-          MemoryScreen(),
-          SettingsScreen(),
+      : [
+          HomeScreen(key: _homeScreenKey),
+          MedicationScreen(key: _medScreenKey),
+          const ActivityScreen(),
+          const MemoryScreen(),
+          const SettingsScreen(),
         ];
 
   List<BottomNavigationBarItem> get _navItems => _isCaregiver
@@ -123,7 +126,14 @@ class _MainShellState extends State<MainShell> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (i) => setState(() => _currentIndex = i),
+          onTap: (i) {
+            setState(() => _currentIndex = i);
+            // Force active screens to reload when switching to them
+            if (!_isCaregiver) {
+              if (i == 0) _homeScreenKey.currentState?.reload();
+              if (i == 1) _medScreenKey.currentState?.reload();
+            }
+          },
           items: _navItems,
         ),
       ),
@@ -149,6 +159,7 @@ class _MoreScreen extends StatelessWidget {
           _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationScreen()),
           _moreTile(context, Icons.timeline_outlined, 'Activity Feed', 'Behavioral monitoring & analysis', AppColors.accent, const ActivityFeedScreen()),
           _moreTile(context, Icons.shield_outlined, 'AI Detection', 'Real-time medication intake pipeline', AppColors.info, const DetectionScreen()),
+          _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen()),
           _moreTile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
         ],
       ),

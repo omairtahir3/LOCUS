@@ -5,12 +5,19 @@ from database import connect_db, close_db, get_settings
 from routes.auth import router as auth_router
 from routes.medication import router as medication_router
 from ai.routes_detection import router as detection_router
+from routes.caregiver import router as caregiver_router
+from scheduler import run_scheduler, stop_scheduler, get_scheduler_status
+import asyncio
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
+    # Scheduler disabled — using manual video testing via /api/detection/start
+    # scheduler_task = asyncio.create_task(run_scheduler())
     yield
+    # stop_scheduler()
+    # scheduler_task.cancel()
     await close_db()
 
 
@@ -36,6 +43,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(medication_router)
 app.include_router(detection_router)
+app.include_router(caregiver_router)
 
 
 @app.get("/", tags=["Health"])
@@ -51,3 +59,9 @@ async def root():
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/scheduler/status", tags=["Scheduler"])
+async def scheduler_status():
+    """Get the medication scheduler state — active sessions, verification windows."""
+    return get_scheduler_status()

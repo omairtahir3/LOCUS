@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from enum import Enum
 
@@ -12,6 +12,7 @@ class DoseStatus(str, Enum):
     scheduled = "scheduled"
     snoozed   = "snoozed"
     skipped   = "skipped"
+    needs_verification = "needs_verification"
 
 
 class FrequencyType(str, Enum):
@@ -104,7 +105,7 @@ class MedicationResponse(BaseModel):
 
 class MedicationLogCreate(BaseModel):
     medication_id: str
-    scheduled_time: datetime
+    scheduled_time: Union[datetime, str]
     status: DoseStatus
     verification_method: Optional[VerificationMethod] = None
     notes: Optional[str] = None

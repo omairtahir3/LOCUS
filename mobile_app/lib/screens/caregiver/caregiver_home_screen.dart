@@ -12,6 +12,7 @@ class CaregiverHomeScreen extends StatefulWidget {
 class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   List<dynamic> _users = [];
   Map<String, dynamic> _summaries = {};
+  List<dynamic> _notifications = [];
   bool _loading = true;
 
   @override
@@ -30,7 +31,12 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
           summaries[u['_id']] = await ApiService.getUserSummary(u['_id']);
         } catch (_) {}
       }
-      setState(() { _users = users; _summaries = summaries; });
+      // Load recent notifications
+      List<dynamic> notifs = [];
+      try {
+        notifs = await ApiService.getNotifications(limit: 5);
+      } catch (_) {}
+      setState(() { _users = users; _summaries = summaries; _notifications = notifs; });
     } catch (_) {} finally {
       setState(() => _loading = false);
     }
@@ -51,6 +57,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     final totalMissed = _summaries.values.fold<int>(0, (sum, s) {
       return sum + ((s?['today_adherence']?['missed'] ?? 0) as num).toInt();
     });
+    final totalAlerts = _notifications.length;
 
     return RefreshIndicator(
       onRefresh: _loadData,
@@ -62,22 +69,28 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
           children: [
             Text('Hi, $userName 👋', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('Monitoring ${totalUsers} family member${totalUsers == 1 ? '' : 's'}', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+            Text('Monitoring $totalUsers family member${totalUsers == 1 ? '' : 's'}', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
             const SizedBox(height: 20),
 
-            // Stat cards
+            // ── Stat cards (2 rows of 2) ──
             Row(
               children: [
                 _statCard('Family Members', '$totalUsers', Icons.people_outline, AppColors.primary),
                 const SizedBox(width: 12),
                 _statCard('Avg Adherence', '${avg.toStringAsFixed(0)}%', Icons.check_circle_outline, AppColors.success),
-                const SizedBox(width: 12),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
                 _statCard('Missed Today', '$totalMissed', Icons.warning_amber_outlined, AppColors.danger),
+                const SizedBox(width: 12),
+                _statCard('Pending Alerts', '$totalAlerts', Icons.notifications_active_outlined, AppColors.warning),
               ],
             ),
             const SizedBox(height: 24),
 
-            // Family members list
+            // ── Family members list ──
             const Text('Your Family', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
 
@@ -127,8 +140,97 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
                   ),
                 );
               }),
+
+            // ── Recent Alerts ──
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Recent Alerts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text('${_notifications.length} notifications', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            if (_notifications.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+                child: Column(
+                  children: [
+                    Icon(Icons.notifications_none, size: 40, color: AppColors.textMuted),
+                    const SizedBox(height: 8),
+                    Text('All clear', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                    const SizedBox(height: 4),
+                    Text('No new notifications at the moment.', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ],
+                ),
+              )
+            else
+              ..._notifications.map((n) => _notificationCard(n)),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _notificationCard(Map<String, dynamic> n) {
+    final type = n['type'] ?? 'system';
+    Color iconBg;
+    Color iconColor;
+    IconData icon;
+
+    switch (type) {
+      case 'missed_dose':
+        iconBg = AppColors.dangerLight;
+        iconColor = AppColors.danger;
+        icon = Icons.medication_outlined;
+        break;
+      case 'emergency':
+        iconBg = AppColors.warningLight;
+        iconColor = AppColors.warning;
+        icon = Icons.warning_amber;
+        break;
+      case 'dose_confirmed':
+        iconBg = AppColors.successLight;
+        iconColor = AppColors.success;
+        icon = Icons.check_circle_outline;
+        break;
+      default:
+        iconBg = AppColors.infoLight;
+        iconColor = AppColors.info;
+        icon = Icons.notifications_outlined;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: n['is_read'] == true ? AppColors.surface : iconBg.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(n['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(n['message'] ?? '', style: TextStyle(fontSize: 11, color: AppColors.textSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(_formatTime(n['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -152,5 +254,10 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
         ),
       ),
     );
+  }
+
+  String _formatTime(String? raw) {
+    if (raw == null) return '—';
+    try { return DateTime.parse(raw).toLocal().toString().substring(0, 16); } catch (_) { return raw; }
   }
 }

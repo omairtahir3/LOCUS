@@ -71,7 +71,7 @@ def test_gesture_detector(frame):
     return result
 
 
-def test_full_pipeline(source, display=False):
+def test_full_pipeline(source, display=False, expected_count=0):
     """
     Run the full medication detection pipeline.
     Prints analysis results every 10 seconds.
@@ -79,9 +79,10 @@ def test_full_pipeline(source, display=False):
     print(f"\n--- Running Full Pipeline ---")
     print(f"Source: {source}")
     print(f"Display: {display}")
+    print(f"Expected medicines: {expected_count}")
     print("Press Q to quit\n")
 
-    pipeline = MedicationDetectionPipeline()
+    pipeline = MedicationDetectionPipeline(expected_medicine_count=expected_count)
 
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -89,11 +90,11 @@ def test_full_pipeline(source, display=False):
         return
 
     frame_count  = 0
-    frames_in_ai_buffer = 0
-    blurry_rejected = 0
-    analyze_every = 30  # analyze more frequently for shorter videos
+    scan_every = 30      # quick scan every ~1 sec
+    pill_seen = False
+    last_full_analysis = 0
 
-    # Track how many files are currently in storage to count new ones later
+    # Track stored files
     import os, glob
     storage_dir = pipeline.extractor.storage.storage_dir if pipeline.extractor.storage else ""
     initial_storage_count = len(glob.glob(os.path.join(storage_dir, "*.json"))) if storage_dir else 0
@@ -103,78 +104,82 @@ def test_full_pipeline(source, display=False):
             ret, frame = cap.read()
             if not ret:
                 print("End of video source")
+
+                # Flush remaining keyframes
+                pipeline.extractor.flush_remaining()
+
+                # Run final analysis on whatever is in the buffer
+                buffer_size = len(pipeline.extractor.get_buffer())
+                if buffer_size > 0:
+                    print(f"\n[FINAL ANALYSIS] End of video | Buffer: {buffer_size}")
+                    result = pipeline.analyze_buffer()
+                    if result:
+                        pd = result['phase_details']
+                        p1 = pd['phase1_medicine_visible']
+                        p2 = pd['phase2_grip_and_motion']
+                        p3 = pd['phase3_medicine_gone']
+                        passed = pd['phases_passed']
+                        print(f"{'='*60}")
+                        print(f"FINAL RESULT")
+                        print(f"-" * 60)
+                        mark1 = "PASS" if p1['pass'] else "FAIL"
+                        mark2 = "PASS" if p2['pass'] else "FAIL"
+                        mark3 = "PASS" if p3['pass'] else "FAIL"
+                        fq = result.get('frame_quality', {})
+                        pill_in_hand = "YES" if p1.get('pill_in_hand', False) else "NO"
+                        in_hand_count = p1.get('in_hand_count', 0)
+                        print(f"Phase 1 - Medicine visible:   [{mark1}]  score={p1['score']:.2f}  pill={p1.get('pill_score', 0):.2f}  in_hand={pill_in_hand}  count={in_hand_count}")
+                        print(f"Phase 2 - Grip/Motion:        [{mark2}]  score={p2['score']:.2f}  grip={p2['grip']:.2f}  motion={p2['motion']:.2f}")
+                        print(f"Phase 3 - Medicine gone:      [{mark3}]  score={p3['score']:.2f}  drop={p3.get('pill_drop', 0):.2f}")
+                        print(f"-" * 60)
+                        print(f"Phases passed:    {passed}/3")
+                        print(f"Confidence:       {result['final_confidence']:.2f}")
+                        print(f"Classification:   {result['classification']}")
+                        print(f"Action:           {result['action']}")
+                        print(f"-" * 60)
+                        print(f"Medicines taken:  {result.get('medicines_taken_count', 0)}")
+                        print(f"{'='*60}\n")
                 break
 
             frame_count += 1
 
-            # Extract keyframe
+            # Buffer every frame (lightweight)
             keyframe = pipeline.extractor.process_frame(frame)
-            if keyframe:
-                frames_in_ai_buffer += 1
 
-            # Check if frame was rejected from AI buffer due to blur
-            if not keyframe and pipeline.extractor.frame_count > 0:
-                blur_score = pipeline.extractor.compute_blur_score(frame)
-                if blur_score < pipeline.extractor.blur_threshold:
-                    blurry_rejected += 1
+            # Quick scan every ~1 sec: check if pill is in hand
+            if frame_count % scan_every == 0:
+                if pipeline.quick_scan(frame):
+                    if not pill_seen:
+                        print(f"\n[TRIGGER] Pill in hand detected at frame {frame_count}")
+                    pill_seen = True
 
-            if display and keyframe:
-                # Annotate with pill detections
-                try:
-                    detections = pipeline.detector.detect(frame)
-                    annotated  = pipeline.detector.annotate_frame(frame, detections)
+            if display:
+                annotated = frame.copy()
+                h, w = frame.shape[:2]
 
-                    # Overlay gesture info
-                    gesture = pipeline.gesture.analyze_frame(frame)
-                    h, w = frame.shape[:2]
+                cur_blur = pipeline.extractor.compute_blur_score(frame)
+                blur_color = (0, 255, 0) if cur_blur >= pipeline.extractor.blur_threshold else (0, 0, 255)
+                cv2.putText(annotated, f"Blur: {cur_blur:.0f}",
+                            (w - 130, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, blur_color, 2)
 
-                    # Draw upward motion indicator
-                    motion_bar_h = int(gesture["upward_motion_score"] * 100)
-                    cv2.rectangle(annotated, (w - 30, h - motion_bar_h), (w - 10, h),
-                                  (0, 212, 184), -1)
-                    cv2.putText(annotated, "Motion", (w - 50, h - 110),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 212, 184), 1)
+                status = "SCANNING" if pill_seen else "IDLE"
+                status_color = (0, 255, 0) if pill_seen else (150, 150, 150)
+                buf_size = len(pipeline.extractor.get_buffer())
+                cv2.putText(annotated, f"[{status}] Frame: {frame_count} | Buffer: {buf_size}",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+                cv2.putText(annotated, f"Meds taken: {pipeline.medicines_taken_count}",
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
 
-                    # Draw hand near top indicator
-                    if gesture["hand_near_top"]:
-                        cv2.putText(annotated, "HAND AT TOP", (10, 60),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.imshow("LOCUS - Medication Detection", annotated)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
 
-                    # Draw grip indicator
-                    grip_color = (0, 255, 0) if gesture["grip_detected"] else (0, 0, 255)
-                    cv2.putText(annotated, f"Grip: {gesture['grip_confidence']:.2f}",
-                                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, grip_color, 2)
-
-                    # Draw gesture score
-                    cv2.putText(annotated, f"Gesture: {gesture['gesture_score']:.2f}",
-                                (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 212, 184), 2)
-
-                    # Draw buffer size and blur info
-                    buf_size = len(pipeline.extractor.get_buffer())
-                    cv2.putText(annotated, f"Buffer: {buf_size} frames",
-                                (10, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-                    cv2.putText(annotated, f"Blur rejected: {blurry_rejected}",
-                                (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
-                    # Show blur score of current frame
-                    cur_blur = pipeline.extractor.compute_blur_score(frame)
-                    blur_color = (0, 255, 0) if cur_blur >= pipeline.extractor.blur_threshold else (0, 0, 255)
-                    cv2.putText(annotated, f"Blur: {cur_blur:.0f}",
-                                (w - 130, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, blur_color, 2)
-
-                    cv2.imshow("LOCUS - Medication Detection (Body Camera)", annotated)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-                except Exception as e:
-                    cv2.imshow("LOCUS - Raw Feed", frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-
-            # Analyze buffer every N frames
-            if frame_count % analyze_every == 0:
+            # Full analysis only after pill+hand trigger, every 90 frames
+            if pill_seen and (frame_count - last_full_analysis) >= 90:
                 buffer_size = len(pipeline.extractor.get_buffer())
-                print(f"\n[DEBUG] Frame {frame_count} | AI Buffer: {buffer_size} | Blurry rejected: {blurry_rejected}")
+                print(f"\n[ANALYSIS] Frame {frame_count} | Buffer: {buffer_size}")
                 result = pipeline.analyze_buffer()
+                last_full_analysis = frame_count
                 if result:
                     pd = result['phase_details']
                     p1 = pd['phase1_medicine_visible']
@@ -182,23 +187,34 @@ def test_full_pipeline(source, display=False):
                     p3 = pd['phase3_medicine_gone']
                     passed = pd['phases_passed']
 
-                    print(f"{'='*55}")
+                    print(f"{'='*60}")
                     print(f"Frame: {frame_count}")
-                    print(f"-" * 55)
+                    print(f"-" * 60)
                     mark1 = "PASS" if p1['pass'] else "FAIL"
                     mark2 = "PASS" if p2['pass'] else "FAIL"
                     mark3 = "PASS" if p3['pass'] else "FAIL"
                     fq = result.get('frame_quality', {})
+                    pill_in_hand = "YES" if p1.get('pill_in_hand', False) else "NO"
+                    in_hand_count = p1.get('in_hand_count', 0)
                     print(f"Frame quality:  avg_blur={fq.get('avg_blur_score', 0):.1f}  all_sharp={fq.get('all_frames_sharp', False)}")
-                    print(f"Phase 1 - Medicine visible:   [{mark1}]  score={p1['score']:.2f}  pill={p1['pill_score']:.2f}")
+                    print(f"Phase 1 - Medicine visible:   [{mark1}]  score={p1['score']:.2f}  pill={p1.get('pill_score', p1.get('best_pill', 0)):.2f}  in_hand={pill_in_hand}  count={in_hand_count}")
                     print(f"Phase 2 - Grip/Motion:        [{mark2}]  score={p2['score']:.2f}  grip={p2['grip']:.2f}  motion={p2['motion']:.2f}")
-                    print(f"Phase 3 - Medicine gone:      [{mark3}]  score={p3['score']:.2f}  drop={p3['pill_drop']:.2f}")
-                    print(f"-" * 55)
+                    print(f"Phase 3 - Medicine gone:      [{mark3}]  score={p3['score']:.2f}  drop={p3.get('pill_drop', 0):.2f}")
+                    print(f"-" * 60)
                     print(f"Phases passed:    {passed}/3")
                     print(f"Confidence:       {result['final_confidence']:.2f}")
                     print(f"Classification:   {result['classification']}")
                     print(f"Action:           {result['action']}")
-                    print(f"{'='*55}\n")
+                    print(f"-" * 60)
+                    print(f"Medicines taken:  {result.get('medicines_taken_count', 0)}")
+                    if result.get('expected_medicine_count', 0) > 0:
+                        print(f"Expected:         {result['expected_medicine_count']}")
+                        print(f"Remaining:        {result.get('medicines_remaining', 0)}")
+                    print(f"{'='*60}\n")
+
+                    # Reset trigger after detection
+                    if result['action'] != 'discard':
+                        pill_seen = False
                 else:
                     print(f"[DEBUG] analyze_buffer() returned None — buffer is empty, no frames to analyze")
 
@@ -212,10 +228,13 @@ def test_full_pipeline(source, display=False):
 
         print(f"\n[DEBUG] Pipeline finished.")
         print(f"  Total frames read:      {frame_count}")
-        print(f"  Frames in AI buffer:    {frames_in_ai_buffer}")
-        print(f"  Blurry rejected (AI):   {blurry_rejected}")
-        print(f"  Frames saved to DISK:   {frames_saved_to_disk} (best frame/sec)")
         print(f"  Final AI buffer size:   {len(pipeline.extractor.get_buffer())}")
+        print(f"  Frames saved to DISK:   {frames_saved_to_disk} (5 best frames/sec)")
+        print(f"  Medicines taken:        {pipeline.medicines_taken_count}")
+        if pipeline.expected_medicine_count > 0:
+            skipped = max(0, pipeline.expected_medicine_count - pipeline.medicines_taken_count)
+            print(f"  Expected medicines:     {pipeline.expected_medicine_count}")
+            print(f"  Skipped medicines:      {skipped}")
         cap.release()
         if display:
             cv2.destroyAllWindows()
@@ -268,6 +287,8 @@ def main():
                         help="Show annotated video window during pipeline run")
     parser.add_argument("--single-frame", action="store_true",
                         help="Test on a single captured frame only (quick test)")
+    parser.add_argument("--expected-count", type=int, default=0,
+                        help="Number of medicines expected at this scheduled time (for skip detection)")
     args = parser.parse_args()
 
     source = int(args.source) if args.source.isdigit() else args.source
@@ -277,12 +298,14 @@ def main():
     print("=" * 45)
     print(f"Mode: {'Single Frame' if args.single_frame else 'Full Pipeline'}")
     print(f"Source: {'Webcam' if source == 0 else source}")
+    if args.expected_count > 0:
+        print(f"Expected medicines: {args.expected_count}")
     print()
 
     if args.single_frame:
         test_single_frame(source)
     else:
-        test_full_pipeline(source, display=args.display)
+        test_full_pipeline(source, display=args.display, expected_count=args.expected_count)
 
 
 if __name__ == "__main__":

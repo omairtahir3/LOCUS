@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
@@ -6,18 +7,29 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _summary;
   List<dynamic> _schedule = [];
   bool _loading = true;
+
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+  }
+
+  void reload() => _loadData();
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -255,20 +267,70 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-            child: Row(
+          if (status == 'needs_verification')
+            Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(statusIcon, size: 14, color: statusColor),
-                const SizedBox(width: 4),
-                Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                GestureDetector(
+                  onTap: () => _logDose(dose, 'taken'),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.check, color: AppColors.success, size: 18),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => _logDose(dose, 'missed'),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                  ),
+                ),
               ],
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(statusIcon, size: 14, color: statusColor),
+                  const SizedBox(width: 4),
+                  Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
+  }
+
+  Future<void> _logDose(Map<String, dynamic> dose, String status) async {
+    try {
+      final timeParts = (dose['scheduled_time'] as String).split(':');
+      final now = DateTime.now();
+      final dt = DateTime(now.year, now.month, now.day, int.parse(timeParts[0]), int.parse(timeParts[1]));
+      
+      await ApiService.recordDose(
+        dose['medication_id'] ?? dose['_id'], 
+        status,
+        dt.toIso8601String()
+      );
+      _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Dose marked as $status'), backgroundColor: AppColors.primary),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
   }
 }

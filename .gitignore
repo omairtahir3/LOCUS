@@ -50,3 +50,4 @@ yarn-debug.log*
 dist/
 dist-ssr/
 *.local
+keyframe_storage/

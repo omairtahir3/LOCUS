@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     app_name: str = "MemoryAssist API"
     app_version: str = "1.0.0"
     debug: bool = True
-    secret_key: str = "change_this_in_production"
+    secret_key: str = "your_secret_key_change_this_in_production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 10080
 

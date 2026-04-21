@@ -61,19 +61,26 @@ class GestureDetector:
 
         return hands_data
 
-    def is_gripping_gesture(self, landmarks, threshold=80):
+    def is_gripping_gesture(self, landmarks, threshold=200):
         """
         Detect if hand is in a gripping or pinching position.
-        Consistent with holding a small pill or tablet.
-        
+        Consistent with holding pills or tablets.
+
+        Threshold is in pixels — set to 200px to handle multiple pills
+        where fingers are more spread apart.
+
         Checks:
         - Thumb and index finger close together (pill pinch)
-        - Fingers curled inward (full grip)
+        - Fingers curled inward (full grip / holding pills)
+        - Any closed fist pattern
         """
         thumb_tip  = landmarks[4]
         index_tip  = landmarks[8]
         middle_tip = landmarks[12]
+        ring_tip   = landmarks[16]
         index_pip  = landmarks[6]   # index middle joint
+        middle_pip = landmarks[10]
+        ring_pip   = landmarks[14]
 
         # Pinch: thumb and index close together
         pinch_dist = np.sqrt(
@@ -83,12 +90,19 @@ class GestureDetector:
         is_pinching = pinch_dist < threshold
         pinch_conf  = max(0.0, 1.0 - (pinch_dist / (threshold * 2)))
 
-        # Curl: index fingertip below its middle joint (finger bent inward)
-        is_curled = index_tip["y"] > index_pip["y"]
+        # Curl: fingertips below their middle joint (fingers bent inward)
+        index_curled = index_tip["y"] > index_pip["y"]
+        middle_curled = middle_tip["y"] > middle_pip["y"]
+        ring_curled = ring_tip["y"] > ring_pip["y"]
+        is_curled = index_curled or middle_curled or ring_curled
 
         grip_confidence = pinch_conf
-        if is_curled:
-            grip_confidence = min(1.0, grip_confidence + 0.2)
+        if index_curled:
+            grip_confidence = min(1.0, grip_confidence + 0.30)
+        if middle_curled:
+            grip_confidence = min(1.0, grip_confidence + 0.20)
+        if ring_curled:
+            grip_confidence = min(1.0, grip_confidence + 0.15)
 
         return (is_pinching or is_curled), round(grip_confidence, 3)
 
@@ -122,9 +136,10 @@ class GestureDetector:
         consistency = upward_frames / (len(y_values) - 1)
 
         # Normalize displacement to a score
-        # A displacement of 100px upward in frame = strong motion signal
-        displacement_score = min(1.0, max(0.0, -y_displacement / 100.0))
+        # A displacement of 30px upward = strong motion (body cam / short videos)
+        displacement_score = min(1.0, max(0.0, -y_displacement / 30.0))
 
+        # Weight consistency higher — sustained upward movement matters more
         motion_score = displacement_score * 0.4 + consistency * 0.6
         return round(float(motion_score), 3)
 
@@ -143,10 +158,25 @@ class GestureDetector:
 
         return is_near_top, round(float(proximity_score), 3)
 
+    def _compute_hand_bbox(self, landmarks, frame_h, frame_w, padding=20):
+        """
+        Compute a bounding box around the hand from 21 MediaPipe landmarks.
+        Adds configurable padding (pixels) around the extremes.
+        Returns dict {x1, y1, x2, y2} in pixel coordinates.
+        """
+        xs = [lm["x"] for lm in landmarks]
+        ys = [lm["y"] for lm in landmarks]
+        x1 = max(0, int(min(xs)) - padding)
+        y1 = max(0, int(min(ys)) - padding)
+        x2 = min(frame_w, int(max(xs)) + padding)
+        y2 = min(frame_h, int(max(ys)) + padding)
+        return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
     def analyze_frame(self, frame):
         """
         Full gesture analysis on a single frame for body camera context.
         Returns gesture scores relevant to medication-taking detection.
+        Includes hand_bbox for spatial overlap checking with pill detections.
         """
         h, w = frame.shape[:2]
         hands = self.detect_hands(frame)
@@ -159,6 +189,8 @@ class GestureDetector:
             "hand_near_top":        False,
             "hand_near_top_score":  0.0,
             "gesture_score":        0.0,
+            "hand_bbox":            None,   # bounding box of primary hand
+            "all_hand_bboxes":      [],     # bounding boxes of all detected hands
         }
 
         if not hands:
@@ -166,8 +198,17 @@ class GestureDetector:
             # computed when hands reappear (brief occlusions are common)
             return results
 
+        # Compute bounding boxes for all detected hands
+        all_bboxes = []
+        for hand_data in hands:
+            bbox = self._compute_hand_bbox(hand_data["landmarks"], h, w)
+            all_bboxes.append(bbox)
+        results["all_hand_bboxes"] = all_bboxes
+
         # Use the hand with highest position (closest to top of frame)
-        primary_hand = min(hands, key=lambda h: h["center_y"])
+        primary_idx = min(range(len(hands)), key=lambda i: hands[i]["center_y"])
+        primary_hand = hands[primary_idx]
+        results["hand_bbox"] = all_bboxes[primary_idx]
 
         # Track position history
         self.hand_position_history.append({
@@ -189,11 +230,10 @@ class GestureDetector:
         results["hand_near_top"]       = near_top
         results["hand_near_top_score"] = top_score
 
-        # Combined gesture score
-        # Grip confirms holding something + upward motion + proximity to top
+        # Combined gesture score — motion weighted higher than grip
         results["gesture_score"] = round(
-            grip_conf    * 0.40 +
-            motion_score * 0.35 +
+            grip_conf    * 0.30 +
+            motion_score * 0.45 +
             top_score    * 0.25,
             3
         )

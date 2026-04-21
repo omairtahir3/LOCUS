@@ -104,7 +104,7 @@ class ApiService {
 
   static Future<List<dynamic>> getDoseHistory({String? userId, int limit = 20}) async {
     final query = userId != null ? '?user_id=$userId&limit=$limit' : '?limit=$limit';
-    final res = await http.get(Uri.parse('$baseUrl/medications/history$query'), headers: _headers);
+    final res = await http.get(Uri.parse('$baseUrl/medications/logs/history$query'), headers: _headers);
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       return data is List ? data : (data['history'] ?? []);
@@ -112,11 +112,16 @@ class ApiService {
     return [];
   }
 
-  static Future<Map<String, dynamic>> recordDose(String medicationId, String status, {String? notes}) async {
+  static Future<Map<String, dynamic>> recordDose(String medicationId, String status, String scheduledTime, {String? notes}) async {
     final res = await http.post(
-      Uri.parse('$baseUrl/medications/dose'),
+      Uri.parse('$baseUrl/medications/logs/'),
       headers: _headers,
-      body: jsonEncode({'medication_id': medicationId, 'status': status, if (notes != null) 'notes': notes}),
+      body: jsonEncode({
+        'medication_id': medicationId, 
+        'status': status, 
+        'scheduled_time': scheduledTime,
+        if (notes != null) 'notes': notes
+      }),
     );
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
@@ -127,6 +132,7 @@ class ApiService {
     required List<String> scheduledTimes,
     String frequency = 'daily',
     String? instructions,
+    List<int>? daysOfWeek,
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/medications'),
@@ -138,7 +144,53 @@ class ApiService {
         'frequency': frequency,
         'start_date': DateTime.now().toIso8601String(),
         if (instructions != null) 'instructions': instructions,
+        if (daysOfWeek != null) 'days_of_week': daysOfWeek,
       }),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> updateMedication({
+    required String id,
+    required String name,
+    required String dosage,
+    required List<String> scheduledTimes,
+    String frequency = 'daily',
+    String? instructions,
+    List<int>? daysOfWeek,
+  }) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/medications/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        'name': name,
+        'dosage': dosage,
+        'scheduled_times': scheduledTimes,
+        'frequency': frequency,
+        if (instructions != null) 'instructions': instructions,
+        if (daysOfWeek != null) 'days_of_week': daysOfWeek,
+      }),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> deleteMedication(String id) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/medications/$id'),
+      headers: _headers,
+    );
+    return {'statusCode': res.statusCode};
+  }
+
+
+
+  // ── Link caregiver (elderly user only) ──────────────────────────────────
+
+  static Future<Map<String, dynamic>> linkCaregiver(String caregiverEmail) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/link-caregiver'),
+      headers: _headers,
+      body: jsonEncode({'caregiver_email': caregiverEmail}),
     );
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
@@ -160,16 +212,6 @@ class ApiService {
     return {};
   }
 
-  // ── Link caregiver (elderly user only) ──────────────────────────────────
-
-  static Future<Map<String, dynamic>> linkCaregiver(String caregiverEmail) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/auth/link-caregiver'),
-      headers: _headers,
-      body: jsonEncode({'caregiver_email': caregiverEmail}),
-    );
-    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
-  }
 
   // ── Caregiver actions ────────────────────────────────────────────────────
 
@@ -188,6 +230,30 @@ class ApiService {
       headers: _headers,
     );
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<List<dynamic>> getVerificationEvents(String userId, {int limit = 10}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/caregiver/users/$userId/verification-events?limit=$limit'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
+  }
+
+  static Future<List<dynamic>> getAnomalies(String userId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/caregiver/users/$userId/anomalies'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
   }
 
   // ── Notifications ───────────────────────────────────────────────────────
@@ -257,5 +323,14 @@ class ApiService {
       if (res.statusCode == 200) return jsonDecode(res.body);
     } catch (_) {}
     return {'is_running': false, 'buffer_size': 0};
+  }
+
+  static Future<List<dynamic>> getKeyframes({int limit = 50}) async {
+    final res = await http.get(Uri.parse('$baseUrl/detection/keyframes?limit=$limit'), headers: _headers);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
   }
 }

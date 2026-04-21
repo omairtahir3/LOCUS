@@ -21,11 +21,13 @@ def medication_document(user_id: str, data: dict) -> dict:
     }
 
 
+from bson import ObjectId
+
 def medication_log_document(user_id: str, data: dict) -> dict:
     """Build a medication log document to insert into MongoDB."""
     return {
-        "user_id": user_id,
-        "medication_id": data["medication_id"],
+        "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+        "medication_id": ObjectId(data["medication_id"]) if isinstance(data["medication_id"], str) else data["medication_id"],
         "scheduled_time": data["scheduled_time"],
         "taken_at": data.get("taken_at"),
         "status": data["status"],
@@ -40,9 +42,23 @@ def medication_log_document(user_id: str, data: dict) -> dict:
 
 
 def serialize_doc(doc: dict) -> dict:
-    """Convert MongoDB _id to string id for API responses."""
-    if doc and "_id" in doc:
+    """Convert MongoDB _id and any nested ObjectIds to strings for API compatibility natively."""
+    from bson import ObjectId
+    from datetime import datetime as _dt
+    if not doc:
+        return doc
+        
+    for k, v in doc.items():
+        if isinstance(v, ObjectId):
+            doc[k] = str(v)
+        elif isinstance(v, _dt):
+            # Append Z to signal UTC so clients (Flutter/JS) convert to local time correctly
+            doc[k] = v.isoformat() + "Z"
+            
+    if "_id" in doc:
         doc["id"] = str(doc.pop("_id"))
+        doc["_id"] = doc["id"] # Flutter and React occasionally bind against exact key variations dynamically natively
+        
     return doc
 
 
