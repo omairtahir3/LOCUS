@@ -4,6 +4,7 @@ import 'theme/app_theme.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/splash/splash_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/medication/medication_screen.dart';
@@ -41,8 +42,9 @@ class LocusApp extends StatelessWidget {
       title: 'LOCUS',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      initialRoute: ApiService.isLoggedIn ? '/home' : '/login',
+      initialRoute: '/splash',
       routes: {
+        '/splash': (_) => const SplashScreen(),
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const RegisterScreen(),
         '/home': (_) => const MainShell(),

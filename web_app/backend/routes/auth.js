@@ -17,8 +17,6 @@ router.post('/register', async (req, res) => {
     if (!name || !email || !password)
       return res.status(400).json({ error: 'Name, email, and password are required' });
 
-    if (role === 'elderly')
-      return res.status(403).json({ error: 'Elderly users must use the mobile application.' });
 
     const existing = await User.findOne({ email });
     if (existing)
@@ -43,8 +41,6 @@ router.post('/login', async (req, res) => {
     if (!user || !(await user.comparePassword(password)))
       return res.status(401).json({ error: 'Invalid email or password' });
 
-    if (user.role === 'elderly')
-      return res.status(403).json({ error: 'Elderly users must use the mobile application.' });
 
     const token = generateToken(user._id, user.role);
     res.json({ user, token });

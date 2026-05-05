@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import AppLayout from './components/Layout/AppLayout';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -26,11 +27,12 @@ function App() {
           {/* Public routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/" element={<Landing />} />
 
           {/* Protected routes (role-aware sidebar handles nav) */}
           <Route element={<AppLayout />}>
             {/* Caregiver routes */}
-            <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="family" element={<FamilyMembers />} />
             <Route path="family/:userId" element={<FamilyMemberDetail />} />
             <Route path="medications" element={<Medications />} />

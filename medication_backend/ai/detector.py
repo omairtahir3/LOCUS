@@ -10,7 +10,7 @@ PILL_CLASSES = {
     1: "capsule",
 }
 
-PILL_CONFIDENCE_THRESHOLD = 0.45
+PILL_CONFIDENCE_THRESHOLD = 0.35
 
 
 class PillDetector:
@@ -42,13 +42,16 @@ class PillDetector:
         print(f"Pill detection model loaded. Input shape: {self.input_shape}")
 
     def preprocess(self, frame):
-        """Resize and normalize frame for model input. Pads to batch size 8."""
+        """Resize and normalize a single frame for model input."""
         img = cv2.resize(frame, (self.img_size, self.img_size))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255.0
         img = np.transpose(img, (2, 0, 1))  # (3, 640, 640)
+        return img
 
-        # Model expects fixed batch size of 8 — pad with zeros
+    def preprocess_single(self, frame):
+        """Preprocess and pad to batch-8 for single-frame inference."""
+        img = self.preprocess(frame)
         batch = np.zeros((8, 3, self.img_size, self.img_size), dtype=np.float32)
         batch[0] = img
         return batch
@@ -86,8 +89,8 @@ class PillDetector:
 
         return self._apply_nms(detections)
 
-    def _apply_nms(self, detections, iou_threshold=0.45):
-        """Remove overlapping duplicate detections."""
+    def _apply_nms(self, detections, iou_threshold=0.85):
+        """Remove overlapping duplicate detections. High threshold keeps tightly grouped pills."""
         if not detections:
             return []
 
@@ -104,21 +107,45 @@ class PillDetector:
     def detect(self, frame):
         """Run pill detection on a single frame."""
         orig_h, orig_w = frame.shape[:2]
-        input_tensor = self.preprocess(frame)
+        input_tensor = self.preprocess_single(frame)
         outputs = self.session.run(None, {self.input_name: input_tensor})
         return self.postprocess(outputs, orig_h, orig_w)
 
     def detect_batch(self, frames):
-        """Run detection across temporal buffer frames."""
+        """
+        Run detection across temporal buffer frames.
+        Packs up to 8 real frames per ONNX call to exploit the
+        model's fixed batch-8 input instead of wasting 7 slots on zeros.
+        """
         results = []
-        for frame_data in frames:
-            detections = self.detect(frame_data["frame"])
-            results.append({
-                "timestamp":  frame_data["timestamp"],
-                "frame_id":   frame_data["id"],
-                "detections": detections,
-                "pill_count": len(detections)
-            })
+        n = len(frames)
+
+        for chunk_start in range(0, n, 8):
+            chunk = frames[chunk_start:chunk_start + 8]
+            batch_tensor = np.zeros((8, 3, self.img_size, self.img_size), dtype=np.float32)
+            orig_sizes = []
+
+            for j, frame_data in enumerate(chunk):
+                frm = frame_data["frame"]
+                orig_sizes.append(frm.shape[:2])  # (h, w)
+                batch_tensor[j] = self.preprocess(frm)
+
+            # Single ONNX call for up to 8 frames
+            raw_outputs = self.session.run(None, {self.input_name: batch_tensor})
+
+            # raw_outputs[0] shape: (8, num_preds, 6) — parse each real frame
+            for j, frame_data in enumerate(chunk):
+                orig_h, orig_w = orig_sizes[j]
+                # Extract single-frame output
+                single_output = [raw_outputs[0][j:j+1]]
+                detections = self.postprocess(single_output, orig_h, orig_w)
+                results.append({
+                    "timestamp":  frame_data["timestamp"],
+                    "frame_id":   frame_data["id"],
+                    "detections": detections,
+                    "pill_count": len(detections)
+                })
+
         return results
 
     def compute_pill_scene_score(self, batch_detections):

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 const caregiverNavItems = [
-  { path: '/',              icon: LayoutDashboard, label: 'Overview' },
+  { path: '/dashboard',     icon: LayoutDashboard, label: 'Overview' },
   { path: '/family',        icon: Users,           label: 'Family Members' },
   { path: '/medications',   icon: Pill,            label: 'Medications' },
   { path: '/notifications', icon: Bell,            label: 'Notifications' },
@@ -29,7 +29,7 @@ const userNavItems = [
 const userMonitorItems = [
   { path: '/my-detection',   icon: Shield,   label: 'Auto Verification' },
   { path: '/my-activity',    icon: Activity, label: 'Activity Feed', comingSoon: true },
-  { path: '/memory-search',  icon: Shield,   label: 'Memory Search', comingSoon: true },
+  { path: '/memory-search',  icon: Shield,   label: 'Memory Search' },
 ];
 
 export default function Sidebar() {

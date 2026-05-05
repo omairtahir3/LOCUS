@@ -21,6 +21,16 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Load .env manually
+_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _val = _line.split("=", 1)
+                os.environ.setdefault(_key.strip(), _val.strip())
+
 import cv2
 import numpy as np
 from ai.keyframe import KeyframeExtractor, VideoSource
@@ -71,7 +81,7 @@ def test_gesture_detector(frame):
     return result
 
 
-def test_full_pipeline(source, display=False, expected_count=0):
+def test_full_pipeline(source, display=False, expected_count=0, user_id="test_user"):
     """
     Run the full medication detection pipeline.
     Prints analysis results every 10 seconds.
@@ -80,14 +90,21 @@ def test_full_pipeline(source, display=False, expected_count=0):
     print(f"Source: {source}")
     print(f"Display: {display}")
     print(f"Expected medicines: {expected_count}")
+    print(f"User ID: {user_id}")
     print("Press Q to quit\n")
 
-    pipeline = MedicationDetectionPipeline(expected_medicine_count=expected_count)
+    pipeline = MedicationDetectionPipeline(expected_medicine_count=expected_count, user_id=user_id)
 
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        print(f"ERROR: Cannot open source: {source}")
-        return
+    # Support GoPro WiFi stream
+    if isinstance(source, str) and source.lower() == "gopro":
+        from ai.gopro import GoProSource
+        cap = GoProSource()
+        cap.open()
+    else:
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            print(f"ERROR: Cannot open source: {source}")
+            return
 
     frame_count  = 0
     scan_every = 30      # quick scan every ~1 sec
@@ -281,17 +298,32 @@ def main():
     parser = argparse.ArgumentParser(
         description="LOCUS Medication Detection Pipeline Test (Body Camera Mode)"
     )
-    parser.add_argument("--source",       default="0",
-                        help="Video source: 0 for webcam, or path to video file")
+    parser.add_argument("--source",       default=None,
+                        help="Video source: 0 for webcam, 1 for GoPro USB, or path to video file. "
+                             "Defaults to CAMERA_SOURCE env var or 0.")
+    parser.add_argument("--gopro",        action="store_true",
+                        help="Shortcut: use GoPro USB webcam (auto-detects camera index)")
     parser.add_argument("--display",      action="store_true",
                         help="Show annotated video window during pipeline run")
     parser.add_argument("--single-frame", action="store_true",
                         help="Test on a single captured frame only (quick test)")
     parser.add_argument("--expected-count", type=int, default=0,
                         help="Number of medicines expected at this scheduled time (for skip detection)")
+    parser.add_argument("--user-id", default="test_user",
+                        help="User ID to attach to captured keyframes")
     args = parser.parse_args()
 
-    source = int(args.source) if args.source.isdigit() else args.source
+    # Resolve video source
+    if args.gopro:
+        # Use GoPro Hero 13 WiFi preview stream
+        source = "gopro"
+        print("GoPro WiFi mode: ensure your PC is connected to the GoPro's WiFi network")
+    elif args.source is not None:
+        source = int(args.source) if args.source.isdigit() else args.source
+    else:
+        # Fall back to CAMERA_SOURCE env var, then 0
+        env_src = os.environ.get("CAMERA_SOURCE", "0")
+        source = int(env_src) if env_src.isdigit() else env_src
 
     print("=" * 45)
     print("LOCUS Medication Detection — Body Camera")
@@ -305,7 +337,7 @@ def main():
     if args.single_frame:
         test_single_frame(source)
     else:
-        test_full_pipeline(source, display=args.display, expected_count=args.expected_count)
+        test_full_pipeline(source, display=args.display, expected_count=args.expected_count, user_id=args.user_id)
 
 
 if __name__ == "__main__":

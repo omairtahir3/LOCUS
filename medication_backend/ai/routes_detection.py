@@ -15,8 +15,15 @@ _pipeline: Optional[MedicationDetectionPipeline] = None
 _pipeline_thread: Optional[threading.Thread] = None
 
 
+def _default_camera_source():
+    """Read CAMERA_SOURCE from env, defaulting to '0' (webcam)."""
+    import os
+    return os.environ.get("CAMERA_SOURCE", "0")
+
+
 class DetectionStartRequest(BaseModel):
-    source: str = "0"           # "0" for webcam, or video file path
+    source: str = ""            # empty = read from CAMERA_SOURCE env var
+    user_id: str = ""           # explicitly provided user ID
     medication_id: str = ""
     scheduled_time: str = ""
     display: bool = False       # show video window (for testing only)
@@ -41,32 +48,82 @@ async def start_detection(req: DetectionStartRequest, db=Depends(get_db)):
     medication_ids = []
     expected_count = 0
     token = ""
+    scheduled_time_used = req.scheduled_time
+    all_scheduled_times = req.scheduled_times or []
     
     if req.scheduled_time:
+        # Explicit time provided — find medications at that exact time
         cursor = db.medications.find({"scheduled_times": req.scheduled_time, "is_active": True})
         meds = await cursor.to_list(length=100)
+    else:
+        # No time provided — auto-detect medications due within ±3 hours
+        from datetime import datetime, timedelta
+        # Calculate true local time by applying the system's timezone offset
+        local_now = datetime.now()
+        utc_now = datetime.utcnow()
+        offset = local_now - utc_now
+        
+        # We want the time to match the user's local wall-clock time
+        now = local_now
+        current_minutes = now.hour * 60 + now.minute
+        window = 180  # 3-hour window
+        
+        cursor = db.medications.find({"is_active": True})
+        all_meds = await cursor.to_list(length=100)
+        meds = []
+        
+        for m in all_meds:
+            for t in m.get("scheduled_times", []):
+                try:
+                    parts = t.split(":")
+                    sched_min = int(parts[0]) * 60 + int(parts[1])
+                    diff = abs(current_minutes - sched_min)
+                    diff = min(diff, 1440 - diff)  # midnight wrap
+                    if diff <= window:
+                        meds.append(m)
+                        if not scheduled_time_used:
+                            scheduled_time_used = t  # use the closest match
+                        if t not in all_scheduled_times:
+                            all_scheduled_times.append(t)
+                        break
+                except (ValueError, IndexError):
+                    continue
         
         if meds:
-            medication_ids = [str(m["_id"]) for m in meds]
-            expected_count = len(meds)
-            # Generate a system token masquerading as the user of the scheduled meds
-            token = create_access_token({"sub": str(meds[0]["user_id"]), "role": "system"})
+            print(f"[Detection] Auto-detected {len(meds)} medications due near {now.strftime('%H:%M')}: "
+                  f"{[m.get('name','?') for m in meds]}")
+    
+    user_id = req.user_id
+    if meds:
+        medication_ids = [str(m["_id"]) for m in meds]
+        expected_count = len(meds)
+        # If no explicit user_id was provided, infer from meds
+        if not user_id:
+            user_id = str(meds[0]["user_id"])
+            
+    if user_id:
+        token = create_access_token({"sub": user_id, "role": "system"})
 
     _pipeline = MedicationDetectionPipeline(
         api_base_url="http://localhost:8000",
         expected_medicine_count=expected_count,
         medication_ids=medication_ids,
-        scheduled_time=req.scheduled_time,
-        token=token
+        scheduled_time=scheduled_time_used,
+        token=token,
+        user_id=user_id
     )
 
-    source = int(req.source) if req.source.isdigit() else req.source
+    # Resolve video source: use env var if not explicitly provided
+    raw_source = req.source.strip() if req.source else ""
+    if not raw_source:
+        raw_source = _default_camera_source()
+    source = int(raw_source) if raw_source.isdigit() else raw_source
 
     def run():
         _pipeline.run_on_video(
             source=source,
             display=req.display,
-            scheduled_times=req.scheduled_times or None
+            scheduled_times=all_scheduled_times or None
         )
 
     _pipeline_thread = threading.Thread(target=run, daemon=True)
@@ -111,7 +168,11 @@ async def analyze_buffer(req: DetectionAnalyzeRequest):
         if result:
             return result
     except Exception as e:
-        print(f"[Analyze] Direct analysis error: {e}")
+        import traceback
+        err = traceback.format_exc()
+        print(f"[Analyze] Direct analysis error: {err}")
+        with open("quickscan.log", "a") as f:
+            f.write(f"\n[Error in Direct Analysis]\n{err}\n")
 
     # No result at all
     raise HTTPException(
@@ -124,19 +185,30 @@ async def analyze_buffer(req: DetectionAnalyzeRequest):
 async def get_status():
     """Check if the detection pipeline is running and return latest result if available."""
     global _pipeline
+
+    # Fall back to the scheduler's always-on pipeline if routes_detection's own is None
+    pipe = _pipeline
+    if not pipe:
+        try:
+            from scheduler import _pipeline as sched_pipeline
+            pipe = sched_pipeline
+        except Exception:
+            pass
+
     try:
-        buffer_size = len(_pipeline.extractor.get_buffer()) if _pipeline else 0
+        buffer_size = len(pipe.extractor.get_buffer()) if pipe else 0
     except Exception:
         buffer_size = 0
 
     return {
-        "is_running": _pipeline.is_running if _pipeline else False,
+        "is_running": pipe.is_running if pipe else False,
+        "camera_online": getattr(pipe, 'camera_online', False) if pipe else False,
         "buffer_size": buffer_size,
-        "has_result": bool(_pipeline and _pipeline.last_result),
-        "last_result": _pipeline.last_result if _pipeline else None,
-        "medicines_taken_count": _pipeline.medicines_taken_count if _pipeline else 0,
-        "expected_medicine_count": _pipeline.expected_medicine_count if _pipeline else 0,
-        "medicines_remaining": max(0, (_pipeline.expected_medicine_count - _pipeline.medicines_taken_count)) if _pipeline else 0,
+        "has_result": bool(pipe and pipe.last_result),
+        "last_result": pipe.last_result if pipe else None,
+        "medicines_taken_count": pipe.medicines_taken_count if pipe else 0,
+        "expected_medicine_count": pipe.expected_medicine_count if pipe else 0,
+        "medicines_remaining": max(0, (pipe.expected_medicine_count - pipe.medicines_taken_count)) if pipe else 0,
     }
 
 
@@ -164,14 +236,24 @@ async def get_medicine_count():
 
 
 @router.get("/keyframes")
-async def list_keyframes(limit: int = 50):
+async def list_keyframes(limit: int = 50, user_id: str = "", medication_only: bool = False):
     """
-    List all stored keyframes with metadata (timestamps, blur scores, motion scores).
-    Used by the caregiver Keyframe Audit page to display per-frame AI evidence.
+    List stored keyframes with metadata.
+
+    Query params:
+        user_id:         Filter by user (empty = all users)
+        medication_only: If true, only return frames with medication_detected=True
+        limit:           Max results (default 50)
+
+    Caregiver dashboard: medication_only=false (see all frames)
+    Elderly user:        medication_only=true  (see only verified intake frames)
     """
     from ai.keyframe import KeyframeStorage
     storage = KeyframeStorage()
-    keyframes = storage.list_keyframes()
+    keyframes = storage.list_keyframes(
+        user_id=user_id or None,
+        medication_only=medication_only,
+    )
     return keyframes[:limit]
 
 

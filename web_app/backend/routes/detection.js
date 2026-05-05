@@ -55,7 +55,11 @@ async function proxy(req, res, method, path) {
 }
 
 // POST /api/detection/start
-router.post('/start', (req, res) => proxy(req, res, 'post', '/api/detection/start'));
+router.post('/start', (req, res) => {
+  if (!req.body) req.body = {};
+  req.body.user_id = req.user._id.toString();
+  return proxy(req, res, 'post', '/api/detection/start');
+});
 
 // POST /api/detection/stop
 router.post('/stop', (req, res) => proxy(req, res, 'post', '/api/detection/stop'));
@@ -73,6 +77,43 @@ router.get('/medicine-count', (req, res) => proxy(req, res, 'get', '/api/detecti
 router.get('/scheduler', (req, res) => proxy(req, res, 'get', '/api/scheduler/status'));
 
 // GET /api/detection/keyframes — list stored keyframes
-router.get('/keyframes', (req, res) => proxy(req, res, 'get', '/api/detection/keyframes'));
+router.get('/keyframes', async (req, res) => {
+  try {
+    // Forward query params to FastAPI (medication_only, user_id, limit)
+    const params = new URLSearchParams();
+    if (req.query.limit) params.set('limit', req.query.limit);
+    if (req.query.medication_only) params.set('medication_only', req.query.medication_only);
+
+    // For normal users, only show their own keyframes
+    // For caregivers, show keyframes of their monitored users
+    const isCaregiverLike = req.user.role === 'admin' || req.user.role === 'caregiver' || req.user.role === 'family_member';
+    if (!isCaregiverLike) {
+      params.set('user_id', req.user._id.toString());
+    } else if (req.query.user_id) {
+      params.set('user_id', req.query.user_id);
+    }
+
+    const url = `${AI_BACKEND}/api/detection/keyframes?${params.toString()}`;
+    const response = await axios.get(url, { timeout: 60000 });
+    let keyframes = response.data;
+
+    // Additional access control: caregivers can only see their monitored users
+    if (isCaregiverLike && req.user.role !== 'admin') {
+      const allowedUserIds = [req.user._id.toString()];
+      if (req.user.monitoring_users) {
+        req.user.monitoring_users.forEach(id => allowedUserIds.push(id.toString()));
+      }
+      keyframes = keyframes.filter(kf => {
+        if (!kf.user_id) return false;
+        return allowedUserIds.includes(kf.user_id);
+      });
+    }
+
+    res.json(keyframes);
+  } catch (err) {
+    console.error('[Detection Proxy] GET /api/detection/keyframes ERROR:', err.message);
+    res.status(500).json({ error: 'Failed to fetch keyframes' });
+  }
+});
 
 module.exports = router;

@@ -3,14 +3,22 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 
 class ApiService {
   // Automatically switch between localhost for Web/iOS and 10.0.2.2 for Android emulator
+  // UPDATED: Uses laptop IP for local dev, and Production URL when deployed.
   static String get baseUrl {
-    if (kIsWeb) return 'http://localhost:8000/api';
-    if (Platform.isAndroid) return 'http://10.0.2.2:8000/api';
-    return 'http://localhost:8000/api';
+    if (kReleaseMode) {
+      // When you deploy the app, it will use this production URL instead of your laptop's IP.
+      // You can override this at build time using: flutter build apk --dart-define=API_URL=https://your-aws-url.com/api
+      return const String.fromEnvironment('API_URL', defaultValue: 'https://your-production-server.com/api');
+    }
+    
+    // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
+    // and the laptop's actual IP (192.168.1.10) for physical Android devices via USB.
+    if (kIsWeb) return 'http://localhost:5000/api';
+    return 'http://192.168.1.10:5000/api';
   }
 
   static late SharedPreferences _prefs;
@@ -27,7 +35,7 @@ class ApiService {
   static bool get isLoggedIn => _token != null;
   static String? get token => _token;
   static Map<String, dynamic>? get user => _user;
-  static String get userRole => _user?['role'] ?? 'user';
+  static String get userRole => _user?['role'] ?? _user?['user']?['role'] ?? 'user';
 
   static Map<String, String> get _headers => {
     'Content-Type': 'application/json',
@@ -59,7 +67,7 @@ class ApiService {
     );
     final data = jsonDecode(res.body);
     if (res.statusCode == 200) {
-      final token = data['access_token'];
+      final token = data['access_token'] ?? data['token'];
       _token = token;
       // Fetch user profile from /me
       final meRes = await http.get(Uri.parse('$baseUrl/auth/me'), headers: _headers);
@@ -86,7 +94,7 @@ class ApiService {
   // ── Medications (for own use or caregiver viewing) ──────────────────────
 
   static Future<List<dynamic>> getSchedule({String? userId}) async {
-    final query = userId != null ? '?user_id=$userId' : '';
+    final query = userId != null ? '?userId=$userId' : '';
     final res = await http.get(Uri.parse('$baseUrl/medications/schedule/today$query'), headers: _headers);
     if (res.statusCode == 200) return jsonDecode(res.body) is List ? jsonDecode(res.body) : [];
     return [];
@@ -100,7 +108,7 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getMedications({String? userId}) async {
-    final query = userId != null ? '?user_id=$userId' : '';
+    final query = userId != null ? '?userId=$userId' : '';
     final res = await http.get(Uri.parse('$baseUrl/medications$query'), headers: _headers);
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
@@ -110,7 +118,7 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getDoseHistory({String? userId, int limit = 20}) async {
-    final query = userId != null ? '?user_id=$userId&limit=$limit' : '?limit=$limit';
+    final query = userId != null ? '?userId=$userId&limit=$limit' : '?limit=$limit';
     final res = await http.get(Uri.parse('$baseUrl/medications/logs/history$query'), headers: _headers);
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
@@ -127,9 +135,29 @@ class ApiService {
         'medication_id': medicationId, 
         'status': status, 
         'scheduled_time': scheduledTime,
+        'verification_method': 'manual',
         if (notes != null) 'notes': notes
       }),
     );
+    if (res.statusCode >= 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Failed to record dose');
+    }
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> updateLog(String logId, String status, {String? notes}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/medications/logs/$logId'),
+      headers: _headers,
+      body: jsonEncode({
+        'status': status,
+        'verification_method': 'manual',
+        if (notes != null) 'notes': notes
+      }),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Failed to update log');
+    }
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
 
@@ -299,7 +327,7 @@ class ApiService {
   // ── AI Detection (proxied through Node.js backend) ─────────────────────
 
   static Future<Map<String, dynamic>> startDetection({
-    String source = '0',
+    String source = '',
     String medicationId = 'test',
     String scheduledTime = '08:00',
   }) async {

@@ -200,11 +200,14 @@ router.get('/users/:userId/anomalies', async (req, res) => {
       return t >= sixDaysAgo && t < threeDaysAgo;
     });
 
-    const recentAdherence = recentPeriod.length > 0
-      ? recentPeriod.filter(l => l.status === 'taken').length / recentPeriod.length
+    const validRecent = recentPeriod.filter(l => l.status !== 'skipped');
+    const recentAdherence = validRecent.length > 0
+      ? validRecent.filter(l => l.status === 'taken').length / validRecent.length
       : 0;
-    const previousAdherence = previousPeriod.length > 0
-      ? previousPeriod.filter(l => l.status === 'taken').length / previousPeriod.length
+      
+    const validPrev = previousPeriod.filter(l => l.status !== 'skipped');
+    const previousAdherence = validPrev.length > 0
+      ? validPrev.filter(l => l.status === 'taken').length / validPrev.length
       : 0;
 
     if (previousAdherence > 0 && recentAdherence < previousAdherence * 0.6) {

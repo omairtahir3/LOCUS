@@ -42,6 +42,16 @@ class KeyframeStorage:
         # Start background cleanup thread
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
+        print(f"[KeyframeStorage] Initialized at: {self.storage_dir}")
+        
+        # Test write access
+        try:
+            test_path = os.path.join(self.storage_dir, ".write_test")
+            with open(test_path, "w") as f:
+                f.write("test")
+            os.remove(test_path)
+        except Exception as e:
+            print(f"[KeyframeStorage] CRITICAL: No write access to {self.storage_dir}: {e}")
 
     def save(self, keyframe_id, frame, metadata):
         """
@@ -55,7 +65,13 @@ class KeyframeStorage:
         img_path  = os.path.join(self.storage_dir, f"{keyframe_id}.jpg")
         meta_path = os.path.join(self.storage_dir, f"{keyframe_id}.json")
 
-        cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        # Absolute path for debugging
+        abs_img_path = os.path.abspath(img_path)
+        # print(f"[KeyframeStorage] Saving: {abs_img_path}") # reduced noise
+
+        success = cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if not success:
+            print(f"[KeyframeStorage] ERROR: Failed to write image to {abs_img_path}")
 
         meta = {
             **metadata,
@@ -80,8 +96,15 @@ class KeyframeStorage:
         with open(meta_path, "r") as f:
             return json.load(f)
 
-    def list_keyframes(self):
-        """List all stored keyframe IDs, sorted by timestamp (newest first)."""
+    def list_keyframes(self, user_id=None, medication_only=False):
+        """
+        List stored keyframes, sorted newest-first.
+
+        Args:
+            user_id:         If set, only return keyframes for this user.
+            medication_only: If True, only return keyframes tagged with
+                             medication_detected=True (verified intake frames).
+        """
         meta_files = glob.glob(os.path.join(self.storage_dir, "*.json"))
         keyframes = []
         for meta_path in meta_files:
@@ -89,11 +112,44 @@ class KeyframeStorage:
                 with open(meta_path, "r") as f:
                     meta = json.load(f)
                     meta["keyframe_id"] = os.path.basename(meta_path).replace(".json", "")
+
+                    # Filter by user
+                    if user_id and meta.get("user_id") != user_id:
+                        continue
+                    # Filter by medication detection
+                    if medication_only and not meta.get("medication_detected"):
+                        continue
+
                     keyframes.append(meta)
             except (json.JSONDecodeError, IOError):
                 continue
         keyframes.sort(key=lambda k: k.get("saved_at", ""), reverse=True)
         return keyframes
+
+    def tag_as_medication_detected(self, keyframe_id, confidence=0.0, status="taken",
+                                    medication_name="", medication_id=""):
+        """
+        Update a keyframe's metadata to mark it as a medication detection frame.
+        Called by the pipeline after a successful detection.
+        """
+        meta_path = os.path.join(self.storage_dir, f"{keyframe_id}.json")
+        if not os.path.exists(meta_path):
+            return False
+        try:
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+            meta["medication_detected"] = True
+            meta["detection_confidence"] = round(confidence, 3)
+            meta["detection_status"] = status
+            meta["medication_name"] = medication_name
+            meta["medication_id"] = medication_id
+            meta["detected_at"] = datetime.now().astimezone().isoformat()
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+            return True
+        except Exception as e:
+            print(f"[KeyframeStorage] Tag error for {keyframe_id}: {e}")
+            return False
 
     def cleanup_expired(self):
         """Delete all keyframes older than TTL."""
@@ -154,12 +210,17 @@ class KeyframeExtractor:
     """
 
     def __init__(self, target_fps=5, buffer_seconds=5, save_locally=True,
-                 blur_threshold=50.0, window_duration=1.0, top_n_per_window=5):
+                 blur_threshold=25.0, window_duration=1.0, top_n_per_window=5,
+                 max_buffer_frames=300, user_id=""):
         self.target_fps = target_fps
         self.buffer_seconds = buffer_seconds
-        # Buffer holds ALL frames for AI analysis — no cap.
-        # For video files, all frames stay until analysis is done.
-        self.buffer = deque()
+        self.user_id = user_id
+        # Buffer holds recent frames for AI analysis.
+        # Capped at max_buffer_frames to prevent memory exhaustion
+        # during long sessions (e.g. 5-6 hour GoPro recording).
+        # 300 frames ≈ 10 seconds at 30fps — plenty for phase analysis.
+        self.max_buffer_frames = max_buffer_frames
+        self.buffer = deque(maxlen=max_buffer_frames)
         self._lock = threading.Lock()
         self.prev_frame = None
         self.motion_threshold = 10
@@ -238,22 +299,32 @@ class KeyframeExtractor:
 
     def _flush_window(self):
         """
-        Save the top N sharpest frames from the current window to disk.
-        Always saves top 5 sharpest — no blur rejection.
+        Evaluate the accumulated frames over the last window_duration seconds.
+        Selects top_n_per_window sharpest frames and saves them.
         """
         if not self._window_candidates or not self.storage:
+            print(f"[Keyframe] Flush skipped: candidates={len(self._window_candidates)}, storage={bool(self.storage)}")
             self._window_candidates = []
             return
 
-        # Sort by blur score (sharpest first) and save top N
+        # Sort by blur score (sharpest first), filter out blurry frames, take top N
         sorted_candidates = sorted(self._window_candidates, key=lambda c: c[0], reverse=True)
-        top_candidates = sorted_candidates[:self.top_n_per_window]
+        sharp_candidates = [c for c in sorted_candidates if c[0] >= self.blur_threshold]
+        top_candidates = sharp_candidates[:self.top_n_per_window]
+
+        print(f"[Keyframe] Window ended: {len(self._window_candidates)} total frames. Best score: {sorted_candidates[0][0]:.2f}. Sharp frames: {len(sharp_candidates)}")
+
+        if not top_candidates:
+            print(f"[Keyframe] Skipped window: all {len(self._window_candidates)} frames below threshold {self.blur_threshold}")
+            self._window_candidates = []
+            self._window_start_time = time.time()
+            return  # all frames in this window were blurry — skip
 
         for blur_score, keyframe_id, frame, metadata in top_candidates:
             self.storage.save(keyframe_id, frame, metadata)
 
-        print(f"[Keyframe] Saved {len(top_candidates)} best of {len(self._window_candidates)} frames "
-              f"(sharpest={top_candidates[0][0]:.1f})")
+        print(f"[Keyframe] Saved {len(top_candidates)} sharp of {len(self._window_candidates)} frames "
+              f"(sharpest={top_candidates[0][0]:.1f}, threshold={self.blur_threshold})")
 
         self._window_candidates = []
         self._window_start_time = time.time()
@@ -275,33 +346,39 @@ class KeyframeExtractor:
     def get_frames_for_analysis(self):
         """
         Return frames from buffer for model inference (thread-safe).
-        Takes every 6th frame (~5fps from 30fps) — enough to catch
-        every action while keeping analysis fast (~30 frames max).
-        Always includes the first and last frame for temporal coverage.
+        Caps to MAX_ANALYSIS_FRAMES by striding through the buffer.
+        The temporal phase analysis only needs ~15 well-distributed
+        frames to detect the pill→grip→gone sequence.
         """
+        MAX_ANALYSIS_FRAMES = 15
+
         with self._lock:
             snapshot = list(self.buffer)
         if not snapshot:
             return []
 
         n = len(snapshot)
-        # Calculate step to get ~30 frames max
-        step = max(6, n // 30)
 
-        selected = []
-        for i in range(0, n, step):
-            selected.append(snapshot[i])
-        # Always include last frame
-        if n > 1 and selected[-1] is not snapshot[-1]:
-            selected.append(snapshot[-1])
+        # If buffer is small enough, use all frames
+        if n <= MAX_ANALYSIS_FRAMES:
+            selected = snapshot
+        else:
+            # Stride through buffer to pick evenly-spaced frames
+            step = n / MAX_ANALYSIS_FRAMES
+            indices = [int(i * step) for i in range(MAX_ANALYSIS_FRAMES)]
+            # Always include last frame
+            if indices[-1] != n - 1:
+                indices[-1] = n - 1
+            selected = [snapshot[i] for i in indices]
 
         frames = []
         for kf in selected:
             frame = kf["raw_frame"]
             frames.append({"frame": frame, "timestamp": kf["timestamp"], "id": kf["id"]})
-        
-        print(f"[Analysis] Analyzing {len(frames)} frames (from {n} in buffer, step={step})")
+
+        print(f"[Analysis] Analyzing {len(frames)} frames (from {n} in buffer)")
         return frames
+
 
     def process_frame(self, frame):
         """
@@ -311,6 +388,8 @@ class KeyframeExtractor:
         2. Top 5 sharpest frames per second are saved to disk.
         """
         self.frame_count += 1
+        if self.frame_count % 100 == 0:
+            print(f"[KeyframeExtractor] Processed {self.frame_count} frames... (Buffer: {len(self.buffer)})")
         motion_score = self.compute_motion_score(frame)
         blur_score = self.compute_blur_score(frame)
 
@@ -326,6 +405,7 @@ class KeyframeExtractor:
                 "blur_score": round(blur_score, 2),
                 "width": frame.shape[1],
                 "height": frame.shape[0],
+                "user_id": getattr(self, "user_id", "")
             }
             self._window_candidates.append((blur_score, keyframe_id, frame.copy(), metadata))
 
@@ -350,41 +430,135 @@ class KeyframeExtractor:
         return keyframe
 
 
+import threading
+import time
+
 class VideoSource:
     """
     Abstracts the video input source.
-    Supports webcam, video file, and will support wearable camera stream.
+    Supports webcam, video file, and GoPro Hero 13 WiFi/RTMP stream.
+    Uses a background thread to read frames, preventing buffer lag on live streams.
     """
 
     def __init__(self, source=0):
         """
         source=0 for webcam
         source="path/to/video.mp4" for file
-        source="rtsp://..." for camera stream
+        source="gopro" for GoPro Hero 13 WiFi preview stream
+        source="rtmp://..." for live stream
         """
         self.source = source
         self.cap = None
+        self._is_gopro = False
+
+        self._frame = None
+        self._ret = False
+        self._running = False
+        self._thread = None
+        
+        # We need threading for live streams to avoid infinite buffer latency
+        self._is_live = isinstance(source, int) or (isinstance(source, str) and ("rtmp://" in source or "rtsp://" in source or "gopro" in source.lower()))
 
     def open(self):
-        self.cap = cv2.VideoCapture(self.source)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Could not open video source: {self.source}")
+        if isinstance(self.source, str) and self.source.lower() == "gopro":
+            from ai.gopro import GoProSource
+            self.cap = GoProSource()
+            self.cap.open()
+            self._is_gopro = True
+            
+            # Start background reader for GoPro WiFi stream
+            self._running = True
+            self._thread = threading.Thread(target=self._update, daemon=True)
+            self._thread.start()
+        else:
+            # Optimize OpenCV for RTMP/RTSP streams (reduce buffer size)
+            if isinstance(self.source, str) and ("rtmp://" in self.source or "rtsp://" in self.source):
+                import os
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "fflags;nobuffer|analyzeduration;0|probesize;32"
+                
+            self.cap = cv2.VideoCapture(self.source)
+            if getattr(cv2, 'CAP_PROP_BUFFERSIZE', None) is not None:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Retry for RTSP/RTMP streams — the publisher (GoPro) may not be live yet
+            if not self.cap.isOpened() and self._is_live:
+                max_retries = 60  # 5 minutes of retrying
+                for attempt in range(1, max_retries + 1):
+                    print(f"[VideoSource] Stream not available, retrying in 5s... ({attempt}/{max_retries})")
+                    time.sleep(5)
+                    self.cap = cv2.VideoCapture(self.source)
+                    if self.cap.isOpened():
+                        break
+            
+            if not self.cap.isOpened():
+                raise RuntimeError(f"Could not open video source: {self.source}")
+                
+            if self._is_live:
+                # Prime the first frame
+                self._ret, self._frame = self.cap.read()
+                self._running = True
+                self._thread = threading.Thread(target=self._update, daemon=True)
+                self._thread.start()
+
         print(f"Video source opened: {self.source}")
         return self
+
+    def _update(self):
+        """Background thread that constantly reads the latest frame to clear the buffer."""
+        while self._running:
+            if self.cap:
+                ret, frame = self.cap.read()
+                if ret:
+                    self._ret, self._frame = ret, frame
+                    self._new_frame = True
+                else:
+                    self._ret = False
+                    self._running = False
+                    break
+            else:
+                time.sleep(0.005)
 
     def read(self):
         """Read next frame. Returns (success, frame)."""
         if self.cap is None:
             return False, None
-        return self.cap.read()
+            
+        if self._is_live:
+            if self._is_gopro:
+                return self.cap.read()
+                
+            # Wait for a truly NEW frame so the AI pipeline doesn't spin out of control processing duplicates
+            timeout = 0
+            while not getattr(self, '_new_frame', False) and timeout < 100:
+                time.sleep(0.005)
+                timeout += 1
+                
+            self._new_frame = False
+            return self._ret, self._frame
+        else:
+            return self.cap.read()
 
     def release(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            
         if self.cap:
             self.cap.release()
             print("Video source released")
 
     def get_fps(self):
-        return self.cap.get(cv2.CAP_PROP_FPS) if self.cap else 0
+        if self.cap is None:
+            return 0
+        if self._is_gopro:
+            return self.cap.get_fps()
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
+        return fps if fps > 0 else 30.0
+
+    def isOpened(self):
+        if self.cap is None:
+            return False
+        return self.cap.isOpened()
 
     def __enter__(self):
         return self.open()

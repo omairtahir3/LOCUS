@@ -8,11 +8,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Python backend instance (for normal user dashboard)
-const pythonApi = axios.create({
-  baseURL: PYTHON_API_BASE,
-  headers: { 'Content-Type': 'application/json' },
-});
 
 // Attach token to every request
 const attachToken = (config) => {
@@ -22,7 +17,6 @@ const attachToken = (config) => {
 };
 
 api.interceptors.request.use(attachToken);
-pythonApi.interceptors.request.use(attachToken);
 
 // Handle 401 globally
 const handle401 = (err) => {
@@ -35,7 +29,6 @@ const handle401 = (err) => {
 };
 
 api.interceptors.response.use((res) => res, handle401);
-pythonApi.interceptors.response.use((res) => res, handle401);
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export const authAPI = {
@@ -89,20 +82,20 @@ export const detectionAPI = {
   getKeyframeImage:  (id) => `${API_BASE}/detection/keyframes/${id}/image`,
 };
 
-// ── Normal User API (Python backend) ─────────────────────────────────────────
+// ── Normal User API (Node.js backend) ─────────────────────────────────────────
 export const userAPI = {
-  getSchedule:    () => pythonApi.get('/medications/schedule/today'),
-  getMedications: () => pythonApi.get('/medications'),
-  getHistory:     (params) => pythonApi.get('/medications/logs/history', { params }),
-  getDailySummary:(params) => pythonApi.get('/medications/summary/daily', { params }),
-  getAdherence:   () => pythonApi.get('/medications/adherence/summary'),
-  createLog:      (data) => pythonApi.post('/medications/logs/', data),
-  updateLog:      (id, data) => pythonApi.patch(`/medications/logs/${id}`, data),
-  createMedication: (data) => pythonApi.post('/medications', data),
-  updateMedication: (id, data) => pythonApi.put(`/medications/${id}`, data),
-  deleteMedication: (id) => pythonApi.delete(`/medications/${id}`),
-  // Auth via Python
-  login:    (data) => pythonApi.post('/auth/login', data),
+  getSchedule:    () => api.get('/medications/schedule/today'),
+  getMedications: () => api.get('/medications'),
+  getHistory:     (params) => api.get('/medications/logs/history', { params }),
+  getDailySummary:(params) => api.get('/medications/summary/daily', { params }),
+  getAdherence:   () => api.get('/medications/summary/daily'), // Use Node.js daily summary
+  createLog:      (data) => api.post('/medications/logs/', data),
+  updateLog:      (id, data) => api.patch(`/medications/logs/${id}`, data),
+  createMedication: (data) => api.post('/medications', data),
+  updateMedication: (id, data) => api.put(`/medications/${id}`, data),
+  deleteMedication: (id) => api.delete(`/medications/${id}`),
+  // Auth via Node.js
+  login:    (data) => api.post('/auth/login', data),
 };
 
 export default api;

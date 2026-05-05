@@ -154,7 +154,7 @@ export default function UserMedications() {
                         </span>
                         {s.status === 'taken' && s.verification_method && (
                           <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                            Verified: {s.verification_method === 'visual' ? 'Camera' : 'Manual'}
+                            Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual' ? 'Manual' : s.verification_method}
                           </div>
                         )}
                       </td>
@@ -309,7 +309,7 @@ export default function UserMedications() {
                         </span>
                       </td>
                       <td className="text-muted text-sm">
-                        {log.verification_method === 'visual' ? 'Camera AI' :
+                        {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera' :
                          log.verification_method === 'manual' ? 'Manual' :
                          log.verification_method || '-'}
                         {log.confidence_score != null && (

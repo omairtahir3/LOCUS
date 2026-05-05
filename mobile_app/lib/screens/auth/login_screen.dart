@@ -46,14 +46,11 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ColorFiltered(
-                  colorFilter: const ColorFilter.mode(Colors.black, BlendMode.srcIn),
-                  child: Image.asset('assets/images/logo.png', height: 48),
-                ),
-                const SizedBox(height: 12),
-                Text('Welcome back', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                Text('Sign in to continue', style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+                Image.asset('assets/images/logo.png', height: 60),
+                const SizedBox(height: 24),
+                Text('Welcome back', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                const SizedBox(height: 8),
+                Text('Sign in to continue', style: TextStyle(color: AppColors.textSecondary, fontSize: 15)),
                 const SizedBox(height: 32),
 
                 if (_error != null)

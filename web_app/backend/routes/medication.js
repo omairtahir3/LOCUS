@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Medication = require('../models/Medication');
 const MedicationLog = require('../models/MedicationLog');
 const { protect, caregiverAccessCheck } = require('../middleware/auth');
@@ -13,7 +14,10 @@ router.use(protect);
 // GET /api/medications
 router.get('/', async (req, res) => {
   try {
-    const meds = await Medication.find({ user_id: req.user._id, is_active: true }).sort({ createdAt: -1 });
+    const rawId = req.query.userId || req.user._id;
+    const idStr = rawId.toString();
+    const idOid = mongoose.Types.ObjectId.isValid(idStr) ? new mongoose.Types.ObjectId(idStr) : rawId;
+    const meds = await Medication.find({ user_id: { $in: [idStr, idOid] }, is_active: true }).sort({ createdAt: -1 });
     res.json(meds);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -58,20 +62,21 @@ router.delete('/:id', async (req, res) => {
 // GET /api/medications/schedule/today  — optionally ?userId= for caregiver access
 router.get('/schedule/today', async (req, res) => {
   try {
-    const userId = req.query.userId || req.user._id;
+    const rawId = req.query.userId || req.user._id;
+    const idStr = rawId.toString();
+    const idOid = mongoose.Types.ObjectId.isValid(idStr) ? new mongoose.Types.ObjectId(idStr) : rawId;
+
     const today = new Date();
     const dayStart = new Date(today.setHours(0, 0, 0, 0));
     const dayEnd   = new Date(today.setHours(23, 59, 59, 999));
 
-    // Query with both string and ObjectId since Flutter stores as string
-    const userIdStr = userId.toString();
     const meds = await Medication.find({
-      user_id: { $in: [userIdStr, userId] },
+      user_id: { $in: [idStr, idOid] },
       is_active: true
     });
 
     const logs = await MedicationLog.find({
-      user_id: { $in: [userIdStr, userId] },
+      user_id: { $in: [idStr, idOid] },
       scheduled_time: { $gte: dayStart, $lte: dayEnd }
     });
 
@@ -125,15 +130,30 @@ router.post('/logs', async (req, res) => {
   try {
     const { medication_id, scheduled_time, status, verification_method, notes, confidence_score, keyframe_id } = req.body;
 
-    const med = await Medication.findOne({ _id: medication_id, user_id: req.user._id });
+    let med;
+    if (req.user.role === 'internal_ai') {
+      med = await Medication.findById(medication_id);
+    } else {
+      med = await Medication.findOne({ _id: medication_id, user_id: req.user._id });
+    }
     if (!med) return res.status(404).json({ error: 'Medication not found' });
 
-    // Prevent duplicate logs for same slot
-    const existing = await MedicationLog.findOne({ medication_id, user_id: req.user._id, scheduled_time: new Date(scheduled_time) });
-    if (existing) return res.status(409).json({ error: 'Log already exists for this dose. Use PATCH to update.' });
+    const targetUserId = med.user_id;
+
+    // Handle race conditions where UI is out of sync and AI pipeline just created a log
+    const existing = await MedicationLog.findOne({ medication_id, user_id: targetUserId, scheduled_time: new Date(scheduled_time) });
+    if (existing) {
+      // If it exists, gracefully update it instead of throwing a 409 error
+      existing.status = status;
+      if (verification_method) existing.verification_method = verification_method;
+      if (notes) existing.notes = notes;
+      if (status === 'taken' && !existing.taken_at) existing.taken_at = new Date();
+      await existing.save();
+      return res.status(200).json({ ...existing.toObject(), medication_name: med.name, dosage: med.dosage });
+    }
 
     const logData = {
-      user_id: req.user._id,
+      user_id: targetUserId,
       medication_id,
       scheduled_time: new Date(scheduled_time),
       status,
@@ -176,9 +196,11 @@ router.patch('/logs/:logId', async (req, res) => {
 router.get('/logs/history', async (req, res) => {
   try {
     const { userId, medication_id, status, start_date, end_date, limit = 50 } = req.query;
-    const targetUser = userId || req.user._id;
+    const rawId = userId || req.user._id;
+    const idStr = rawId.toString();
+    const idOid = mongoose.Types.ObjectId.isValid(idStr) ? new mongoose.Types.ObjectId(idStr) : rawId;
 
-    const query = { user_id: targetUser };
+    const query = { user_id: { $in: [idStr, idOid] } };
     if (medication_id) query.medication_id = medication_id;
     if (status)        query.status = status;
     if (start_date || end_date) {
@@ -202,28 +224,91 @@ router.get('/logs/history', async (req, res) => {
 // GET /api/medications/summary/daily?date=YYYY-MM-DD&userId=
 router.get('/summary/daily', async (req, res) => {
   try {
-    const targetUser = req.query.userId || req.user._id;
+    const rawId = req.query.userId || req.user._id;
+    const idStr = rawId.toString();
+    const idOid = mongoose.Types.ObjectId.isValid(idStr) ? new mongoose.Types.ObjectId(idStr) : rawId;
+    const now = new Date();
     const targetDate = req.query.date ? new Date(req.query.date) : new Date();
-    const dayStart   = new Date(targetDate.setHours(0, 0, 0, 0));
-    const dayEnd     = new Date(targetDate.setHours(23, 59, 59, 999));
+    const dayStart   = new Date(new Date(targetDate).setHours(0, 0, 0, 0));
+    const dayEnd     = new Date(new Date(targetDate).setHours(23, 59, 59, 999));
 
+    // ── Today's logs ──
     const logs = await MedicationLog.find({
-      user_id: targetUser,
+      user_id: { $in: [idStr, idOid] },
       scheduled_time: { $gte: dayStart, $lte: dayEnd }
     }).populate('medication_id', 'name dosage');
 
     const counts = { taken: 0, missed: 0, snoozed: 0, skipped: 0, scheduled: 0 };
     logs.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
 
-    const total = logs.length;
-    const adherence = total > 0 ? parseFloat(((counts.taken / total) * 100).toFixed(1)) : 0;
+    // Only count doses whose scheduled_time has ALREADY PASSED for today's adherence
+    // (future doses should not drag the percentage down)
+    const pastLogs = logs.filter(l => new Date(l.scheduled_time) <= now);
+    const pastTaken = pastLogs.filter(l => l.status === 'taken').length;
+    const pastMissed = pastLogs.filter(l => l.status === 'missed').length;
+    const pastValid = pastTaken + pastMissed;
+    const todayAdherence = pastValid > 0
+      ? parseFloat(((pastTaken / pastValid) * 100).toFixed(1))
+      : (pastLogs.length === 0 ? 100 : 0);  // No past doses yet = 100% (nothing to miss)
+
+    // ── 7-day overall adherence ──
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - 7);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const weekLogs = await MedicationLog.find({
+      user_id: { $in: [idStr, idOid] },
+      scheduled_time: { $gte: weekStart, $lte: now }  // only past doses
+    });
+    const weekTaken = weekLogs.filter(l => l.status === 'taken').length;
+    const weekMissed = weekLogs.filter(l => l.status === 'missed').length;
+    const weekValid = weekTaken + weekMissed;
+    const overallAdherence = weekValid > 0
+      ? parseFloat(((weekTaken / weekValid) * 100).toFixed(1))
+      : 100;
 
     res.json({
-      date: req.query.date || new Date().toISOString().split('T')[0],
-      total_scheduled: total,
+      date: req.query.date || now.toISOString().split('T')[0],
+      total_scheduled: logs.length,
       ...counts,
-      adherence_percentage: adherence,
+      adherence_percentage: todayAdherence,
+      overall_adherence: overallAdherence,
+      total_taken: weekTaken,
+      total_missed: weekMissed,
+      days_tracked: 7,
       medications: logs,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/medications/adherence/summary — 7-day adherence for Flutter app
+router.get('/adherence/summary', async (req, res) => {
+  try {
+    const rawId = req.query.userId || req.user._id;
+    const idStr = rawId.toString();
+    const idOid = mongoose.Types.ObjectId.isValid(idStr) ? new mongoose.Types.ObjectId(idStr) : rawId;
+
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const logs = await MedicationLog.find({
+      user_id: { $in: [idStr, idOid] },
+      scheduled_time: { $gte: weekAgo, $lte: now }
+    });
+
+    const taken = logs.filter(l => l.status === 'taken').length;
+    const missed = logs.filter(l => l.status === 'missed').length;
+    const totalValid = taken + missed;
+    const adherence = totalValid > 0
+      ? parseFloat(((taken / totalValid) * 100).toFixed(1))
+      : 100;
+
+    res.json({
+      total_scheduled: logs.length,
+      taken,
+      missed,
+      adherence_percentage: adherence,
+      period: '7_days',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

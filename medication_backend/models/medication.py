@@ -3,8 +3,9 @@ from datetime import datetime
 
 def medication_document(user_id: str, data: dict) -> dict:
     """Build a medication document to insert into MongoDB."""
+    from bson import ObjectId
     return {
-        "user_id": user_id,
+        "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
         "name": data["name"],
         "dosage": data["dosage"],
         "frequency": data["frequency"],

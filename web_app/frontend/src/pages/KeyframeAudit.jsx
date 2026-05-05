@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
 import { detectionAPI } from '../services/api';
-import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap } from 'lucide-react';
+import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle } from 'lucide-react';
+
+const PHASE_LABELS = {
+  phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
+  phase2_grip_motion:  { label: 'Phase 2 — Grip & Motion', short: 'P2', color: '#f59e0b' },
+  phase3_pill_gone:    { label: 'Phase 3 — Pill Gone', short: 'P3', color: '#10b981' },
+};
 
 export default function KeyframeAudit() {
   const [keyframes, setKeyframes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
   const [lastResult, setLastResult] = useState(null);
+  const [filter, setFilter] = useState('all'); // 'all' | 'medicine_only'
 
   useEffect(() => {
     loadData();
@@ -15,11 +22,22 @@ export default function KeyframeAudit() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [kfRes, statusRes] = await Promise.all([
+      const [kfRes, medKfRes, statusRes] = await Promise.all([
         detectionAPI.getKeyframes({ limit: 50 }),
+        detectionAPI.getKeyframes({ limit: 50, medication_only: true }),
         detectionAPI.getStatus(),
       ]);
-      setKeyframes(kfRes.data || []);
+      
+      const generalFrames = kfRes.data || [];
+      const medFrames = medKfRes.data || [];
+      
+      // Combine and deduplicate
+      const allFrames = [...medFrames, ...generalFrames];
+      const uniqueFrames = Array.from(new Map(allFrames.map(f => [f.keyframe_id, f])).values());
+      // Sort by date descending
+      uniqueFrames.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
+      
+      setKeyframes(uniqueFrames);
       setLastResult(statusRes.data?.last_result || null);
     } catch (err) {
       console.error('Failed to load keyframes:', err);
@@ -44,6 +62,11 @@ export default function KeyframeAudit() {
     return { label: 'Low', color: 'var(--text-muted)' };
   };
 
+  // Separate medicine-taken frames and general frames
+  const medicineTakenFrames = keyframes.filter(kf => kf.medicine_taken);
+  const generalFrames = keyframes.filter(kf => !kf.medicine_taken);
+  const displayFrames = filter === 'medicine_only' ? medicineTakenFrames : keyframes;
+
   if (loading) {
     return <div className="empty-state"><p>Loading keyframe data...</p></div>;
   }
@@ -55,9 +78,21 @@ export default function KeyframeAudit() {
           <h2 className="page-title">Keyframe Confidence Audit</h2>
           <p className="page-description">Per-frame AI evidence for medication intake verification</p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={loadData}>
-          <Eye size={16} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilter('all')}
+          >All Frames ({keyframes.length})</button>
+          <button
+            className={`btn btn-sm ${filter === 'medicine_only' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilter('medicine_only')}
+          >
+            <Pill size={14} /> Medicine Evidence ({medicineTakenFrames.length})
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={loadData}>
+            <Eye size={16} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Latest Detection Result Summary */}
@@ -111,16 +146,72 @@ export default function KeyframeAudit() {
         </div>
       )}
 
+      {/* Medicine Verification Evidence — grouped by detection event */}
+      {medicineTakenFrames.length > 0 && filter !== 'medicine_only' && (
+        <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid var(--success)' }}>
+          <div className="card-header">
+            <div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle size={18} color="var(--success)" /> Medicine Verification Evidence
+              </div>
+              <div className="card-subtitle">
+                {medicineTakenFrames.length} best-evidence keyframes from verified intake(s)
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, padding: 16 }}>
+            {medicineTakenFrames.map(kf => {
+              const phaseInfo = PHASE_LABELS[kf.phase_role] || { label: kf.phase_role, short: '??', color: '#888' };
+              return (
+                <div key={kf.keyframe_id} style={{
+                  border: `2px solid ${phaseInfo.color}44`,
+                  borderRadius: 'var(--radius-md)',
+                  overflow: 'hidden',
+                  background: 'var(--surface)',
+                }}>
+                  <img
+                    src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
+                    alt={phaseInfo.label}
+                    style={{ width: '100%', height: 140, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44` }}
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span className="badge" style={{
+                        background: phaseInfo.color + '22', color: phaseInfo.color,
+                        fontSize: '0.7rem', fontWeight: 700
+                      }}>{phaseInfo.short}</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {((kf.detection_confidence || 0) * 100).toFixed(0)}% conf
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      {kf.medication_name || 'Unknown'} · {kf.detection_status}
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      {kf.detected_at ? new Date(kf.detected_at).toLocaleString() : ''}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Keyframe Timeline */}
       <div className="card">
         <div className="card-header">
           <div>
-            <div className="card-title"><Camera size={18} style={{ display: 'inline', marginRight: 8 }} />Captured Keyframes</div>
-            <div className="card-subtitle">{keyframes.length} frames stored on disk</div>
+            <div className="card-title"><Camera size={18} style={{ display: 'inline', marginRight: 8 }} />
+              {filter === 'medicine_only' ? 'Medicine Evidence Frames' : 'Captured Keyframes'}
+            </div>
+            <div className="card-subtitle">{displayFrames.length} frames</div>
           </div>
         </div>
 
-        {keyframes.length === 0 ? (
+        {displayFrames.length === 0 ? (
           <div className="empty-state">
             <Image size={48} />
             <h3>No keyframes captured yet</h3>
@@ -128,17 +219,20 @@ export default function KeyframeAudit() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {keyframes.map((kf) => {
+            {displayFrames.map((kf) => {
               const blur = getBlurLabel(kf.blur_score || 0);
               const motion = getMotionLabel(kf.motion_score || 0);
               const isOpen = expanded[kf.keyframe_id];
+              const isMedFrame = kf.medicine_taken;
+              const phaseInfo = PHASE_LABELS[kf.phase_role];
 
               return (
                 <div key={kf.keyframe_id} style={{
-                  border: '1px solid var(--border)',
+                  border: isMedFrame ? `2px solid ${phaseInfo?.color || 'var(--success)'}66` : '1px solid var(--border)',
                   borderRadius: 'var(--radius-md)',
                   overflow: 'hidden',
-                  transition: 'all 0.2s ease'
+                  transition: 'all 0.2s ease',
+                  background: isMedFrame ? `${phaseInfo?.color || 'var(--success)'}08` : 'transparent',
                 }}>
                   {/* Header row */}
                   <div
@@ -166,12 +260,28 @@ export default function KeyframeAudit() {
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Clock size={12} />
                         {kf.saved_at ? new Date(kf.saved_at).toLocaleString() : 'Unknown time'}
+                        {isMedFrame && phaseInfo && (
+                          <span className="badge" style={{
+                            background: phaseInfo.color + '22', color: phaseInfo.color,
+                            fontSize: '0.65rem', fontWeight: 700
+                          }}>{phaseInfo.short} · {kf.medication_name}</span>
+                        )}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                         {kf.width}x{kf.height}
+                        {isMedFrame && ` · ${((kf.detection_confidence || 0) * 100).toFixed(0)}% confidence · ${kf.detection_status}`}
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      {isMedFrame && (
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>PHASE</div>
+                          <span className="badge" style={{
+                            background: (phaseInfo?.color || '#888') + '22',
+                            color: phaseInfo?.color || '#888', fontSize: '0.7rem'
+                          }}>{((kf.phase_score || 0) * 100).toFixed(0)}%</span>
+                        </div>
+                      )}
                       <div style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>BLUR</div>
                         <span className="badge" style={{
@@ -206,6 +316,13 @@ export default function KeyframeAudit() {
                         <div><strong>ID:</strong> {kf.keyframe_id?.slice(0, 8)}...</div>
                         <div><strong>Blur Score:</strong> {(kf.blur_score || 0).toFixed(1)}</div>
                         <div><strong>Motion Score:</strong> {(kf.motion_score || 0).toFixed(1)}</div>
+                        {isMedFrame && (
+                          <>
+                            <div><strong>Medicine:</strong> {kf.medication_name}</div>
+                            <div><strong>Phase:</strong> {phaseInfo?.label || kf.phase_role}</div>
+                            <div><strong>Status:</strong> {kf.detection_status}</div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}

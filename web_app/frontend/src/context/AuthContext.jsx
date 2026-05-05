@@ -17,8 +17,12 @@ export function AuthProvider({ children }) {
       authAPI.getMe()
         .then(res => {
           const u = res.data.user || res.data;
-          setUser(u);
-          localStorage.setItem('locus_user', JSON.stringify(u));
+          if (u.role === 'elderly') {
+            logout();
+          } else {
+            setUser(u);
+            localStorage.setItem('locus_user', JSON.stringify(u));
+          }
         })
         .catch(() => logout());
     }
@@ -30,6 +34,12 @@ export function AuthProvider({ children }) {
     try {
       const res = await authAPI.login({ email, password });
       const { user: u, token: t } = res.data;
+      
+      if (u.role === 'elderly') {
+        setError('Elderly users must use the LOCUS mobile app. Web access is restricted.');
+        return false;
+      }
+      
       setUser(u);
       setToken(t);
       localStorage.setItem('locus_token', t);

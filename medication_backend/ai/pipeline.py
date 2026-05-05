@@ -4,8 +4,9 @@ from .keyframe import KeyframeExtractor, VideoSource
 import asyncio
 import httpx
 import json
+import os
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 # Confidence thresholds — tuned for real-world YOLO + MediaPipe accuracy
@@ -28,10 +29,10 @@ class MedicationDetectionPipeline:
     early and disappearing late is a positive indicator.
     """
 
-    def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token=""):
+    def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id=""):
         self.detector  = PillDetector(model_path="ai/best_model.onnx")
         self.gesture   = GestureDetector()
-        self.extractor = KeyframeExtractor(target_fps=5, buffer_seconds=5)
+        self.extractor = KeyframeExtractor(target_fps=3, buffer_seconds=5, user_id=user_id, save_locally=True)
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -44,6 +45,239 @@ class MedicationDetectionPipeline:
         self.medication_ids = medication_ids or []
         self.scheduled_time = scheduled_time
         self.token = token
+        self.user_id = user_id
+
+    def _log_detection_to_db(self, status, confidence, keyframe_id=None):
+        """
+        Write a medication detection log directly to MongoDB.
+        Uses pymongo (synchronous) since the pipeline runs in a background thread.
+        Bypasses the HTTP API to avoid authentication issues.
+        """
+        if not self.medication_ids or not self.scheduled_time:
+            print(f"[Pipeline] [DB-Log] No medication_ids or scheduled_time set — skipping log")
+            return
+
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+
+            sched_str = self.scheduled_time
+            # Convert "HH:MM" to full UTC datetime
+            if len(sched_str) <= 5:
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                sh, sm = map(int, sched_str.split(":"))
+                local_dt = today.replace(hour=sh, minute=sm)
+                local_offset = datetime.now() - datetime.utcnow()
+                scheduled_dt = local_dt - local_offset
+            else:
+                scheduled_dt = datetime.fromisoformat(sched_str.replace("Z", "+00:00"))
+
+            ts_now = datetime.utcnow()
+
+            for med_id in self.medication_ids:
+                try:
+                    # Look up user_id from the medication document
+                    med_doc = db.medications.find_one({"_id": ObjectId(med_id)})
+                    if not med_doc:
+                        print(f"[Pipeline] [DB-Log] Medication {med_id} not found in DB")
+                        continue
+
+                    user_id = med_doc["user_id"]
+
+                    # Check for existing log to avoid duplicates
+                    existing = db.medication_logs.find_one({
+                        "medication_id": ObjectId(med_id),
+                        "user_id": ObjectId(str(user_id)),
+                        "scheduled_time": scheduled_dt,
+                    })
+                    if existing:
+                        print(f"[Pipeline] [DB-Log] Log already exists for {med_id} at {sched_str}")
+                        continue
+
+                    log_doc = {
+                        "user_id": ObjectId(str(user_id)),
+                        "medication_id": ObjectId(med_id),
+                        "scheduled_time": scheduled_dt,
+                        "status": status,
+                        "verification_method": "Camera",
+                        "confidence_score": round(confidence, 3),
+                        "keyframe_id": keyframe_id,
+                        "taken_at": ts_now if status == "taken" else None,
+                        "notes": f"AI detection (confidence: {confidence:.1%})",
+                        "created_at": ts_now,
+                        "updated_at": ts_now,
+                    }
+                    db.medication_logs.insert_one(log_doc)
+                    print(f"[Pipeline] [DB-Log] ✓ {med_id} logged as {status.upper()} (conf={confidence:.2f})")
+                except Exception as ex:
+                    print(f"[Pipeline] [DB-Log] Error for {med_id}: {ex}")
+
+            client.close()
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log] Fatal error: {e}")
+
+    def _log_detection_to_db_batch(self, status, confidence, pills_to_log, keyframe_id=None):
+        """
+        Log exactly `pills_to_log` medications as taken/verified.
+        When multiple pills are taken at once (e.g., 2 pills in hand),
+        this logs 2 medications. When only 1 pill is seen, only 1 med is logged.
+        Remaining unlogged meds stay pending for another detection or get
+        marked missed/skipped when the scheduler's 3-hour window expires.
+        """
+        if not self.medication_ids or not self.scheduled_time:
+            print(f"[Pipeline] [DB-Log-Batch] No medication_ids or scheduled_time set — skipping")
+            return
+
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+
+            sched_str = self.scheduled_time
+            if len(sched_str) <= 5:
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                sh, sm = map(int, sched_str.split(":"))
+                local_dt = today.replace(hour=sh, minute=sm)
+                local_offset = datetime.now() - datetime.utcnow()
+                scheduled_dt = local_dt - local_offset
+            else:
+                scheduled_dt = datetime.fromisoformat(sched_str.replace("Z", "+00:00"))
+
+            ts_now = datetime.utcnow()
+            logged_count = 0
+
+            for med_id in self.medication_ids:
+                if logged_count >= pills_to_log:
+                    break  # Only log as many meds as pills detected
+
+                try:
+                    med_doc = db.medications.find_one({"_id": ObjectId(med_id)})
+                    if not med_doc:
+                        print(f"[Pipeline] [DB-Log-Batch] Medication {med_id} not found")
+                        continue
+
+                    user_id = med_doc["user_id"]
+
+                    # Skip if already logged
+                    existing = db.medication_logs.find_one({
+                        "medication_id": ObjectId(med_id),
+                        "user_id": ObjectId(str(user_id)),
+                        "scheduled_time": scheduled_dt,
+                    })
+                    if existing:
+                        print(f"[Pipeline] [DB-Log-Batch] Already logged {med_doc.get('name', med_id)}")
+                        continue
+
+                    log_doc = {
+                        "user_id": ObjectId(str(user_id)),
+                        "medication_id": ObjectId(med_id),
+                        "scheduled_time": scheduled_dt,
+                        "status": status,
+                        "verification_method": "Camera",
+                        "confidence_score": round(confidence, 3),
+                        "keyframe_id": keyframe_id,
+                        "taken_at": ts_now if status == "taken" else None,
+                        "notes": f"AI batch detection ({pills_to_log} pills seen, confidence: {confidence:.1%})",
+                        "created_at": ts_now,
+                        "updated_at": ts_now,
+                    }
+                    db.medication_logs.insert_one(log_doc)
+                    logged_count += 1
+                    print(f"[Pipeline] [DB-Log-Batch] ✓ {med_doc.get('name', med_id)} logged as {status.upper()} "
+                          f"({logged_count}/{pills_to_log} pills, conf={confidence:.2f})")
+                except Exception as ex:
+                    print(f"[Pipeline] [DB-Log-Batch] Error for {med_id}: {ex}")
+
+            if logged_count < pills_to_log:
+                print(f"[Pipeline] [DB-Log-Batch] Only {logged_count}/{pills_to_log} meds logged "
+                      f"(remaining meds may already be logged or not found)")
+
+            client.close()
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log-Batch] Fatal error: {e}")
+
+    def _tag_detection_keyframes(self, result, confidence, status):
+        """
+        After a successful detection, tag ONLY the 3 best-evidence keyframes
+        (one per phase) with medicine_taken=True and phase_role metadata.
+        These tagged frames appear on the Keyframe Audit page and Memory Search.
+
+        Phase 1 (pill visible): best pill-in-hand frame
+        Phase 2 (grip/motion): best grip or upward-motion frame
+        Phase 3 (pill gone):   best frame showing pill has disappeared
+        """
+        try:
+            pd = result.get("phase_details", {})
+            p1 = pd.get("phase1_medicine_visible", {})
+            p2 = pd.get("phase2_grip_and_motion", {})
+            p3 = pd.get("phase3_medicine_gone", {})
+
+            # Collect the best keyframe ID per phase
+            best_frames = {
+                "phase1_pill_visible": p1.get("keyframe_id"),
+                "phase2_grip_motion": p2.get("keyframe_id"),
+                "phase3_pill_gone": p3.get("keyframe_id"),
+            }
+
+            # Look up medication names for tagging
+            med_names = []
+            if self.medication_ids:
+                try:
+                    from pymongo import MongoClient
+                    from bson import ObjectId
+                    client = MongoClient("mongodb://localhost:27017")
+                    db = client["locusDB"]
+                    for mid in self.medication_ids:
+                        doc = db.medications.find_one({"_id": ObjectId(mid)})
+                        if doc:
+                            med_names.append(doc.get("name", "Unknown"))
+                    client.close()
+                except Exception:
+                    pass
+
+            med_name = ", ".join(med_names) if med_names else "Unknown"
+            med_id = self.medication_ids[0] if self.medication_ids else ""
+
+            tagged = 0
+            for phase_role, kf_id in best_frames.items():
+                if not kf_id:
+                    continue
+                if self.extractor.storage:
+                    # Use enhanced tagging with medicine_taken and phase_role
+                    meta_path = os.path.join(self.extractor.storage.storage_dir, f"{kf_id}.json")
+                    if not os.path.exists(meta_path):
+                        continue
+                    try:
+                        import json as _json
+                        with open(meta_path, "r") as f:
+                            meta = _json.load(f)
+                        meta["medication_detected"] = True
+                        meta["medicine_taken"] = True
+                        meta["detection_confidence"] = round(confidence, 3)
+                        meta["detection_status"] = status
+                        meta["medication_name"] = med_name
+                        meta["medication_id"] = med_id
+                        meta["phase_role"] = phase_role
+                        meta["phase_score"] = round(pd.get(phase_role.replace("phase1_pill_visible", "phase1_medicine_visible")
+                                                          .replace("phase2_grip_motion", "phase2_grip_and_motion")
+                                                          .replace("phase3_pill_gone", "phase3_medicine_gone"), {})
+                                                    .get("score", 0.0), 3)
+                        meta["detected_at"] = datetime.now(timezone.utc).isoformat()
+                        with open(meta_path, "w") as f:
+                            _json.dump(meta, f, indent=2)
+                        tagged += 1
+                        print(f"[Pipeline] Tagged {kf_id} as {phase_role} (medicine_taken=true)")
+                    except Exception as e:
+                        print(f"[Pipeline] Tag error for {kf_id}: {e}")
+
+            print(f"[Pipeline] Tagged {tagged}/3 best-evidence keyframes (medicine_taken=true)")
+        except Exception as e:
+            print(f"[Pipeline] Keyframe tagging error: {e}")
 
     # ── Spatial Overlap: Pill-in-Hand Check ───────────────────────────
 
@@ -109,19 +343,24 @@ class MedicationDetectionPipeline:
         Processes frames one-by-one in temporal order, advancing through
         three states. Each phase locks its BEST score independently:
 
-          State 1 → Medicine visible
+          State 1 → Medicine visible (pass ≥ 0.60 AND pill-in-hand)
             Scan frames for pill detection. Lock the best pill score.
-            Advance to State 2 once medicine is confirmed (score ≥ 0.45).
+            Advance to State 2 once medicine is confirmed.
 
-          State 2 → Grip / motion detected
+          State 2 → Grip / motion detected (pass ≥ 0.45)
             After medicine is found, scan for hand grip or upward motion.
             Lock the best gesture score.
-            Advance to State 3 once motion is confirmed (score ≥ 0.30).
 
-          State 3 → Medicine gone (hand reappears empty)
-            After motion, wait for a hand to reappear in frame.
-            Check if the pill is still visible — if not, medicine was taken.
-            Lock the best "medicine gone" evidence.
+          State 3 → Medicine gone (pass ≥ 0.50)
+            After motion, compare early vs late frames.
+            If pill visible early but gone late → medicine was taken.
+
+        Final confidence = avg(weighted_sum, min_phase_score).
+        The WEAKEST phase constrains the result — a single failed
+        phase drags the entire confidence down. Per-phase minimums
+        gate each verification tier:
+          Auto-verify (≥0.85): every phase ≥ 0.50
+          Needs confirmation (≥0.65): every phase ≥ 0.35
 
         Returns (confidence, phase_details) tuple.
         """
@@ -170,7 +409,9 @@ class MedicationDetectionPipeline:
                 best_in_hand_count = in_hand_count
 
         phase1_score = best_pill
-        phase1_pass = phase1_score >= 0.60
+        # Phase 1 REQUIRES pill spatially overlapping a hand to pass.
+        # This eliminates false positives from random objects on tables.
+        phase1_pass = phase1_score >= 0.60 and hand_with_pill
 
         # ── Phase 2: Best grip/motion AFTER medicine was first seen ────
         best_gesture = 0.0
@@ -194,7 +435,7 @@ class MedicationDetectionPipeline:
                 motion_frame = i
 
         phase2_score = min(1.0, best_gesture)
-        phase2_pass = phase2_score >= 0.30
+        phase2_pass = phase2_score >= 0.45
 
         # ── Phase 3: Check if medicine is GONE ──────────────────────────
         # Instead of only looking after motion_frame (which may be the last
@@ -205,6 +446,7 @@ class MedicationDetectionPipeline:
         pill_after_motion = 0.0
         hand_returned = False
         frames_after_motion = 0
+        best_gone_frame = n - 1  # default to last frame
 
         # Strategy 1: Early-vs-Late comparison (more robust)
         # Early = first 1/3 (where pill should be visible)
@@ -249,6 +491,14 @@ class MedicationDetectionPipeline:
             if late_pill_max < 0.30:
                 # Pill clearly gone in late frames → strong evidence
                 phase3_score = min(1.0, pill_drop / early_pill_max) if early_pill_max > 0 else 0.0
+                # Pick the late frame with the lowest pill score as best evidence
+                best_gone_score = 1.0
+                for i in late_frames:
+                    det = batch_detections[i]
+                    ps = max((d["confidence"] for d in det["detections"]), default=0.0)
+                    if ps < best_gone_score:
+                        best_gone_score = ps
+                        best_gone_frame = i
                 print(f"  [Phase3] Pill gone! early={early_pill_max:.2f} late={late_pill_max:.2f} drop={pill_drop:.2f}")
             elif post_motion_pill < 0.30 and frames_after_motion >= 2:
                 # Late frames still have pill but post-motion frames don't
@@ -272,14 +522,39 @@ class MedicationDetectionPipeline:
         phase3_pass = phase3_score >= 0.50
 
         # ── Final Confidence ──────────────────────────────────────────
+        # The weakest phase CONSTRAINS the overall confidence.
+        # A weighted average alone lets strong phases mask failed ones
+        # (e.g. P1=1.0, P2=1.0, P3=0.0 → 0.65 — wrongly passes confirm).
+        # Now: confidence = avg(weighted_sum, min_phase), so a single
+        # failed phase drags the entire score down.
         phases_passed = sum([phase1_pass, phase2_pass, phase3_pass])
-        confidence = (phase1_score * 0.35 + phase2_score * 0.30 + phase3_score * 0.35)
 
-        # All 3 phases must pass for auto-verification level confidence.
+        weighted_avg = (phase1_score * 0.35 + phase2_score * 0.30 + phase3_score * 0.35)
+        min_phase = min(phase1_score, phase2_score, phase3_score)
+
+        # Blend: 70% weighted average, 30% weakest phase.
+        # This ensures strong overall evidence dominates while a single
+        # failed phase still drags the score down meaningfully.
+        # Example: P1=0.725, P2=1.0, P3=1.0 → 0.7*0.904 + 0.3*0.725 = 0.851 ✓
+        # Example: P1=1.0,   P2=1.0, P3=0.0 → 0.7*0.650 + 0.3*0.000 = 0.455 ✗
+        confidence = (weighted_avg * 0.70) + (min_phase * 0.30)
+
+        # Hard gate: all 3 phases must individually pass their thresholds
         if phases_passed < 3:
             confidence = min(confidence, 0.60)
         if phases_passed < 2:
             confidence = min(confidence, 0.35)
+
+        # Per-phase minimums for each verification tier:
+        #   Auto-verify (≥0.85): every phase must score ≥ 0.50
+        #   Needs confirmation (≥0.65): every phase must score ≥ 0.35
+        if min_phase < 0.50:
+            confidence = min(confidence, 0.84)   # block auto-verify
+        if min_phase < 0.35:
+            confidence = min(confidence, 0.64)   # block needs_confirmation
+
+        print(f"  [Confidence] weighted_avg={weighted_avg:.3f} min_phase={min_phase:.3f} "
+              f"→ blended={confidence:.3f} phases_passed={phases_passed}/3")
 
         phase_details = {
             "phase1_medicine_visible": {
@@ -305,8 +580,11 @@ class MedicationDetectionPipeline:
                 "pill_drop": float(round(max(0, best_pill - pill_after_motion), 3)),
                 "hand_returned": bool(hand_returned),
                 "frames_after": int(frames_after_motion),
+                "gone_frame": int(best_gone_frame),
             },
             "phases_passed": int(phases_passed),
+            "min_phase_score": float(round(min_phase, 3)),
+            "weighted_avg": float(round(weighted_avg, 3)),
         }
 
         return round(float(confidence), 3), phase_details
@@ -354,10 +632,28 @@ class MedicationDetectionPipeline:
         batch_detections = self.detector.detect_batch(frames)
         batch_gestures   = self.gesture.analyze_batch(frames)
 
+
         # Compute temporal confidence using phase analysis
         confidence, phase_details = self.compute_temporal_confidence(
             batch_detections, batch_gestures
         )
+
+        # Attach the best keyframe ID per phase from the frames analyzed
+        p1 = phase_details.get("phase1_medicine_visible", {})
+        p2 = phase_details.get("phase2_grip_and_motion", {})
+        p3 = phase_details.get("phase3_medicine_gone", {})
+
+        pf_idx = p1.get("pill_frame", -1)
+        if 0 <= pf_idx < len(frames):
+            p1["keyframe_id"] = frames[pf_idx]["id"]
+
+        mf_idx = p2.get("motion_frame", -1)
+        if 0 <= mf_idx < len(frames):
+            p2["keyframe_id"] = frames[mf_idx]["id"]
+
+        gf_idx = p3.get("gone_frame", -1)
+        if 0 <= gf_idx < len(frames):
+            p3["keyframe_id"] = frames[gf_idx]["id"]
 
         # Classify the event
         classification = self.classify_event(confidence)
@@ -386,25 +682,91 @@ class MedicationDetectionPipeline:
         # Phase 1 (pill in hand) + Phase 2 (grip/motion) + Phase 3 (pill gone)
         in_hand_count = phase_details.get("phase1_medicine_visible", {}).get("in_hand_count", 0)
 
-        if phase_details["phases_passed"] == 3 and classification["classification"] in ("auto_verified", "needs_confirmation"):
+        # ── Save keyframes based on confidence tier ─────────────────────
+        # >= 85%  (auto_verified):      save + immediately log as taken
+        # >= 65%  (needs_confirmation): save + log as needs_verification (user confirms)
+        # <  65%:                        no save, no log
+        if phase_details["phases_passed"] == 3 and confidence >= THRESHOLD_CONFIRM:
+            try:
+                import cv2, os, json as _json
+                os.makedirs("keyframe_storage", exist_ok=True)
+                label = "AUTO" if confidence >= THRESHOLD_AUTO_VERIFY else "MANUAL"
+                for idx, (f_item, det, gest) in enumerate(zip(frames, batch_detections, batch_gestures)):
+                    dbg = f_item["frame"].copy()
+                    for d in det.get("detections", []):
+                        b = d["bbox"]
+                        x1, y1, x2, y2 = int(b["x1"]), int(b["y1"]), int(b["x2"]), int(b["y2"])
+                        cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(dbg, f"pill {d['confidence']:.2f}", (x1, max(y1-8, 0)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    for hb in gest.get("hand_boxes", []):
+                        x1, y1, x2, y2 = int(hb["x1"]), int(hb["y1"]), int(hb["x2"]), int(hb["y2"])
+                        cv2.rectangle(dbg, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                    cv2.putText(dbg, f"Frame {idx:02d} | [{label}] conf:{confidence:.2f}", (8, 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    cv2.imwrite(f"keyframe_storage/verified_frame_{idx:02d}.jpg", dbg)
+                with open("keyframe_storage/latest_analysis.json", "w") as jf:
+                    _json.dump(result, jf, indent=4)
+                print(f"[Pipeline] Saved {len(frames)} frames [{label}] + analysis JSON (conf={confidence:.2f})")
+            except Exception as _e:
+                print(f"[Pipeline] Frame save error: {_e}")
+
+        if phase_details["phases_passed"] == 3 and confidence >= THRESHOLD_AUTO_VERIFY:
+            # ── Batch pill detection: mark exactly as many meds as pills seen ──
+            # If 2 pills seen in hand and 2 meds scheduled → both taken
+            # If 1 pill seen in hand and 2 meds scheduled → only 1 taken now,
+            #   the other stays pending for a second detection or gets missed at window end
             pills_counted = max(1, in_hand_count)
+            # Cap at expected remaining so we don't over-count
+            remaining = max(0, self.expected_medicine_count - self.medicines_taken_count)
+            pills_to_log = min(pills_counted, remaining) if remaining > 0 else pills_counted
 
             event = {
                 "timestamp": result["timestamp"],
-                "pill_count": pills_counted,
+                "pill_count": pills_to_log,
                 "confidence": confidence,
                 "classification": classification["classification"],
             }
             self.medicines_detected_this_session.append(event)
-            self.medicines_taken_count += pills_counted
-            print(f"[Pipeline] Medicine taken! Count: {self.medicines_taken_count} "
-                  f"(+{pills_counted} this detection, {in_hand_count} pills seen in hand)")
+            self.medicines_taken_count += pills_to_log
+            print(f"[Pipeline] Medicine auto-verified! Count: {self.medicines_taken_count} "
+                  f"(+{pills_to_log} this detection, {in_hand_count} pills seen in hand)")
+
+            # ── Real-time DB logging: log exactly pills_to_log medications ──
+            # Instead of logging ALL medication_ids, only log the first N
+            # where N = pills_to_log. This ensures that if 1 pill is seen,
+            # only 1 med is marked taken; if 2 pills, both are marked taken.
+            self._log_detection_to_db_batch(
+                status="taken",
+                confidence=confidence,
+                pills_to_log=pills_to_log,
+                keyframe_id=phase_details.get("phase1_medicine_visible", {}).get("keyframe_id"),
+            )
+
+            # ── Tag keyframes used in this detection ──
+            self._tag_detection_keyframes(result, confidence, "taken")
+
+        elif phase_details["phases_passed"] == 3 and confidence >= THRESHOLD_CONFIRM:
+            # needs_confirmation tier — log ALL meds for user to manually verify
+            self._log_detection_to_db(
+                status="needs_verification",
+                confidence=confidence,
+                keyframe_id=phase_details.get("phase1_medicine_visible", {}).get("keyframe_id"),
+            )
+
+            # ── Tag keyframes used in this detection ──
+            self._tag_detection_keyframes(result, confidence, "needs_verification")
 
         # Add counter to result
         result["medicines_taken_count"] = self.medicines_taken_count
         result["medicines_detected_this_session"] = self.medicines_detected_this_session
         result["expected_medicine_count"] = self.expected_medicine_count
         result["medicines_remaining"] = max(0, self.expected_medicine_count - self.medicines_taken_count)
+
+        # Hands-free Auto-Shutdown: Stop immediately if goal is reached
+        if self.expected_medicine_count > 0 and self.medicines_taken_count >= self.expected_medicine_count:
+            print(f"[Pipeline] Goal reached! ({self.medicines_taken_count}/{self.expected_medicine_count}). Shutting down automatically.")
+            self.stop()
 
         # Smart result caching (Peak Evidence Locking):
         # We prioritize results that have more phases passed (temporal sequence completeness).
@@ -423,11 +785,11 @@ class MedicationDetectionPipeline:
         if should_update:
             self.last_result = result
 
-        # Buffer management: If all 3 phases passed, clear for next event
-        if current_phases == 3:
+        # Buffer management: If all 3 phases passed and confidence >= 65%, clear for next event
+        if current_phases == 3 and result["final_confidence"] >= THRESHOLD_CONFIRM:
             with self.extractor._lock:
                 self.extractor.buffer.clear()
-            print(f"[Pipeline] Peak evidence locked ({current_phases}/3 phases) - buffer cleared for next detection cycle")
+            print(f"[Pipeline] Detection complete ({current_phases}/3 phases, conf={result['final_confidence']:.2f}) — buffer cleared for next dose")
 
         return result
 
@@ -480,16 +842,22 @@ class MedicationDetectionPipeline:
 
         # Pill found — check for hand or motion
         gesture = self.gesture.analyze_frame(frame)
-        if gesture["hands_detected"] == 0:
+        hands_detected = gesture["hands_detected"]
+        
+        if hands_detected == 0:
+            # print(f"[QuickScan] Pill detected ({len(detections)}), but no hands found.")
             return False
 
         # Trigger if pill overlaps hand OR upward motion detected
-        pill_in_hand, _, _ = self.is_pill_in_hand(detections, gesture)
+        pill_in_hand, overlap, _ = self.is_pill_in_hand(detections, gesture)
         has_motion = gesture["upward_motion_score"] > 0.3
+
+        # print(f"[QuickScan] Pill: {len(detections)} | Hands: {hands_detected} | "
+        #       f"Pill-in-hand: {pill_in_hand} (overlap={overlap:.2f}) | Motion: {has_motion} (score={gesture['upward_motion_score']:.2f})")
 
         return pill_in_hand or has_motion
 
-    def is_within_schedule_window(self, scheduled_times, window_minutes=15):
+    def is_within_schedule_window(self, scheduled_times, window_minutes=180):
         """
         Check if current time is within ±window_minutes of any scheduled time.
         scheduled_times: list of "HH:MM" strings, e.g. ["08:00", "20:00"]
@@ -498,7 +866,7 @@ class MedicationDetectionPipeline:
         if not scheduled_times:
             return True  # no schedule = always active
 
-        from datetime import datetime, timedelta
+        # datetime and timedelta are imported at module level
         now = datetime.now()
         current_minutes = now.hour * 60 + now.minute
 
@@ -526,7 +894,7 @@ class MedicationDetectionPipeline:
         3. Only if pill-in-hand detected: trigger full analyze_buffer()
         4. Time-aware: only scan during ±15 min of scheduled medication times
 
-        source=0 for webcam, or path to video file.
+        source=0 for webcam, or path to video file, or RTSP/RTMP URL.
         scheduled_times: list of "HH:MM" strings for when meds are expected.
         """
         print(f"Starting medication detection pipeline on source: {source}")
@@ -537,9 +905,12 @@ class MedicationDetectionPipeline:
         try:
             import cv2
             import time
-            cap = cv2.VideoCapture(source)
-            if not cap.isOpened():
-                raise RuntimeError(f"Cannot open video source: {source}")
+
+            # Use the threaded VideoSource for all sources — it handles
+            # webcam, GoPro WiFi, RTSP/RTMP streams with proper buffer
+            # draining to prevent latency buildup on live streams.
+            cap = VideoSource(source)
+            cap.open()
 
             frame_count = 0
             scan_every = 30        # quick scan every ~1 sec at 30fps
@@ -549,13 +920,29 @@ class MedicationDetectionPipeline:
             while self.is_running:
                 ret, frame = cap.read()
                 if not ret:
-                    print(f"End of video source (total frames: {frame_count})")
-                    self.is_running = False
-
-                    # Cleanup happens in the 'finally' block below
-                    break
+                    # Stream dropped — always reconnect regardless of frame count
+                    self.camera_online = False
+                    if frame_count == 0:
+                        print(f"[Pipeline] ⚠ Could not read from {source}. Retrying in 5s...")
+                    else:
+                        print(f"[Pipeline] ⚠ Stream dropped after {frame_count} frames. Reconnecting in 5s...")
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+                    time.sleep(5)
+                    try:
+                        cap = VideoSource(source)
+                        cap.open()
+                    except Exception as e:
+                        print(f"[Pipeline] Reconnect failed: {e}. Will retry...")
+                    continue
+                else:
+                    self.camera_online = True
 
                 frame_count += 1
+                if frame_count % 30 == 0:
+                    print(f"[Pipeline] Heartbeat: Receiving frames from {source}... (Total: {frame_count})")
 
                 # Yield GIL so uvicorn can serve HTTP requests
                 time.sleep(0.001)
@@ -576,35 +963,43 @@ class MedicationDetectionPipeline:
 
                 # Step 4: Full analysis only when pill was seen in hand
                 # Run in background thread so frame reading doesn't freeze
-                if pill_seen and (frame_count - last_full_analysis) >= 90 and not self._analyzing:
-                    last_full_analysis = frame_count
+                if pill_seen and not self._analyzing:
+                    if last_full_analysis == 0 or (frame_count - last_full_analysis) >= 90:
+                        last_full_analysis = frame_count
 
-                    def _run_analysis():
-                        self._analyzing = True
-                        try:
-                            result = self.analyze_buffer()
-                            if result:
-                                pd = result.get("phase_details", {})
-                                p1 = pd.get("phase1_medicine_visible", {})
-                                p2 = pd.get("phase2_grip_and_motion", {})
-                                p3 = pd.get("phase3_medicine_gone", {})
-                                fq = result.get("frame_quality", {})
-                                print(f"\n--- Detection Analysis ---")
-                                print(f"Frames analyzed: {result['frames_analyzed']} | Avg blur: {fq.get('avg_blur_score', 0):.1f}")
-                                print(f"Phase 1 (pill visible):  score={p1.get('score', 0):.2f}  pill={p1.get('pill_score', 0):.2f}")
-                                print(f"Phase 2 (grip/motion):   score={p2.get('score', 0):.2f}  grip={p2.get('grip', 0):.2f}  motion={p2.get('motion', 0):.2f}")
-                                print(f"Phase 3 (pill gone):     score={p3.get('score', 0):.2f}  drop={p3.get('pill_drop', 0):.2f}")
-                                print(f"Phases passed:  {pd.get('phases_passed', 0)}/3")
-                                print(f"Confidence:     {result['final_confidence']}")
-                                print(f"Classification: {result['classification']}")
-                                print(f"Action:         {result['action']}")
-                                print(f"--------------------------\n")
+                        def _run_analysis():
+                            self._analyzing = True
+                            try:
+                                result = self.analyze_buffer()
+                                if result:
+                                    pd = result.get("phase_details", {})
+                                    p1 = pd.get("phase1_medicine_visible", {})
+                                    p2 = pd.get("phase2_grip_and_motion", {})
+                                    p3 = pd.get("phase3_medicine_gone", {})
+                                    fq = result.get("frame_quality", {})
+                                    print(f"\n--- Detection Analysis ---")
+                                    print(f"Frames analyzed: {result['frames_analyzed']} | Avg blur: {fq.get('avg_blur_score', 0):.1f}")
+                                    print(f"Phase 1 (pill visible):  score={p1.get('score', 0):.2f}  pill={p1.get('pill_score', 0):.2f}")
+                                    print(f"Phase 2 (grip/motion):   score={p2.get('score', 0):.2f}  grip={p2.get('grip', 0):.2f}  motion={p2.get('motion', 0):.2f}")
+                                    print(f"Phase 3 (pill gone):     score={p3.get('score', 0):.2f}  drop={p3.get('pill_drop', 0):.2f}")
+                                    print(f"Phases passed:  {pd.get('phases_passed', 0)}/3")
+                                    print(f"Confidence:     {result['final_confidence']}")
+                                    print(f"Classification: {result['classification']}")
+                                    print(f"Action:         {result['action']}")
+                                    print(f"--------------------------\n")
 
-                                # Reset trigger if medicine was taken
-                                if result['action'] != 'discard':
-                                    pass # cannot reset local pill_seen from thread, handled next frame
-                        finally:
-                            self._analyzing = False
+                                    # Reset pill_seen after confirmed detection so pipeline
+                                    # keeps watching for the next dose all day
+                                    conf = result.get('final_confidence', 0)
+                                    phases = result.get('phase_details', {}).get('phases_passed', 0)
+                                    if phases == 3 and conf >= THRESHOLD_CONFIRM:
+                                        pill_seen = False
+                                        print('[Pipeline] Detection cycle complete (conf=' + f'{conf:.2f}' + ') - watching for next dose')
+                            except Exception as e:
+                                import traceback
+                                print('[Pipeline Error] ' + traceback.format_exc())
+                            finally:
+                                self._analyzing = False
 
                     import threading
                     threading.Thread(target=_run_analysis, daemon=True).start()
@@ -651,15 +1046,25 @@ class MedicationDetectionPipeline:
                     #   >= 0.85  -> taken (auto-verified)
                     #   >= 0.65  -> needs_verification (elderly user confirms)
                     #   <  0.65  -> missed
-                    if conf >= 0.845:
+                    if conf >= THRESHOLD_AUTO_VERIFY:
                         final_status = "taken"
-                    elif conf >= 0.65:
+                    elif conf >= THRESHOLD_CONFIRM:
                         final_status = "needs_verification"
                     else:
                         final_status = "missed"
                         
-                    # CRITICAL FIX: If the number of pills visually detected and swallowed
-                    # is fewer than what was scheduled, we cannot assume all were taken.
+                    # CRITICAL FIX: Do not overwrite a successful session with 'missed'!
+                    # If we already detected the expected medicines, the final status is success.
+                    if self.expected_medicine_count > 0 and self.medicines_taken_count >= self.expected_medicine_count:
+                        final_status = "taken"
+                        
+                    # CRITICAL FIX 2: Only post the FINAL status if it's NOT missed,
+                    # OR if we haven't logged anything yet. (Since batch logging already posts in real-time)
+                    if final_status == "missed" and self.medicines_taken_count > 0:
+                        print(f"[Pipeline] Final status is missed, but we already took {self.medicines_taken_count} meds. Skipping duplicate 'missed' log.")
+                        skip_final_log = True
+                    else:
+                        skip_final_log = False
                     # Downgrade to needs_verification to force manual clarification!
                     if final_status == "taken" and getattr(self, 'expected_medicine_count', 0) > 0:
                         taken_count = self.last_result.get('medicines_taken_count', 0)
@@ -678,36 +1083,36 @@ class MedicationDetectionPipeline:
                     print(f"Medicines taken:  {self.last_result.get('medicines_taken_count', 0)}")
                     print(f"Final Status:     {final_status}")
                     print(f"{'='*60}\n")
-                    
-                    # POST to backend for each identified medication at this time
-                    import requests
-                    from datetime import datetime
-                    sched_str = self.scheduled_time
-                    if len(sched_str) <= 5:  # e.g. "08:00"
-                        local_dt = datetime.strptime(f"{datetime.now().strftime('%Y-%m-%d')} {sched_str}", "%Y-%m-%d %H:%M")
-                        utc_dt = datetime.utcfromtimestamp(local_dt.timestamp())
-                        sched_str = utc_dt.isoformat() + ".000Z"
-                        
-                    headers = {"Authorization": f"Bearer {self.token}"} if getattr(self, 'token', None) else {"x-internal": "true"}
-                    
-                    for med_id in self.medication_ids:
-                        try:
-                            payload = {
-                                "medication_id": med_id,
-                                "scheduled_time": sched_str,
-                                "status": final_status,
-                                "verification_method": "visual",
-                                "confidence_score": conf
-                            }
-                            print(f"[{med_id}] Automatically pushing result to database: {final_status}")
+                    if not skip_final_log:
+                        # POST to backend for each identified medication at this time
+                        import requests
+                        sched_str = self.scheduled_time
+                        if len(sched_str) <= 5:  # e.g. "08:00"
+                            local_dt = datetime.strptime(f"{datetime.now().strftime('%Y-%m-%d')} {sched_str}", "%Y-%m-%d %H:%M")
+                            utc_dt = datetime.utcfromtimestamp(local_dt.timestamp())
+                            sched_str = utc_dt.isoformat() + ".000Z"
                             
-                            res = requests.post(f"{self.api_base}/api/medications/logs/", json=payload, headers=headers, timeout=5)
-                            if res.status_code >= 400:
-                                print(f"[{med_id}] [Error] Failed to post auto-log. HTTP {res.status_code}: {res.text}")
-                            else:
-                                print(f"[{med_id}] [Success] Auto-log posted. HTTP {res.status_code}")
-                        except Exception as ex:
-                            print(f"[{med_id}] Failed to post auto-log: {ex}")
+                        headers = {"Authorization": f"Bearer {self.token}"} if getattr(self, 'token', None) else {"x-internal": "true"}
+                        
+                        for med_id in self.medication_ids:
+                            try:
+                                payload = {
+                                    "medication_id": med_id,
+                                    "scheduled_time": sched_str,
+                                    "status": final_status,
+                                    "verification_method": "visual",
+                                    "confidence_score": conf,
+                                    "keyframe_id": self.last_result.get("best_keyframe_id")
+                                }
+                                print(f"[{med_id}] Automatically pushing result to database: {final_status}")
+                                
+                                res = requests.post(f"{self.api_base}/api/medications/logs/", json=payload, headers=headers, timeout=5)
+                                if res.status_code >= 400:
+                                    print(f"[{med_id}] [Error] Failed to post auto-log. HTTP {res.status_code}: {res.text}")
+                                else:
+                                    print(f"[{med_id}] [Success] Auto-log posted. HTTP {res.status_code}")
+                            except Exception as ex:
+                                print(f"[{med_id}] Failed to post auto-log: {ex}")
                 else:
                     print("[Pipeline] Final analysis: no frames in buffer to analyze and no cached result")
             except Exception as e:
@@ -715,8 +1120,11 @@ class MedicationDetectionPipeline:
 
             # Clean up resources
             cap.release()
-            cv2.destroyAllWindows()
-            self.gesture.close()
+            if display:
+                try:
+                    cv2.destroyAllWindows()
+                except Exception:
+                    pass
 
             # Check for skipped medicines and send notification
             self.check_for_skipped_medicines()
@@ -768,5 +1176,4 @@ class MedicationDetectionPipeline:
             print(f"[Pipeline] ✓ All {expected} expected medicines taken. No skips.")
 
     def stop(self):
-        self.is_running = False
         self.is_running = False

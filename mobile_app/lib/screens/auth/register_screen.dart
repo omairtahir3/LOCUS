@@ -54,11 +54,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 20),
-              Center(child: Image.asset('assets/images/logo.png', height: 48)),
-              const SizedBox(height: 12),
-              Text('Create Account', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700), textAlign: TextAlign.center),
-              const SizedBox(height: 4),
-              Text('Choose your account type', style: TextStyle(color: AppColors.textSecondary, fontSize: 14), textAlign: TextAlign.center),
+              Center(child: Image.asset('assets/images/logo.png', height: 60)),
+              const SizedBox(height: 24),
+              Text('Create Account', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text('Choose your account type', style: TextStyle(color: AppColors.textSecondary, fontSize: 15), textAlign: TextAlign.center),
               const SizedBox(height: 24),
 
               // Role selector
@@ -118,9 +118,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primaryLight : AppColors.surface,
+          color: isSelected ? AppColors.primaryLight : Colors.white,
           border: Border.all(color: isSelected ? AppColors.primary : AppColors.border, width: isSelected ? 2 : 1),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: isSelected ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))] : null,
         ),
         child: Row(
           children: [

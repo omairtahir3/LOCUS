@@ -192,14 +192,14 @@ async def get_verification_events(user_id: str, limit: int = 20, db=Depends(get_
             "_id": str(log["_id"]),
             "medication_name": med["name"] if med else "Unknown",
             "dosage": med.get("dosage", "") if med else "",
-            "scheduled_time": log.get("scheduled_time").isoformat() if log.get("scheduled_time") else None,
-            "taken_at": log.get("taken_at").isoformat() if log.get("taken_at") else None,
+            "scheduled_time": log.get("scheduled_time").isoformat() + "Z" if log.get("scheduled_time") else None,
+            "taken_at": log.get("taken_at").isoformat() + "Z" if log.get("taken_at") else None,
             "status": log.get("status"),
             "confidence_score": conf,
             "classification": classification,
             "action": action,
             "keyframe_id": log.get("keyframe_id"),
-            "created_at": log.get("created_at").isoformat() if log.get("created_at") else None
+            "created_at": log.get("created_at").isoformat() + "Z" if log.get("created_at") else None
         })
         
     return JSONResponse(content=events)

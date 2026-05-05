@@ -7,17 +7,38 @@ Medication Scheduler — Background service that:
 """
 
 import asyncio
+import os
 import threading
 from datetime import datetime, timedelta
+from bson import ObjectId
 from database import get_db
 from ai.pipeline import MedicationDetectionPipeline
+
+# Optional GoPro auto-control via Open GoPro API
+_gopro_session = None
+
+
+def _get_camera_source():
+    """Read CAMERA_SOURCE from env. Returns int index or string path."""
+    raw = os.environ.get("CAMERA_SOURCE", "0")
+    try:
+        return int(raw)
+    except ValueError:
+        return raw  # could be a video file path or RTSP URL
 
 # ─── Scheduler State ─────────────────────────────────────────────────────────
 
 _scheduler_running = False
 _active_session = None   # Current verification session
-_pipeline = None
+_pipeline = None         # Set by register_pipeline() from main.py startup
 _pipeline_thread = None
+
+
+def register_pipeline(pipeline_instance):
+    """Called from main.py after the always-on pipeline starts."""
+    global _pipeline
+    _pipeline = pipeline_instance
+    print("[Scheduler] Always-on pipeline registered")
 
 
 class VerificationSession:
@@ -28,15 +49,23 @@ class VerificationSession:
         self.medications = medications       # list of med docs from DB
         self.expected_count = expected_count  # total pills expected
         self.started_at = datetime.now()
-        self.window_minutes = 10
+        self.window_minutes = 180  # 3-hour verification window
         self.status = "verifying"            # verifying | taken | missed
         self.medicines_taken = 0
         self.pipeline_started = False
+        self.camera_ever_connected = False   # True once camera feeds at least one frame
+
+        # Compute the REAL deadline from the scheduled time, not from
+        # when this session object was created.  A med at 02:30 always
+        # expires at 05:30 regardless of when the scheduler picks it up.
+        sh, sm = map(int, time_slot.split(":"))
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.scheduled_datetime = today.replace(hour=sh, minute=sm)
+        self.window_deadline = self.scheduled_datetime + timedelta(minutes=self.window_minutes)
 
     @property
     def time_remaining(self):
-        elapsed = (datetime.now() - self.started_at).total_seconds()
-        remaining = (self.window_minutes * 60) - elapsed
+        remaining = (self.window_deadline - datetime.now()).total_seconds()
         return max(0, remaining)
 
     @property
@@ -53,6 +82,7 @@ class VerificationSession:
             "expected_count": self.expected_count,
             "medicines_taken": self.medicines_taken,
             "started_at": self.started_at.isoformat(),
+            "window_deadline": self.window_deadline.isoformat(),
             "time_remaining_seconds": round(self.time_remaining),
             "status": self.status,
         }
@@ -66,8 +96,8 @@ def _get_current_time_slot():
     return f"{now.hour:02d}:{now.minute:02d}"
 
 
-def _is_time_match(scheduled_time, current_time, tolerance_minutes=2):
-    """Check if current time is within ±tolerance of scheduled time."""
+def _is_time_match(scheduled_time, current_time, tolerance_minutes=180):
+    """Check if current time is within ±tolerance of scheduled time (trigger only)."""
     try:
         sh, sm = map(int, scheduled_time.split(":"))
         ch, cm = map(int, current_time.split(":"))
@@ -81,32 +111,25 @@ def _is_time_match(scheduled_time, current_time, tolerance_minutes=2):
 
 
 def _start_pipeline_for_session(session):
-    """Start the AI detection pipeline for a verification session."""
-    global _pipeline, _pipeline_thread
+    """
+    Update the always-on pipeline with the current session's medication context.
+    The pipeline is already running 24/7 from main.py startup.
+    We just tell it which medications to log when it detects an intake.
+    """
+    global _pipeline
 
     if _pipeline and _pipeline.is_running:
-        print("[Scheduler] Pipeline already running, skipping")
-        return
-
-    _pipeline = MedicationDetectionPipeline(
-        api_base_url="http://localhost:5000",
-        expected_medicine_count=session.expected_count
-    )
-
-    scheduled_times = [session.time_slot]
-
-    def run():
-        _pipeline.run_on_video(
-            source=0,  # webcam for now, will switch to GoPro later
-            display=False,
-            scheduled_times=scheduled_times
-        )
-
-    _pipeline_thread = threading.Thread(target=run, daemon=True)
-    _pipeline_thread.start()
-    session.pipeline_started = True
-    print(f"[Scheduler] Pipeline started for time slot {session.time_slot} "
-          f"({session.expected_count} medicines expected)")
+        _pipeline.medication_ids = [str(med["_id"]) for med in session.medications]
+        _pipeline.scheduled_time = session.time_slot
+        _pipeline.expected_medicine_count = session.expected_count
+        _pipeline.medicines_taken_count = 0
+        _pipeline.medicines_detected_this_session = []
+        session.pipeline_started = True
+        print(f"[Scheduler] ✓ Pipeline updated for session {session.time_slot} "
+              f"({session.expected_count} medicines expected) — watching 24/7")
+    else:
+        print(f"[Scheduler] ⚠ Pipeline not running — session {session.time_slot} will self-log when pipeline starts")
+        session.pipeline_started = False
 
 
 async def _log_session_result(session):
@@ -116,24 +139,27 @@ async def _log_session_result(session):
         print("[Scheduler] No DB connection, cannot log results")
         return
 
-    now = datetime.now()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Use the date the session actually started, NOT "now".
+    # If a 3-hour window crosses midnight (e.g., 21:30 -> 00:30), 
+    # "now" would incorrectly assign the log to the next day.
+    session_date = session.started_at.replace(hour=0, minute=0, second=0, microsecond=0)
 
     for med in session.medications:
         med_id = str(med["_id"])
         user_id = med["user_id"]
 
-        # Build scheduled_time as a full datetime for today
+        # Build scheduled_time as a full datetime for the session's correct day
         sh, sm = map(int, session.time_slot.split(":"))
-        scheduled_dt_local = today_start.replace(hour=sh, minute=sm)
+        scheduled_dt_local = session_date.replace(hour=sh, minute=sm)
         # Convert local naive time to UTC equivalent since PyMongo defaults to UTC
-        local_offset = datetime.now() - datetime.utcnow()
+        local_offset = datetime.now().replace(microsecond=0) - datetime.utcnow().replace(microsecond=0)
         scheduled_dt = scheduled_dt_local - local_offset
 
-        # Check if log already exists
+        # Check if log already exists (use ObjectId to match DB storage format)
+        from bson import ObjectId as ObjId
         existing = await db.medication_logs.find_one({
-            "medication_id": med_id,
-            "user_id": user_id,
+            "medication_id": ObjId(med_id),
+            "user_id": ObjId(str(user_id)),
             "scheduled_time": scheduled_dt,
         })
         if existing:
@@ -145,28 +171,125 @@ async def _log_session_result(session):
         elif session.medicines_taken > 0:
             status = "needs_verification"
         else:
-            status = "missed"
+            # Distinguish camera-offline vs camera-on-but-no-detection
+            if not getattr(session, 'camera_ever_connected', False):
+                status = "skipped"
+            else:
+                status = "missed"
+
+        # "taken" is already logged in real-time by the pipeline the moment
+        # all 3 phases pass — skip here to avoid duplicates with wrong confidence.
+        if status == "taken":
+            print(f"[Scheduler] '{med['name']}' already logged as taken by real-time pipeline.")
+            continue
+
+        from bson import ObjectId
+        ts_now = datetime.utcnow()
         log_doc = {
-            "user_id": user_id,
-            "medication_id": med_id,
+            "user_id": ObjectId(str(user_id)),
+            "medication_id": ObjectId(str(med_id)),
             "scheduled_time": scheduled_dt,
             "status": status,
-            "verification_method": "visual" if status == "taken" else None,
-            "confidence_score": None,
+            "verification_method": None,
+            "confidence_score": None,   # never carry pipeline confidence into missed/skipped
             "keyframe_id": None,
-            "taken_at": now if status == "taken" else None,
-            "notes": f"Auto-verified by AI scheduler ({session.medicines_taken} pills detected)"
-                     if status == "taken" else "No medication intake detected within 10-minute window",
-            "created_at": now,
-            "updated_at": now,
+            "taken_at": None,
+            "notes": (
+                "Camera was offline during the entire scheduled window. Could not verify."
+                if status == "skipped"
+                else "No medication intake detected within 3-hour window"
+            ),
+            "created_at": ts_now,
+            "updated_at": ts_now,
         }
-
-        # If pipeline has a result, grab the confidence
-        if _pipeline and _pipeline.last_result:
-            log_doc["confidence_score"] = _pipeline.last_result.get("final_confidence")
 
         await db.medication_logs.insert_one(log_doc)
         print(f"[Scheduler] Logged '{status}' for {med['name']} at {session.time_slot}")
+
+
+async def _backfill_expired_slots():
+    """
+    Retroactive sweep: find any medication time slots whose 3-hour window
+    has fully elapsed without a log entry and auto-log them as 'skipped'.
+
+    Checks BOTH today AND yesterday to catch slots that expired while
+    the server was offline overnight.
+
+    Example: if a med is scheduled at 21:00 yesterday, its window ends at 00:00.
+    If the server starts at 01:00 today and no log exists, create a 'skipped' log.
+    """
+    db = get_db()
+    if db is None:
+        return
+
+    now = datetime.now()
+    local_offset = datetime.now().replace(microsecond=0) - datetime.utcnow().replace(microsecond=0)
+
+    meds_cursor = db.medications.find({"is_active": True})
+    all_meds = await meds_cursor.to_list(length=500)
+
+    # Check both yesterday and today
+    for day_offset in [1, 0]:  # 1 = yesterday, 0 = today
+        check_date = now - timedelta(days=day_offset)
+        day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_of_week = check_date.weekday()
+
+        for med in all_meds:
+            freq = med.get("frequency", "daily")
+            if freq == "weekly":
+                days = med.get("days_of_week", [])
+                if days and day_of_week not in days:
+                    continue
+
+            for sched_time in med.get("scheduled_times", []):
+                try:
+                    sh, sm = map(int, sched_time.split(":"))
+                except (ValueError, IndexError):
+                    continue
+
+                # Build the scheduled datetime and its window end
+                scheduled_dt_local = day_start.replace(hour=sh, minute=sm)
+                window_end = scheduled_dt_local + timedelta(hours=3)
+
+                # Only process slots whose window has FULLY expired
+                if now < window_end:
+                    continue  # window still open — leave it alone
+
+                # Skip if there's already a session actively handling this slot
+                if _active_session and _active_session.time_slot == sched_time and day_offset == 0:
+                    continue
+
+                # Convert to UTC for DB query
+                scheduled_dt = scheduled_dt_local - local_offset
+
+                # Check if already logged
+                existing = await db.medication_logs.find_one({
+                    "medication_id": ObjectId(str(med["_id"])),
+                    "user_id": ObjectId(str(med["user_id"])),
+                    "scheduled_time": scheduled_dt,
+                })
+                if existing:
+                    continue  # already handled
+
+                # No log exists and window has expired → mark as skipped
+                ts_now = datetime.utcnow()
+                log_doc = {
+                    "user_id": ObjectId(str(med["user_id"])),
+                    "medication_id": ObjectId(str(med["_id"])),
+                    "scheduled_time": scheduled_dt,
+                    "status": "skipped",
+                    "verification_method": None,
+                    "confidence_score": None,
+                    "keyframe_id": None,
+                    "taken_at": None,
+                    "notes": "Camera was offline during the entire scheduled window. Could not verify.",
+                    "created_at": ts_now,
+                    "updated_at": ts_now,
+                }
+                await db.medication_logs.insert_one(log_doc)
+                day_label = "yesterday" if day_offset == 1 else "today"
+                print(f"[Scheduler] [Backfill] Auto-logged 'skipped' for {med['name']} at {sched_time} {day_label} "
+                      f"(window ended at {window_end.strftime('%H:%M')})")
 
 
 async def _check_schedules():
@@ -179,11 +302,21 @@ async def _check_schedules():
 
     current_time = _get_current_time_slot()
 
+    # ── Retroactive backfill: catch any expired, unlogged slots ────────
+    # This handles medications like 00:00 whose 3-hour window (→03:00)
+    # has fully elapsed with no log — auto-marks them as 'skipped'.
+    try:
+        await _backfill_expired_slots()
+    except Exception as e:
+        print(f"[Scheduler] Backfill error: {e}")
+
     # ── Handle active session ──────────────────────────────────────────
     if _active_session:
         # Update taken count from pipeline
-        if _pipeline and _pipeline.is_running:
-            _active_session.medicines_taken = _pipeline.medicines_taken_count
+        if _pipeline:
+            _active_session.medicines_taken = max(_active_session.medicines_taken, _pipeline.medicines_taken_count)
+            if getattr(_pipeline, 'camera_online', False):
+                _active_session.camera_ever_connected = True
 
         # Check if window expired
         if _active_session.is_expired:
@@ -191,25 +324,38 @@ async def _check_schedules():
 
             # Final check on pipeline results
             if _pipeline:
-                _active_session.medicines_taken = _pipeline.medicines_taken_count
+                _active_session.medicines_taken = max(_active_session.medicines_taken, _pipeline.medicines_taken_count)
                 if _active_session.medicines_taken >= _active_session.expected_count:
                     _active_session.status = "taken"
                 elif _active_session.medicines_taken > 0:
                     _active_session.status = "needs_verification"
                 else:
-                    _active_session.status = "missed"
-                # Stop pipeline
-                if _pipeline.is_running:
-                    _pipeline.stop()
+                    if not getattr(_active_session, 'camera_ever_connected', False):
+                        _active_session.status = "skipped"
+                    else:
+                        _active_session.status = "missed"
             else:
-                _active_session.status = "missed"
+                _active_session.status = "skipped"  # no pipeline at all = camera never available
 
             # Log results
             await _log_session_result(_active_session)
             print(f"[Scheduler] Session ended: {_active_session.status} "
                   f"({_active_session.medicines_taken}/{_active_session.expected_count} pills)")
+
+            # Stop GoPro stream if it was auto-started
+            if _gopro_session:
+                try:
+                    _gopro_session.stop()
+                    print("[Scheduler] GoPro stream stopped")
+                except Exception as e:
+                    print(f"[Scheduler] GoPro stop error: {e}")
+                finally:
+                    _gopro_session = None
+
             _active_session = None
-            _pipeline = None
+            # NOTE: Do NOT set _pipeline = None here.
+            # The pipeline is an always-on instance managed by main.py.
+            # Nulling it would lose the reference for future sessions.
 
         # Check if all meds taken early
         elif (_active_session.medicines_taken >= _active_session.expected_count
@@ -217,13 +363,8 @@ async def _check_schedules():
             print(f"[Scheduler] All {_active_session.expected_count} medicines detected!")
             _active_session.status = "taken"
 
-            # Stop pipeline early
-            if _pipeline and _pipeline.is_running:
-                _pipeline.stop()
-
             await _log_session_result(_active_session)
             _active_session = None
-            _pipeline = None
 
         return  # Don't start new session while one is active
 
@@ -252,14 +393,24 @@ async def _check_schedules():
         # Check each scheduled time
         for sched_time in med.get("scheduled_times", []):
             if _is_time_match(sched_time, current_time):
+                # If we already started building a session for a different time, ignore this one for now
+                if time_slot and sched_time != time_slot:
+                    continue
+                
                 # Check if already logged today
                 sh, sm = map(int, sched_time.split(":"))
-                scheduled_dt = today_start.replace(hour=sh, minute=sm)
+                scheduled_dt_local = today_start.replace(hour=sh, minute=sm)
+                
+                # Convert local naive time to UTC equivalent since PyMongo defaults to UTC
+                local_offset = datetime.now().replace(microsecond=0) - datetime.utcnow().replace(microsecond=0)
+                scheduled_dt = scheduled_dt_local - local_offset
+                
                 existing = await db.medication_logs.find_one({
-                    "medication_id": str(med["_id"]),
-                    "user_id": med["user_id"],
+                    "medication_id": ObjectId(str(med["_id"])),
+                    "user_id": ObjectId(str(med["user_id"])),
                     "scheduled_time": scheduled_dt,
                 })
+                
                 if not existing:
                     due_meds.append(med)
                     time_slot = sched_time
@@ -274,7 +425,7 @@ async def _check_schedules():
         print(f"[Scheduler] {expected_count} medications due:")
         for m in due_meds:
             print(f"[Scheduler]   • {m['name']} ({m['dosage']})")
-        print(f"[Scheduler] Starting 10-minute verification window...")
+        print(f"[Scheduler] Starting 3-hour verification window...")
         print(f"[Scheduler] ═══════════════════════════════════════\n")
 
         # Start the pipeline
@@ -321,3 +472,4 @@ def get_scheduler_status():
         "active_session": _active_session.to_dict() if _active_session else None,
         "pipeline_running": _pipeline.is_running if _pipeline else False,
     }
+

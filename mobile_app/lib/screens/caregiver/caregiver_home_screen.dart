@@ -31,7 +31,6 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
           summaries[u['_id']] = await ApiService.getUserSummary(u['_id']);
         } catch (_) {}
       }
-      // Load recent notifications
       List<dynamic> notifs = [];
       try {
         notifs = await ApiService.getNotifications(limit: 5);
@@ -44,10 +43,10 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final userName = ApiService.user?['name']?.toString().split(' ').first ?? 'there';
+    final userName = ApiService.user?['name']?.toString().split(' ').first ?? 'Caregiver';
 
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+    if (_loading && _users.isEmpty) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary));
     }
 
     final totalUsers = _users.length;
@@ -57,116 +56,57 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     final totalMissed = _summaries.values.fold<int>(0, (sum, s) {
       return sum + ((s?['today_adherence']?['missed'] ?? 0) as num).toInt();
     });
-    final totalAlerts = _notifications.length;
 
     return RefreshIndicator(
       onRefresh: _loadData,
+      color: AppColors.primary,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Hi, $userName 👋', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+            Text('Hi, $userName! 👋', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
             const SizedBox(height: 4),
-            Text('Monitoring $totalUsers family member${totalUsers == 1 ? '' : 's'}', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-            const SizedBox(height: 20),
+            Text('Your care network is active.', style: TextStyle(color: AppColors.textSecondary, fontSize: 15)),
+            const SizedBox(height: 32),
 
-            // ── Stat cards (2 rows of 2) ──
+            // ── Premium Stats ──
             Row(
               children: [
-                _statCard('Family Members', '$totalUsers', Icons.people_outline, AppColors.primary),
-                const SizedBox(width: 12),
-                _statCard('Avg Adherence', '${avg.toStringAsFixed(0)}%', Icons.check_circle_outline, AppColors.success),
+                _premiumStatCard('Adherence', '${avg.toStringAsFixed(0)}%', Icons.check_circle, AppColors.success, context),
+                const SizedBox(width: 16),
+                _premiumStatCard('Alerts', '${_notifications.length}', Icons.notifications_active, AppColors.warning, context),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _statCard('Missed Today', '$totalMissed', Icons.warning_amber_outlined, AppColors.danger),
-                const SizedBox(width: 12),
-                _statCard('Pending Alerts', '$totalAlerts', Icons.notifications_active_outlined, AppColors.warning),
-              ],
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            _wideStatCard('Monitoring $totalUsers family members', Icons.people, AppColors.primary),
+            const SizedBox(height: 40),
 
-            // ── Family members list ──
-            const Text('Your Family', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
-
-            if (_users.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
-                child: Column(
-                  children: [
-                    Icon(Icons.family_restroom, size: 48, color: AppColors.textMuted),
-                    const SizedBox(height: 12),
-                    Text('No family members yet', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                    const SizedBox(height: 4),
-                    Text('Ask your elderly family members to link you from their app', style: TextStyle(fontSize: 12, color: AppColors.textMuted), textAlign: TextAlign.center),
-                  ],
-                ),
-              )
-            else
-              ..._users.asMap().entries.map((e) {
-                final i = e.key;
-                final u = e.value;
-                final s = _summaries[u['_id']];
-                final adh = s?['today_adherence']?['adherence_percentage'];
-                final colors = [AppColors.primary, const Color(0xFF6366F1), const Color(0xFFEC4899), const Color(0xFFF59E0B)];
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    leading: CircleAvatar(
-                      backgroundColor: colors[i % colors.length],
-                      child: Text(u['name']?.toString().substring(0, 1).toUpperCase() ?? '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                    ),
-                    title: Text(u['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: Text(u['email'] ?? '', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                    trailing: adh != null
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: (adh as num) >= 80 ? AppColors.success.withValues(alpha: 0.1) : AppColors.danger.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text('${adh.toStringAsFixed(0)}%', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: adh >= 80 ? AppColors.success : AppColors.danger)),
-                          )
-                        : null,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                );
-              }),
-
-            // ── Recent Alerts ──
-            const SizedBox(height: 24),
+            // ── Family grid ──
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Recent Alerts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                Text('${_notifications.length} notifications', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                const Text('Family Status', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                TextButton(
+                  onPressed: () {},
+                  child: const Text('See All', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
               ],
             ),
             const SizedBox(height: 12),
 
+            if (_users.isEmpty)
+              _emptyState(Icons.family_restroom, 'No family connected')
+            else
+              ..._users.asMap().entries.map((e) => _memberCard(e.key, e.value)),
+
+            const SizedBox(height: 40),
+            const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+
             if (_notifications.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-                child: Column(
-                  children: [
-                    Icon(Icons.notifications_none, size: 40, color: AppColors.textMuted),
-                    const SizedBox(height: 8),
-                    Text('All clear', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                    const SizedBox(height: 4),
-                    Text('No new notifications at the moment.', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                  ],
-                ),
-              )
+              _emptyState(Icons.notifications_none, 'No recent activity')
             else
               ..._notifications.map((n) => _notificationCard(n)),
           ],
@@ -175,58 +115,127 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     );
   }
 
+  Widget _premiumStatCard(String label, String value, IconData icon, Color color, BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: AppColors.border),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(height: 20),
+            Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -1)),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary, letterSpacing: 0.5)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _wideStatCard(String label, IconData icon, Color color) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  Widget _memberCard(int i, dynamic u) {
+    final s = _summaries[u['_id']];
+    final adh = (s?['today_adherence']?['adherence_percentage'] ?? 0) as num;
+    final colors = [AppColors.primary, AppColors.accent, const Color(0xFFEC4899), const Color(0xFFF59E0B)];
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: colors[i % colors.length],
+            child: Text(u['name']?.toString().substring(0, 1).toUpperCase() ?? '?', 
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(u['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                const SizedBox(height: 2),
+                Text(u['email'] ?? '', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${adh.toStringAsFixed(0)}%', 
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: adh >= 80 ? AppColors.success : AppColors.warning)),
+              const Text('Adherence', style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _notificationCard(Map<String, dynamic> n) {
     final type = n['type'] ?? 'system';
-    Color iconBg;
-    Color iconColor;
-    IconData icon;
-
-    switch (type) {
-      case 'missed_dose':
-        iconBg = AppColors.dangerLight;
-        iconColor = AppColors.danger;
-        icon = Icons.medication_outlined;
-        break;
-      case 'emergency':
-        iconBg = AppColors.warningLight;
-        iconColor = AppColors.warning;
-        icon = Icons.warning_amber;
-        break;
-      case 'dose_confirmed':
-        iconBg = AppColors.successLight;
-        iconColor = AppColors.success;
-        icon = Icons.check_circle_outline;
-        break;
-      default:
-        iconBg = AppColors.infoLight;
-        iconColor = AppColors.info;
-        icon = Icons.notifications_outlined;
-    }
+    IconData icon = Icons.notifications;
+    Color color = AppColors.info;
+    if (type == 'missed_dose') { icon = Icons.medication; color = AppColors.danger; }
+    else if (type == 'emergency') { icon = Icons.warning; color = AppColors.warning; }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: n['is_read'] == true ? AppColors.surface : iconBg.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, size: 18, color: iconColor),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(n['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                Text(n['message'] ?? '', style: TextStyle(fontSize: 11, color: AppColors.textSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(_formatTime(n['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                Text(n['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(n['message'] ?? '', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4)),
               ],
             ),
           ),
@@ -235,29 +244,18 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     );
   }
 
-  Widget _statCard(String label, String value, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 8),
-            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
-            Text(label, style: TextStyle(fontSize: 10, color: AppColors.textSecondary), textAlign: TextAlign.center),
-          ],
-        ),
+  Widget _emptyState(IconData icon, String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(40),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: AppColors.border)),
+      child: Column(
+        children: [
+          Icon(icon, size: 40, color: AppColors.textMuted.withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+          Text(text, style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+        ],
       ),
     );
-  }
-
-  String _formatTime(String? raw) {
-    if (raw == null) return '—';
-    try { return DateTime.parse(raw).toLocal().toString().substring(0, 16); } catch (_) { return raw; }
   }
 }

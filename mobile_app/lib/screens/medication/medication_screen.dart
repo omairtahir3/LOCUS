@@ -17,6 +17,8 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
   List<dynamic> _medications = [];
   List<dynamic> _history = [];
   bool _loading = true;
+
+  bool get _isElderly => ApiService.userRole == 'elderly';
   Timer? _refreshTimer;
 
   @override
@@ -228,6 +230,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
               ),
             ),
             if (status == 'needs_verification')
+              // AI pipeline requested confirmation — all users can confirm/deny
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -239,17 +242,13 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 ],
               )
             else if (status == 'scheduled' || status == 'pending')
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: AppColors.primary.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.camera_alt, size: 14, color: AppColors.primary),
-                    const SizedBox(width: 4),
-                    Text('PENDING CAMERA VERIFICATION', style: TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.w800)),
-                  ],
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
+                  const SizedBox(width: 6),
+                  _actionBtn(Icons.close, AppColors.danger, () => _logDose(dose, 'missed')),
+                ],
               )
             else
               Container(
@@ -284,17 +283,21 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
 
   Future<void> _logDose(Map<String, dynamic> dose, String status) async {
     try {
-      // Must pass ISO format date string for today with the scheduled time. 
-      // Fortunately getSchedule returns 'scheduled_time' like "08:00". Let's convert to ISO today String
-      final timeParts = (dose['scheduled_time'] as String).split(':');
-      final now = DateTime.now();
-      final dt = DateTime(now.year, now.month, now.day, int.parse(timeParts[0]), int.parse(timeParts[1]));
-      
-      await ApiService.recordDose(
-        dose['medication_id'] ?? dose['_id'], 
-        status,
-        dt.toIso8601String()
-      );
+      if (dose['log_id'] != null) {
+        await ApiService.updateLog(dose['log_id'], status, notes: 'Manually verified');
+      } else {
+        // Must pass ISO format date string for today with the scheduled time. 
+        // Fortunately getSchedule returns 'scheduled_time' like "08:00". Let's convert to ISO today String
+        final timeParts = (dose['scheduled_time'] as String).split(':');
+        final now = DateTime.now();
+        final dt = DateTime(now.year, now.month, now.day, int.parse(timeParts[0]), int.parse(timeParts[1]));
+        
+        await ApiService.recordDose(
+          dose['medication_id'] ?? dose['_id'], 
+          status,
+          dt.toIso8601String()
+        );
+      }
       _loadData();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
