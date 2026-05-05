@@ -118,11 +118,11 @@ export default function Medications() {
                           {statusBadge(s.status)}
                           {s.status === 'taken' && s.verification_method && (
                             <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                              Verified: {s.verification_method === 'visual' ? 'Camera' : s.verification_method}
+                              Verified: {s.verification_method === 'visual' ? 'Camera' : s.verification_method.charAt(0).toUpperCase() + s.verification_method.slice(1)}
                             </div>
                           )}
                         </td>
-                        <td className="text-muted text-sm">{s.verification_method ? (s.verification_method === 'visual' ? 'Camera API' : s.verification_method) : '—'}</td>
+                        <td className="text-muted text-sm">{s.verification_method ? (s.verification_method === 'visual' ? 'Camera' : s.verification_method.charAt(0).toUpperCase() + s.verification_method.slice(1)) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -145,8 +145,10 @@ class MedicationDetectionPipeline:
                 local_dt = today.replace(hour=sh, minute=sm)
                 local_offset = datetime.now() - datetime.utcnow()
                 scheduled_dt = local_dt - local_offset
+                # Strip microseconds to match Node.js parsing!
+                scheduled_dt = scheduled_dt.replace(microsecond=0)
             else:
-                scheduled_dt = datetime.fromisoformat(sched_str.replace("Z", "+00:00"))
+                scheduled_dt = datetime.fromisoformat(sched_str.replace("Z", "+00:00")).replace(microsecond=0)
 
             ts_now = datetime.utcnow()
             logged_count = 0
@@ -178,13 +180,13 @@ class MedicationDetectionPipeline:
                         "medication_id": ObjectId(med_id),
                         "scheduled_time": scheduled_dt,
                         "status": status,
-                        "verification_method": "Camera",
+                        "verification_method": "visual",
                         "confidence_score": round(confidence, 3),
                         "keyframe_id": keyframe_id,
                         "taken_at": ts_now if status == "taken" else None,
                         "notes": f"AI batch detection ({pills_to_log} pills seen, confidence: {confidence:.1%})",
-                        "created_at": ts_now,
-                        "updated_at": ts_now,
+                        "createdAt": ts_now,
+                        "updatedAt": ts_now,
                     }
                     db.medication_logs.insert_one(log_doc)
                     logged_count += 1
@@ -402,11 +404,13 @@ class MedicationDetectionPipeline:
                       f"hand={has_hand} overlap={overlap:.2f} in_hand={pill_in_hand} "
                       f"in_hand_count={in_hand_count} -> score={score:.2f}")
 
+            if pill_in_hand and in_hand_count > best_in_hand_count:
+                best_in_hand_count = in_hand_count
+
             if score > best_pill:
                 best_pill = score
                 best_pill_frame = i
                 hand_with_pill = pill_in_hand
-                best_in_hand_count = in_hand_count
 
         phase1_score = best_pill
         # Phase 1 REQUIRES pill spatially overlapping a hand to pass.
@@ -1029,10 +1033,13 @@ class MedicationDetectionPipeline:
 
             # ── FINAL ANALYSIS — always runs when pipeline stops ──────
             try:
-                # Do not overwrite self.last_result with None if buffer is empty but we have a cached result!
-                result = self.analyze_buffer()
-                if result:
-                    self.last_result = result
+                # If we already have a successful cached result, don't run analyze_buffer again!
+                if not self.last_result:
+                    result = self.analyze_buffer()
+                    if result:
+                        self.last_result = result
+                else:
+                    print("[Pipeline] Skipping redundant final analysis; using cached successful result.")
                     
                 # If we have a result (either just analyzed or cached from earlier), POST the log
                 if self.last_result and self.medication_ids and self.scheduled_time:
@@ -1067,7 +1074,7 @@ class MedicationDetectionPipeline:
                         skip_final_log = False
                     # Downgrade to needs_verification to force manual clarification!
                     if final_status == "taken" and getattr(self, 'expected_medicine_count', 0) > 0:
-                        taken_count = self.last_result.get('medicines_taken_count', 0)
+                        taken_count = self.medicines_taken_count
                         if taken_count < self.expected_medicine_count:
                             print(f"[Pipeline] WARNING: Expected {self.expected_medicine_count} meds but only tracked {taken_count}. Downgrading to needs_verification.")
                             final_status = "needs_verification"

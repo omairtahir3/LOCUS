@@ -242,14 +242,27 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 ],
               )
             else if (status == 'scheduled' || status == 'pending')
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
-                  const SizedBox(width: 6),
-                  _actionBtn(Icons.close, AppColors.danger, () => _logDose(dose, 'missed')),
-                ],
-              )
+              _isElderly
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: AppColors.primary.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.camera_alt, size: 14, color: AppColors.primary),
+                        const SizedBox(width: 4),
+                        Text('PENDING CAMERA VERIFICATION', style: TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.w800)),
+                      ],
+                    ),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
+                      const SizedBox(width: 6),
+                      _actionBtn(Icons.close, AppColors.danger, () => _logDose(dose, 'missed')),
+                    ],
+                  )
             else
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -752,11 +765,20 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 _formatDate(h['scheduled_time'] ?? h['createdAt'] ?? ''),
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
               ),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(6)),
-                child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
-              ),
+              trailing: status == 'needs_verification'
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _actionBtn(Icons.check, AppColors.success, () => _logDose({'log_id': h['_id']}, 'taken')),
+                      const SizedBox(width: 6),
+                      _actionBtn(Icons.close, AppColors.danger, () => _logDose({'log_id': h['_id']}, 'missed')),
+                    ],
+                  )
+                : Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(6)),
+                    child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
+                  ),
             ),
           );
         },
