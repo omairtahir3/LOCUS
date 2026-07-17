@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, Pill, Bell, MapPin, Activity,
-  Settings, LogOut, Shield, Image, Clock, Home
+  Settings, LogOut, Shield, Image, Clock, Home, Video
 } from 'lucide-react';
 
 const caregiverNavItems = [
@@ -13,7 +13,6 @@ const caregiverNavItems = [
 ];
 
 const caregiverMonitorItems = [
-  { path: '/detection', icon: Shield, label: 'AI Detection' },
   { path: '/keyframes', icon: Image,  label: 'Keyframe Audit' },
   { path: '/location',  icon: MapPin,   label: 'Location Map',   comingSoon: true },
   { path: '/activity',  icon: Activity, label: 'Activity Feed',  comingSoon: true },
@@ -27,12 +26,12 @@ const userNavItems = [
 ];
 
 const userMonitorItems = [
-  { path: '/my-detection',   icon: Shield,   label: 'Auto Verification' },
+  { path: '/keyframes',      icon: Image,    label: 'Keyframe Audit' },
   { path: '/my-activity',    icon: Activity, label: 'Activity Feed', comingSoon: true },
   { path: '/memory-search',  icon: Shield,   label: 'Memory Search' },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ isMobileOpen, closeMobile }) {
   const { logout, user } = useAuth();
   const location = useLocation();
 
@@ -42,23 +41,26 @@ export default function Sidebar() {
   const monitorNav = isCaregiver ? caregiverMonitorItems : userMonitorItems;
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <img src="/logo.png" alt="LOCUS" />
-      </div>
+    <>
+      <div className={`sidebar-overlay ${isMobileOpen ? 'open' : ''}`} onClick={closeMobile} />
+      <aside className={`sidebar ${isMobileOpen ? 'open' : ''}`}>
+        <div className="sidebar-logo">
+          <img src="/logo.png" alt="LOCUS" />
+        </div>
 
-      <nav className="sidebar-nav">
-        <div className="sidebar-section-label">Main</div>
-        {mainNav.map(({ path, icon: Icon, label }) => (
-          <NavLink
-            key={path}
-            to={path}
-            className={({ isActive }) => isActive ? 'active' : ''}
-            end={path === '/' || path === '/my-dashboard'}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </NavLink>
+        <nav className="sidebar-nav">
+          <div className="sidebar-section-label">Main</div>
+          {mainNav.map(({ path, icon: Icon, label }) => (
+            <NavLink
+              key={path}
+              to={path}
+              className={({ isActive }) => isActive ? 'active' : ''}
+              end={path === '/' || path === '/my-dashboard'}
+              onClick={closeMobile}
+            >
+              <Icon size={18} />
+              <span>{label}</span>
+            </NavLink>
         ))}
 
         {monitorNav.length > 0 && (
@@ -69,6 +71,10 @@ export default function Sidebar() {
                 key={path}
                 to={path}
                 className={({ isActive }) => isActive ? 'active' : ''}
+                onClick={e => {
+                  if (comingSoon) e.preventDefault();
+                  else closeMobile();
+                }}
               >
                 <Icon size={18} />
                 <span>{label}</span>
@@ -81,7 +87,7 @@ export default function Sidebar() {
         <div className="sidebar-spacer" />
 
         <div className="sidebar-section-label">Account</div>
-        <NavLink to="/settings">
+        <NavLink to="/settings" onClick={closeMobile}>
           <Settings size={18} />
           <span>Settings</span>
         </NavLink>
@@ -89,9 +95,13 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '0 4px' }}>
-          <div className="avatar avatar-sm" style={{ background: isCaregiver ? 'var(--primary)' : 'var(--accent)' }}>
-            {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-          </div>
+          {(user?.picture || user?.profile_picture) ? (
+            <img src={user.picture || user.profile_picture} alt={user?.name || 'User'} className="avatar avatar-sm" style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} />
+          ) : (
+            <div className="avatar avatar-sm" style={{ background: isCaregiver ? 'var(--primary)' : 'var(--accent)' }}>
+              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+          )}
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <div className="text-sm font-bold truncate">{user?.name || 'User'}</div>
             <div className="text-xs text-muted truncate">{user?.email || ''}</div>

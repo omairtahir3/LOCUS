@@ -65,7 +65,7 @@ export default function UserHistory() {
 
       {/* Adherence Summary Stats */}
       {adherence && (
-        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="stat-grid">
           <div className="stat-card">
             <div className="stat-icon success"><TrendingUp size={20} /></div>
             <div>
@@ -171,7 +171,7 @@ export default function UserHistory() {
                       {log.dosage || ''}
                       {log.verification_method && (
                         <span style={{ marginLeft: 8 }}>
-                          via {log.verification_method === 'visual' ? 'Camera AI' : log.verification_method}
+                          via {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera AI' : ['manual', 'manual_caregiver'].includes(log.verification_method) ? 'Manually Verified' : log.verification_method}
                         </span>
                       )}
                     </div>

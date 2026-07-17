@@ -31,7 +31,9 @@ export default function Detection() {
 
   useEffect(() => {
     fetchStatus();
-    pollRef.current = setInterval(fetchStatus, 3000);
+    pollRef.current = setInterval(() => {
+      if (!document.hidden) fetchStatus();
+    }, 10000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
@@ -127,7 +129,7 @@ export default function Detection() {
             </span>
           </div>
 
-          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
             <div className="stat-card">
               <div className="stat-icon primary"><Scan size={18} /></div>
               <div>

@@ -76,7 +76,7 @@ export default function ActivityFeed() {
 
         {/* Insights */}
         <div>
-          <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
+          <div className="stat-grid" style={{ marginBottom: 16 }}>
             <div className="stat-card">
               <div className="stat-icon primary"><Footprints size={18} /></div>
               <div>

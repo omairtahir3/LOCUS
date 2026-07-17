@@ -14,7 +14,9 @@ export default function UserDashboard() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(() => {
+      if (!document.hidden) loadData();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -58,6 +60,33 @@ export default function UserDashboard() {
     }
   };
 
+  const dismissMed = async (item) => {
+    try {
+      // Set back to scheduled — the AI pipeline continues watching and
+      // will update the status to "needs_verification" if it detects intake.
+      if (item.log_id || item.id) {
+        await userAPI.updateLog(item.log_id || item.id, {
+          status: 'scheduled',
+          notes: 'Dismissed — awaiting camera verification',
+        });
+      }
+      loadData();
+    } catch (err) {
+      console.error('Failed to dismiss medication:', err);
+    }
+  };
+
+  const snoozeMed = async (item) => {
+    try {
+      if (item.log_id || item.id) {
+        await userAPI.snoozeLog(item.log_id || item.id, { snooze_duration_minutes: 10 });
+      }
+      loadData();
+    } catch (err) {
+      console.error('Failed to snooze medication:', err);
+    }
+  };
+
   const adherencePercent = adherence?.overall_adherence ?? adherence?.adherence_percentage ?? 0;
   const todayAdherence = adherence?.adherence_percentage || 0;
   const takenWeek = adherence?.total_taken || adherence?.taken || 0;
@@ -65,7 +94,7 @@ export default function UserDashboard() {
 
   const todayTotal = schedule.length;
   const todayTaken = schedule.filter(s => s.status === 'taken').length;
-  const todayUpcoming = schedule.filter(s => s.status === 'scheduled').length;
+  const todayUpcoming = schedule.filter(s => s.status === 'scheduled' || (s.status === 'camera_off' && s.notes === 'pending_camera_verification')).length;
 
   const upcoming = schedule
     .filter(s => s.status === 'scheduled')
@@ -116,6 +145,9 @@ export default function UserDashboard() {
           grid-template-columns: 2fr 1fr 1fr;
           gap: 24px;
           margin-bottom: 32px;
+        }
+        @media (max-width: 1024px) {
+          .main-stat-row { grid-template-columns: 1fr; }
         }
 
         .hero-dose-card {
@@ -176,6 +208,7 @@ export default function UserDashboard() {
         .time-slot.taken { background: #F0FDFA; border: 1px solid #CCFBF1; }
         .time-slot.missed { background: #FEF2F2; border: 1px solid #FEE2E2; }
         .time-slot.upcoming { background: #F8FAFC; border: 1px solid #F1F5F9; }
+        .time-slot.camera_off { background: #FFFBEB; border: 1px solid #FDE68A; }
 
         .time-label {
           font-size: 1.1rem;
@@ -277,11 +310,60 @@ export default function UserDashboard() {
                   </div>
                   <div>
                     {s.status === 'taken' && <span className="badge badge-success"><CheckCircle size={14} /> Taken</span>}
-                    {s.status === 'missed' && <span className="badge badge-danger"><XCircle size={14} /> Missed</span>}
-                    {s.status === 'scheduled' && <span className="badge badge-neutral"><Clock size={14} /> Upcoming</span>}
-                    {s.status === 'needs_verification' && (
+                    {s.status === 'missed' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="badge badge-danger"><XCircle size={14} /> Missed</span>
+                        {user?.role !== 'elderly' && (
+                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={14} /> Take
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {['scheduled', 'pending', 'snoozed'].includes(s.status) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {user?.role !== 'elderly' && (
+                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={14} /> Take
+                          </button>
+                        )}
+                        <span className="badge" style={{ background: '#E0F2FE', color: '#0369A1', border: '1px solid #BAE6FD', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Activity size={14} /> Pending Camera Verification
+                        </span>
+                        <button className="btn btn-sm btn-secondary" onClick={() => snoozeMed(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={12} /> Snooze 10m
+                        </button>
+                      </div>
+                    )}
+                    {((s.status === 'camera_off' && s.notes === 'pending_camera_verification')) && (
+                      <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Activity size={14} /> Pending Camera Verification
+                      </span>
+                    )}
+                    {((s.status === 'camera_off' && s.notes !== 'pending_camera_verification') || s.status === 'skipped') && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="badge badge-neutral"><Clock size={14} /> CAMERA OFF</span>
+                        {user?.role !== 'elderly' && (
+                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={14} /> Take
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {s.status === 'needs_verification' && user?.role === 'elderly' && (
+                      <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Clock size={12} /> Awaiting Caregiver Review
+                      </span>
+                    )}
+                    {s.status === 'needs_verification' && user?.role !== 'elderly' && (
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10 }}>Confirm</button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => dismissMed(s)}
+                          style={{ borderRadius: 10, background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A' }}
+                          title="Reschedule — camera will keep verifying"
+                        >Reschedule</button>
                       </div>
                     )}
                   </div>

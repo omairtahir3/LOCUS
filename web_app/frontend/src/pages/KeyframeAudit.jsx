@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { detectionAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle } from 'lucide-react';
 
 const PHASE_LABELS = {
@@ -9,35 +10,41 @@ const PHASE_LABELS = {
 };
 
 export default function KeyframeAudit() {
+  const { user } = useAuth();
   const [keyframes, setKeyframes] = useState([]);
+  const [evidenceFrames, setEvidenceFrames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
   const [lastResult, setLastResult] = useState(null);
   const [filter, setFilter] = useState('all'); // 'all' | 'medicine_only'
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 12;
 
   useEffect(() => {
     loadData();
+    // Auto-refresh every 30 seconds (not 10 — page was too slow)
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadData = async () => {
-    setLoading(true);
     try {
-      const [kfRes, medKfRes, statusRes] = await Promise.all([
-        detectionAPI.getKeyframes({ limit: 50 }),
-        detectionAPI.getKeyframes({ limit: 50, medication_only: true }),
+      // Don't pass user_id — the Node.js proxy handles filtering by role:
+      // caregivers see monitored users' frames, normal users see only their own
+      const [kfRes, evidenceRes, statusRes] = await Promise.all([
+        detectionAPI.getKeyframes({ limit: 20 }),
+        detectionAPI.getEvidence({ limit: 20 }).catch(() => ({ data: [] })),
         detectionAPI.getStatus(),
       ]);
       
-      const generalFrames = kfRes.data || [];
-      const medFrames = medKfRes.data || [];
+      const allFrames = kfRes.data || [];
+      allFrames.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
       
-      // Combine and deduplicate
-      const allFrames = [...medFrames, ...generalFrames];
-      const uniqueFrames = Array.from(new Map(allFrames.map(f => [f.keyframe_id, f])).values());
-      // Sort by date descending
-      uniqueFrames.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
+      const evidence = evidenceRes.data || [];
+      evidence.sort((a, b) => new Date(b.saved_at || b.detected_at || 0) - new Date(a.saved_at || a.detected_at || 0));
       
-      setKeyframes(uniqueFrames);
+      setKeyframes(allFrames);
+      setEvidenceFrames(evidence);
       setLastResult(statusRes.data?.last_result || null);
     } catch (err) {
       console.error('Failed to load keyframes:', err);
@@ -62,10 +69,9 @@ export default function KeyframeAudit() {
     return { label: 'Low', color: 'var(--text-muted)' };
   };
 
-  // Separate medicine-taken frames and general frames
-  const medicineTakenFrames = keyframes.filter(kf => kf.medicine_taken);
-  const generalFrames = keyframes.filter(kf => !kf.medicine_taken);
-  const displayFrames = filter === 'medicine_only' ? medicineTakenFrames : keyframes;
+  // Evidence frames from dedicated evidence storage
+  const medicineTakenFrames = evidenceFrames;
+  const displayFrames = filter === 'medicine_only' ? [] : keyframes;
 
   if (loading) {
     return <div className="empty-state"><p>Loading keyframe data...</p></div>;
@@ -87,7 +93,7 @@ export default function KeyframeAudit() {
             className={`btn btn-sm ${filter === 'medicine_only' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('medicine_only')}
           >
-            <Pill size={14} /> Medicine Evidence ({medicineTakenFrames.length})
+            <Pill size={14} /> Medicine Evidence ({evidenceFrames.length})
           </button>
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
             <Eye size={16} /> Refresh
@@ -118,7 +124,7 @@ export default function KeyframeAudit() {
             </span>
           </div>
 
-          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="stat-grid">
             <div className="stat-card">
               <div className="stat-value" style={{ color: 'var(--primary)' }}>
                 {((lastResult.final_confidence || 0) * 100).toFixed(0)}%
@@ -146,8 +152,8 @@ export default function KeyframeAudit() {
         </div>
       )}
 
-      {/* Medicine Verification Evidence — grouped by detection event */}
-      {medicineTakenFrames.length > 0 && filter !== 'medicine_only' && (
+      {/* Medicine Verification Evidence — from evidence_storage */}
+      {evidenceFrames.length > 0 && (
         <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid var(--success)' }}>
           <div className="card-header">
             <div>
@@ -155,22 +161,24 @@ export default function KeyframeAudit() {
                 <CheckCircle size={18} color="var(--success)" /> Medicine Verification Evidence
               </div>
               <div className="card-subtitle">
-                {medicineTakenFrames.length} best-evidence keyframes from verified intake(s)
+                {evidenceFrames.length} evidence frame(s) from AI detection
               </div>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, padding: 16 }}>
-            {medicineTakenFrames.map(kf => {
-              const phaseInfo = PHASE_LABELS[kf.phase_role] || { label: kf.phase_role, short: '??', color: '#888' };
+            {evidenceFrames.map(ev => {
+              const phaseInfo = PHASE_LABELS[ev.phase_role] || { label: ev.phase_role || 'Evidence', short: '??', color: '#888' };
+              const evId = ev.id || ev.keyframe_id;
               return (
-                <div key={kf.keyframe_id} style={{
+                <div key={evId} style={{
                   border: `2px solid ${phaseInfo.color}44`,
                   borderRadius: 'var(--radius-md)',
                   overflow: 'hidden',
                   background: 'var(--surface)',
                 }}>
                   <img
-                    src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
+                    loading="lazy"
+                    src={detectionAPI.getEvidenceImage(evId)}
                     alt={phaseInfo.label}
                     style={{ width: '100%', height: 140, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44` }}
                     onError={(e) => { e.target.style.display = 'none'; }}
@@ -182,15 +190,15 @@ export default function KeyframeAudit() {
                         fontSize: '0.7rem', fontWeight: 700
                       }}>{phaseInfo.short}</span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        {((kf.detection_confidence || 0) * 100).toFixed(0)}% conf
+                        {((ev.detection_confidence || ev.phase_score || 0) * 100).toFixed(0)}% conf
                       </span>
                     </div>
                     <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      {kf.medication_name || 'Unknown'} · {kf.detection_status}
+                      {ev.medication_name || 'Unknown'} · {ev.detection_status || ''}
                     </div>
                     <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                      {kf.detected_at ? new Date(kf.detected_at).toLocaleString() : ''}
+                      {(ev.saved_at || ev.detected_at) ? new Date(ev.saved_at || ev.detected_at).toLocaleString() : ''}
                     </div>
                   </div>
                 </div>
@@ -200,29 +208,106 @@ export default function KeyframeAudit() {
         </div>
       )}
 
-      {/* Keyframe Timeline */}
+      {/* Keyframe Timeline / Medicine Evidence Grid */}
       <div className="card">
         <div className="card-header">
           <div>
             <div className="card-title"><Camera size={18} style={{ display: 'inline', marginRight: 8 }} />
               {filter === 'medicine_only' ? 'Medicine Evidence Frames' : 'Captured Keyframes'}
             </div>
-            <div className="card-subtitle">{displayFrames.length} frames</div>
+            <div className="card-subtitle">
+              {filter === 'medicine_only' ? `${evidenceFrames.length} evidence frames` : `${keyframes.length} frames`}
+            </div>
           </div>
         </div>
 
-        {displayFrames.length === 0 ? (
-          <div className="empty-state">
-            <Image size={48} />
-            <h3>No keyframes captured yet</h3>
-            <p>Run the AI detection pipeline to capture keyframes for auditing.</p>
-          </div>
+        {filter === 'medicine_only' ? (
+          /* ─── Medicine Evidence Grid ─── */
+          evidenceFrames.length === 0 ? (
+            <div className="empty-state">
+              <Image size={48} />
+              <h3>No medicine evidence yet</h3>
+              <p>Evidence frames are captured when the AI pipeline detects medication intake.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, padding: 16 }}>
+              {evidenceFrames.map(ev => {
+                const phaseInfo = PHASE_LABELS[ev.phase_role] || { label: ev.phase_role || 'Evidence', short: '??', color: '#888' };
+                const evId = ev.id || ev.keyframe_id;
+                const isOpen = expanded[evId];
+                return (
+                  <div key={evId} style={{
+                    border: `2px solid ${phaseInfo.color}44`,
+                    borderRadius: 'var(--radius-md)',
+                    overflow: 'hidden',
+                    background: 'var(--surface)',
+                  }}>
+                    <img
+                      loading="lazy"
+                      src={detectionAPI.getEvidenceImage(evId)}
+                      alt={phaseInfo.label}
+                      style={{ width: '100%', height: 180, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44`, cursor: 'pointer' }}
+                      onClick={() => toggleExpand(evId)}
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                    <div style={{ padding: '10px 12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span className="badge" style={{
+                          background: phaseInfo.color + '22', color: phaseInfo.color,
+                          fontSize: '0.7rem', fontWeight: 700
+                        }}>{phaseInfo.short}</span>
+                        <span className="badge" style={{
+                          background: ev.detection_status === 'taken' ? 'var(--success)22' : 'var(--warning)22',
+                          color: ev.detection_status === 'taken' ? 'var(--success)' : 'var(--warning)',
+                          fontSize: '0.65rem', fontWeight: 600
+                        }}>{ev.detection_status || 'pending'}</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {ev.medication_name || 'Unknown'} · {((ev.detection_confidence || ev.phase_score || 0) * 100).toFixed(0)}% confidence
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                        {(ev.saved_at || ev.detected_at) ? new Date(ev.saved_at || ev.detected_at).toLocaleString() : ''}
+                      </div>
+                    </div>
+                    {/* Expanded: full-size image */}
+                    {isOpen && (
+                      <div style={{ padding: 12, borderTop: '1px solid var(--border-light)' }}>
+                        <img
+                          src={detectionAPI.getEvidenceImage(evId)}
+                          alt={`Evidence ${evId}`}
+                          style={{ width: '100%', maxHeight: 400, objectFit: 'contain', borderRadius: 'var(--radius-md)', background: '#000' }}
+                        />
+                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                          <div><strong>ID:</strong> {evId?.slice(0, 8)}...</div>
+                          <div><strong>Phase:</strong> {phaseInfo.label}</div>
+                          <div><strong>Medicine:</strong> {ev.medication_name}</div>
+                          <div><strong>Status:</strong> {ev.detection_status}</div>
+                          <div><strong>Confidence:</strong> {((ev.detection_confidence || 0) * 100).toFixed(1)}%</div>
+                          <div><strong>Phase Score:</strong> {((ev.phase_score || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {displayFrames.map((kf) => {
-              const blur = getBlurLabel(kf.blur_score || 0);
-              const motion = getMotionLabel(kf.motion_score || 0);
-              const isOpen = expanded[kf.keyframe_id];
+          /* ─── Regular Keyframes List ─── */
+          keyframes.length === 0 ? (
+            <div className="empty-state">
+              <Image size={48} />
+              <h3>No keyframes captured yet</h3>
+              <p>Run the AI detection pipeline to capture keyframes for auditing.</p>
+            </div>
+          ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {keyframes.slice((page - 1) * PER_PAGE, page * PER_PAGE).map((kf) => {
+                const blur = getBlurLabel(kf.blur_score || 0);
+                const motion = getMotionLabel(kf.motion_score || 0);
+                const isOpen = expanded[kf.keyframe_id];
               const isMedFrame = kf.medicine_taken;
               const phaseInfo = PHASE_LABELS[kf.phase_role];
 
@@ -250,6 +335,7 @@ export default function KeyframeAudit() {
                       background: '#f1f5f9'
                     }}>
                       <img
+                        loading="lazy"
                         src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
                         alt=""
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -302,6 +388,7 @@ export default function KeyframeAudit() {
                   {isOpen && (
                     <div style={{ padding: 16, borderTop: '1px solid var(--border-light)' }}>
                       <img
+                        loading="lazy"
                         src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
                         alt={`Keyframe ${kf.keyframe_id}`}
                         style={{
@@ -329,7 +416,31 @@ export default function KeyframeAudit() {
                 </div>
               );
             })}
-          </div>
+            </div>
+
+            {/* Pagination controls */}
+            {keyframes.length > PER_PAGE && (
+              <div style={{
+                display: 'flex', justifyContent: 'center', alignItems: 'center',
+                gap: 12, padding: '16px 0'
+              }}>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                >Previous</button>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Page {page} of {Math.ceil(keyframes.length / PER_PAGE)}
+                </span>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={page >= Math.ceil(keyframes.length / PER_PAGE)}
+                  onClick={() => setPage(p => p + 1)}
+                >Next</button>
+              </div>
+            )}
+          </>
+          )
         )}
       </div>
     </div>

@@ -3,8 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import { caregiverAPI, medicationAPI } from '../services/api';
 import {
   ArrowLeft, Pill, CheckCircle, XCircle, Clock, AlertTriangle,
-  MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap
+  MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell
 } from 'lucide-react';
+import { formatSmartDate } from '../utils/dateUtils';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -21,11 +22,10 @@ export default function FamilyMemberDetail() {
   useEffect(() => {
     loadData();
 
-    // Auto-refresh every 5 seconds so caregiver sees updates
-    // when an elderly user modifies their schedule from the mobile app
+    // Refresh every 30s (not 5s) — skip when tab is hidden
     const interval = setInterval(() => {
-      if (!loading) loadData();
-    }, 5000);
+      if (!loading && !document.hidden) loadData();
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [userId]);
@@ -163,7 +163,7 @@ export default function FamilyMemberDetail() {
       )}
 
       {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-icon success"><CheckCircle size={18} /></div>
           <div>
@@ -217,6 +217,7 @@ export default function FamilyMemberDetail() {
                     <th>Medication</th>
                     <th>Dosage</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -226,18 +227,84 @@ export default function FamilyMemberDetail() {
                       <td>{s.medication_name}</td>
                       <td className="text-muted">{s.dosage}</td>
                       <td>
-                        <span className={`badge ${
-                          s.status === 'taken' ? 'badge-success' :
-                          s.status === 'needs_verification' ? 'badge-warning' :
-                          s.status === 'missed' ? 'badge-danger' :
-                          s.status === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
-                        }`}>
-                          {statusIcon(s.status)} {s.status}
-                        </span>
+                        {(() => {
+                          const displayStatus = (s.status === 'camera_off' && s.notes === 'pending_camera_verification')
+                            ? 'scheduled' : (s.status === 'skipped' ? 'camera_off' : s.status);
+                          return (
+                            <span className={`badge ${
+                              displayStatus === 'taken' ? 'badge-success' :
+                              displayStatus === 'needs_verification' ? 'badge-warning' :
+                              displayStatus === 'missed' ? 'badge-danger' :
+                              displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
+                            }`}>
+                              {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+                            </span>
+                          );
+                        })()}
                         {s.status === 'taken' && s.verification_method && (
                             <div style={{ fontSize: '0.7rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                              Verified: {s.verification_method === 'visual' ? 'Camera' : s.verification_method}
+                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method}
                             </div>
+                        )}
+                      </td>
+                      <td>
+                        {(s.status === 'scheduled' || s.status === 'needs_verification' || s.status === 'missed' || s.status === 'camera_off' || s.status === 'skipped') && (
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              className="btn btn-sm"
+                              style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, fontSize: '0.75rem', padding: '4px 10px' }}
+                              onClick={async () => {
+                                try {
+                                  if (s.log_id || s.id) {
+                                    await medicationAPI.updateLog(s.log_id || s.id, {
+                                      status: 'taken',
+                                      verification_method: 'manual',
+                                      notes: 'Confirmed by caregiver',
+                                    });
+                                  } else {
+                                    const [hh, mm] = s.scheduled_time.split(':');
+                                    const dt = new Date();
+                                    dt.setHours(parseInt(hh), parseInt(mm), 0, 0);
+                                    await medicationAPI.createLog({
+                                      medication_id: s.medication_id,
+                                      scheduled_time: dt.toISOString(),
+                                      status: 'taken',
+                                      verification_method: 'manual',
+                                      notes: 'Confirmed by caregiver',
+                                    });
+                                  }
+                                  loadData();
+                                } catch (err) {
+                                  console.error('Failed to mark as taken:', err);
+                                  alert('Failed to update. Please try again.');
+                                }
+                              }}
+                            >
+                              <CheckCircle size={12} /> Taken
+                            </button>
+                            {s.status === 'needs_verification' && (
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: 8, fontSize: '0.75rem', padding: '4px 10px' }}
+                                onClick={async () => {
+                                  try {
+                                    if (s.log_id || s.id) {
+                                      await medicationAPI.updateLog(s.log_id || s.id, {
+                                        status: 'scheduled',
+                                        notes: 'Rescheduled by caregiver',
+                                      });
+                                    }
+                                    loadData();
+                                  } catch (err) {
+                                    console.error('Failed to reschedule:', err);
+                                    alert('Failed to reschedule. Please try again.');
+                                  }
+                                }}
+                              >
+                                <Clock size={12} /> Reschedule
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -263,20 +330,35 @@ export default function FamilyMemberDetail() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {alerts.map((a) => (
+              {alerts.map((a) => {
+                const typeConfig = {
+                  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger)' },
+                  camera_off_alert:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
+                  skipped_medicine:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
+                  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success)' },
+                  dose_reminder:     { icon: Bell,  bg: 'var(--info-light)',    color: 'var(--info)' },
+                  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning)' },
+                  status_check:      { icon: Bell,  bg: 'var(--accent-light)',  color: 'var(--accent)' },
+                  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary)' },
+                  system:            { icon: Bell,  bg: 'var(--surface-hover)', color: 'var(--text-secondary)' },
+                };
+                const cfg = typeConfig[a.type] || typeConfig.system;
+                const Icon = cfg.icon;
+                return (
                 <div key={a._id} className="notification-item unread">
                   <div className="notification-icon" style={{
-                    background: 'var(--danger-light)', color: 'var(--danger)'
+                    background: cfg.bg, color: cfg.color
                   }}>
-                    <AlertTriangle size={16} />
+                    <Icon size={16} />
                   </div>
                   <div className="notification-body">
                     <div className="notification-title">{a.title}</div>
                     <div className="notification-message">{a.message}</div>
-                    <div className="notification-time">{new Date(a.createdAt).toLocaleString()}</div>
+                    <div className="notification-time">{formatSmartDate(a.createdAt)}</div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -323,7 +405,7 @@ export default function FamilyMemberDetail() {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ev.medication_name}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                    {ev.scheduled_time ? new Date(ev.scheduled_time).toLocaleString() : 'Unknown time'}
+                    {ev.scheduled_time ? formatSmartDate(ev.scheduled_time) : 'Unknown time'}
                     {ev.dosage && <span> - {ev.dosage}</span>}
                   </div>
                 </div>

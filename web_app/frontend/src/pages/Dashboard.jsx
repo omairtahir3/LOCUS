@@ -20,7 +20,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 5000);
+    // Refresh every 30s — not 5s — to avoid hammering the backend
+    const interval = setInterval(() => {
+      if (!document.hidden) loadData();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -57,6 +60,15 @@ export default function Dashboard() {
     ? Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.adherence_percentage || 0), 0) / users.length 
     : 0;
   const missedDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.missed || 0), 0);
+
+  const handleClearNotifications = async () => {
+    try {
+      await notificationAPI.markAllRead();
+      setNotifications([]);
+    } catch (err) {
+      console.error('Error clearing notifications', err);
+    }
+  };
 
   if (loading && users.length === 0) {
     return (
@@ -151,10 +163,24 @@ export default function Dashboard() {
           gap: 4px;
         }
 
+        .dashboard-grid {
+          display: grid;
+          grid-template-columns: 1.7fr 1.3fr;
+          gap: 24px;
+        }
+        @media (max-width: 1024px) {
+          .dashboard-grid { grid-template-columns: 1fr; }
+        }
+
         .family-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
           gap: 20px;
+        }
+        @media (max-width: 768px) {
+          .welcome-section { flex-direction: column; align-items: flex-start; gap: 16px; }
+          .premium-stat-grid { grid-template-columns: 1fr; }
+          .family-grid { grid-template-columns: 1fr; }
         }
         .member-card {
           background: var(--surface);
@@ -265,8 +291,7 @@ export default function Dashboard() {
           {missedDoses > 0 && <div className="p-stat-trend" style={{ color: 'var(--danger)' }}>Critical</div>}
         </div>
       </div>
-
-      <div className="grid-2">
+      <div className="dashboard-grid">
         <section>
           <div className="card-header" style={{ marginBottom: 20 }}>
             <h3 className="card-title" style={{ fontSize: '1.1rem' }}>Family Status</h3>
@@ -287,9 +312,13 @@ export default function Dashboard() {
                 return (
                   <div key={u._id} className="member-card">
                     <div className="member-header">
-                      <div className="avatar" style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}>
-                        {u.name?.charAt(0)?.toUpperCase()}
-                      </div>
+                      {(u.picture || u.profile_picture) ? (
+                        <img src={u.picture || u.profile_picture} alt="" className="avatar" style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} />
+                      ) : (
+                        <div className="avatar" style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}>
+                          {u.name?.charAt(0)?.toUpperCase()}
+                        </div>
+                      )}
                       <div className="member-info" style={{ flex: 1 }}>
                         <h4>{u.name}</h4>
                         <p>{u.email}</p>
@@ -371,7 +400,11 @@ export default function Dashboard() {
             </div>
             
             {notifications.length > 0 && (
-              <button className="btn btn-secondary w-full" style={{ marginTop: 'auto', borderRadius: 12 }}>
+              <button 
+                className="btn btn-secondary w-full" 
+                style={{ marginTop: 'auto', borderRadius: 12 }}
+                onClick={handleClearNotifications}
+              >
                 Clear All Notifications
               </button>
             )}

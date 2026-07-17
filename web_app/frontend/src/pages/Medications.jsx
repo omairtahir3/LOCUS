@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { medicationAPI, caregiverAPI } from '../services/api';
-import { Pill, Plus, Edit, Trash2, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Pill, Plus, Edit, Trash2, CheckCircle, XCircle, Clock, SkipForward } from 'lucide-react';
+import { formatSmartDate } from '../utils/dateUtils';
 
 export default function Medications() {
   const [users, setUsers] = useState([]);
@@ -22,10 +23,10 @@ export default function Medications() {
     if (!selectedUser) return;
     loadMedData();
 
-    // Auto-refresh every 5s to pick up changes from the elderly user's app
+    // Refresh every 30s — skip when tab is hidden
     const interval = setInterval(() => {
-      loadMedData();
-    }, 5000);
+      if (!document.hidden) loadMedData();
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [selectedUser]);
@@ -41,16 +42,59 @@ export default function Medications() {
     } catch {}
   };
 
-  const statusBadge = (status) => {
-    const map = {
-      taken: { cls: 'badge-success', icon: <CheckCircle size={12} /> },
-      needs_verification: { cls: 'badge-warning', icon: <Clock size={12} /> },
-      missed: { cls: 'badge-danger', icon: <XCircle size={12} /> },
-      snoozed: { cls: 'badge-secondary', icon: <Clock size={12} /> },
-      scheduled: { cls: 'badge-neutral', icon: <Clock size={12} /> },
-    };
-    const s = map[status] || map.scheduled;
-    return <span className={`badge ${s.cls}`}>{s.icon} {status}</span>;
+  const markAsTaken = async (item, isHistory = false) => {
+    try {
+      if (item.log_id || item.id || item._id) {
+        const logId = item.log_id || item.id || item._id;
+        await medicationAPI.updateLog(logId, {
+          status: 'taken',
+          verification_method: 'manual',
+          notes: 'Marked as taken by caregiver',
+        });
+      } else {
+        // No log exists yet — create one
+        const [hh, mm] = (item.scheduled_time || '00:00').split(':');
+        const dt = new Date();
+        dt.setHours(parseInt(hh), parseInt(mm), 0, 0);
+        await medicationAPI.createLog({
+          medication_id: item.medication_id,
+          scheduled_time: dt.toISOString(),
+          status: 'taken',
+          verification_method: 'manual',
+          notes: 'Marked as taken by caregiver',
+        });
+      }
+      loadMedData();
+    } catch (err) {
+      console.error('Failed to mark as taken:', err);
+      alert('Failed to update. Please try again.');
+    }
+  };
+
+  const statusIcon = (s) => {
+    switch (s) {
+      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
+      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger)' }} />;
+      case 'snoozed': return <Clock size={14} style={{ color: 'var(--warning)' }} />;
+      case 'camera_off': return <SkipForward size={14} style={{ color: 'var(--text-muted)' }} />;
+      default: return <Clock size={14} style={{ color: 'var(--text-muted)' }} />;
+    }
+  };
+
+  const renderStatus = (status, notes) => {
+    const displayStatus = (status === 'camera_off' && notes === 'pending_camera_verification')
+      ? 'scheduled' : (status === 'skipped' ? 'camera_off' : status);
+    return (
+      <span className={`badge ${
+        displayStatus === 'taken' ? 'badge-success' :
+        displayStatus === 'needs_verification' ? 'badge-warning' :
+        displayStatus === 'missed' ? 'badge-danger' :
+        displayStatus === 'camera_off' ? 'badge-neutral' :
+        displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
+      }`}>
+        {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+      </span>
+    );
   };
 
   return (
@@ -64,7 +108,7 @@ export default function Medications() {
           className="form-select"
           value={selectedUser}
           onChange={e => setSelectedUser(e.target.value)}
-          style={{ width: 240 }}
+          style={{ width: '100%', maxWidth: 240 }}
         >
           <option value="">Select Family Member</option>
           {users.map(u => (
@@ -106,6 +150,7 @@ export default function Medications() {
                       <th>Dosage</th>
                       <th>Status</th>
                       <th>Verified By</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -115,14 +160,29 @@ export default function Medications() {
                         <td><strong>{s.medication_name}</strong></td>
                         <td className="text-muted">{s.dosage}</td>
                         <td>
-                          {statusBadge(s.status)}
+                          {renderStatus(s.status, s.notes)}
                           {s.status === 'taken' && s.verification_method && (
                             <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                              Verified: {s.verification_method === 'visual' ? 'Camera' : s.verification_method.charAt(0).toUpperCase() + s.verification_method.slice(1)}
+                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method}
                             </div>
                           )}
                         </td>
-                        <td className="text-muted text-sm">{s.verification_method ? (s.verification_method === 'visual' ? 'Camera' : s.verification_method.charAt(0).toUpperCase() + s.verification_method.slice(1)) : '—'}</td>
+                        <td className="text-muted text-sm">{s.verification_method ? (['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method) : '—'}</td>
+                        <td>
+                          {['camera_off', 'skipped', 'missed', 'scheduled', 'needs_verification'].includes(s.status) && (
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                background: 'var(--success-light, #D1FAE5)', color: 'var(--success, #059669)',
+                                border: '1px solid var(--success, #059669)', borderRadius: 8,
+                                fontSize: '0.75rem', padding: '4px 10px',
+                              }}
+                              onClick={() => markAsTaken(s)}
+                            >
+                              <CheckCircle size={12} /> Taken
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -154,20 +214,36 @@ export default function Medications() {
                       <th>Status</th>
                       <th>Confidence</th>
                       <th>Notes</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {historyData.map((h, i) => (
                       <tr key={h._id || i}>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {new Date(h.scheduled_time || h.createdAt).toLocaleString()}
+                          {formatSmartDate(h.scheduled_time || h.createdAt)}
                         </td>
                         <td>{h.medication_id?.name || h.medication_name || '—'}</td>
-                        <td>{statusBadge(h.status)}</td>
+                        <td>{renderStatus(h.status, h.notes)}</td>
                         <td className="text-muted">
                           {h.confidence_score ? `${(h.confidence_score * 100).toFixed(0)}%` : '—'}
                         </td>
                         <td className="text-muted text-sm">{h.notes || '—'}</td>
+                        <td>
+                          {['camera_off', 'skipped', 'missed'].includes(h.status) && (
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                background: 'var(--success-light, #D1FAE5)', color: 'var(--success, #059669)',
+                                border: '1px solid var(--success, #059669)', borderRadius: 8,
+                                fontSize: '0.75rem', padding: '4px 10px',
+                              }}
+                              onClick={() => markAsTaken(h, true)}
+                            >
+                              <CheckCircle size={12} /> Mark Taken
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

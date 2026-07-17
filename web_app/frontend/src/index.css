@@ -110,7 +110,7 @@ img {
   flex: 1;
   margin-left: var(--sidebar-width);
   padding: 24px 32px;
-  padding-top: calc(var(--topbar-height) + 24px);
+
   transition: margin-left var(--transition-base);
   min-height: 100vh;
 }
@@ -230,12 +230,18 @@ img {
   font-size: 1.2rem;
   font-weight: 700;
   color: var(--text-primary);
+  flex: 1;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-left: auto;
+}
+
+.topbar-right .form-input {
+  width: 220px;
 }
 
 /* ── Cards ──────────────────────────────────────────────────────────────── */
@@ -258,6 +264,8 @@ img {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .card-title {
@@ -511,7 +519,10 @@ img {
 /* ── Tables ─────────────────────────────────────────────────────────────── */
 
 .table-wrapper {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .table {
@@ -980,27 +991,74 @@ img {
   background: var(--text-muted);
 }
 
+/* ── Mobile Overlay ─────────────────────────────────────────────────────── */
+
+.mobile-header {
+  display: none;
+  height: 60px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  justify-content: space-between;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 90;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 95;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.open {
+  display: block;
+  opacity: 1;
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
 @media (max-width: 768px) {
+  .mobile-header {
+    display: flex;
+  }
+
   .sidebar {
-    display: none;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
   }
 
   .main-content {
     margin-left: 0;
     padding: 16px;
-    padding-top: calc(var(--topbar-height) + 16px);
+    padding-top: calc(60px + 16px);
   }
 
   .topbar {
-    left: 0;
+    display: none;
   }
 
   .stat-grid {
     grid-template-columns: 1fr 1fr;
   }
+}
 
+@media (max-width: 1024px) {
   .grid-2,
   .grid-3 {
     grid-template-columns: 1fr;
