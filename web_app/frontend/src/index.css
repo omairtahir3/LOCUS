@@ -397,6 +397,17 @@ img {
   background: var(--surface-hover);
 }
 
+.btn-outline-primary {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+.btn-outline-primary:hover {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
 .btn-danger {
   background: var(--danger);
   color: var(--text-inverse);
@@ -1032,11 +1043,24 @@ img {
 @media (max-width: 768px) {
   .mobile-header {
     display: flex;
+    z-index: 105;
+  }
+
+  .sidebar-overlay {
+    z-index: 90;
   }
 
   .sidebar {
+    top: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    max-height: none;
+    border-right: 1px solid var(--border);
+    border-bottom: none;
     transform: translateX(-100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 110;
+    box-shadow: 4px 0 6px -1px rgba(0, 0, 0, 0.1);
   }
 
   .sidebar.open {

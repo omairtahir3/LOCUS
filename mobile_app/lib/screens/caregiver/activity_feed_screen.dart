@@ -9,7 +9,7 @@ class ActivityFeedScreen extends StatelessWidget {
     {'time': '08:30 AM', 'type': 'medication', 'title': 'Medication taken', 'detail': 'Morning dose confirmed by camera', 'icon': Icons.monitor_heart_outlined},
     {'time': '09:00 AM', 'type': 'social', 'title': 'Social interaction', 'detail': 'Met with neighbor Mrs. Johnson', 'icon': Icons.psychology_outlined},
     {'time': '10:30 AM', 'type': 'movement', 'title': 'Walk detected', 'detail': '~2,400 steps in the garden', 'icon': Icons.directions_walk_outlined},
-    {'time': '12:00 PM', 'type': 'routine', 'title': 'Lunch preparation', 'detail': 'Kitchen activity for 25 minutes', 'icon': Icons.coffee_outlined},
+
     {'time': '02:00 PM', 'type': 'rest', 'title': 'Afternoon rest', 'detail': 'Resting period - 1.5 hours', 'icon': Icons.dark_mode_outlined},
     {'time': '04:00 PM', 'type': 'anomaly', 'title': '⚠ Anomaly detected', 'detail': 'Unusual inactivity period', 'icon': Icons.monitor_heart_outlined},
   ];

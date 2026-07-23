@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { User, Mail, Lock, UserCheck, Heart, ArrowRight } from 'lucide-react';
+import { User, Mail, Lock, UserCheck, Heart, ArrowRight, Users, Activity } from 'lucide-react';
+import { GoogleLogin } from '@react-oauth/google';
 
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('caregiver');
-  const { register, loading, error, setError } = useAuth();
+  const { register, googleLogin, loading, error, setError } = useAuth();
   const navigate = useNavigate();
+
+  const [googleRoleModal, setGoogleRoleModal] = useState({ show: false, token: null, name: '', picture: '', selectedRole: 'caregiver' });
 
   useEffect(() => {
     const style = document.createElement('style');
@@ -319,10 +322,121 @@ export default function Register() {
           </button>
         </form>
 
+        <div style={{ display: 'flex', alignItems: 'center', margin: '24px 0 16px 0' }}>
+          <div style={{ flex: 1, height: '1px', background: '#E2E8F0' }}></div>
+          <span style={{ padding: '0 12px', color: '#94A3B8', fontSize: '0.85rem', fontWeight: '500' }}>or sign up with</span>
+          <div style={{ flex: 1, height: '1px', background: '#E2E8F0' }}></div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+          <GoogleLogin
+            onSuccess={async (credentialResponse) => {
+              const res = await googleLogin(credentialResponse.credential, role, false);
+              if (res && res.requiresRole) {
+                setGoogleRoleModal({ show: true, token: res.token, name: res.name, picture: res.picture, selectedRole: role });
+                return;
+              }
+              if (res === true) {
+                const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
+                if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
+                  navigate('/dashboard');
+                } else {
+                  navigate('/my-dashboard');
+                }
+              }
+            }}
+            onError={() => setError('Google Sign-In failed or was cancelled')}
+            theme="outline"
+            shape="pill"
+            size="large"
+            width="350"
+          />
+        </div>
+
         <p className="reg-footer">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
       </div>
+
+      {googleRoleModal.show && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px'
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: '24px', padding: '32px',
+            width: '100%', maxWidth: '440px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            textAlign: 'center'
+          }}>
+            {googleRoleModal.picture && (
+              <img src={googleRoleModal.picture} alt="" style={{ width: '70px', height: '70px', borderRadius: '50%', margin: '0 auto 16px auto', border: '3px solid #3B82F6' }} />
+            )}
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1E293B', marginBottom: '8px' }}>
+              Welcome, {googleRoleModal.name}!
+            </h2>
+            <p style={{ color: '#64748B', fontSize: '0.95rem', marginBottom: '24px' }}>
+              To complete your Google registration, please select your role in LOCUS:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px', textAlign: 'left' }}>
+              <button
+                type="button"
+                onClick={() => setGoogleRoleModal(prev => ({ ...prev, selectedRole: 'caregiver' }))}
+                style={{
+                  padding: '16px', borderRadius: '16px', border: `2px solid ${googleRoleModal.selectedRole === 'caregiver' ? '#3B82F6' : '#E2E8F0'}`,
+                  background: googleRoleModal.selectedRole === 'caregiver' ? '#EFF6FF' : '#ffffff',
+                  cursor: 'pointer', transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ fontWeight: '600', fontSize: '1.05rem', color: '#1E293B', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Users size={18} color="#3B82F6" /> Be a Caregiver
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Monitor family members and handle medication alerts.</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGoogleRoleModal(prev => ({ ...prev, selectedRole: 'user' }))}
+                style={{
+                  padding: '16px', borderRadius: '16px', border: `2px solid ${googleRoleModal.selectedRole === 'user' ? '#3B82F6' : '#E2E8F0'}`,
+                  background: googleRoleModal.selectedRole === 'user' ? '#EFF6FF' : '#ffffff',
+                  cursor: 'pointer', transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ fontWeight: '600', fontSize: '1.05rem', color: '#1E293B', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={18} color="#EC4899" /> Track Myself
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Manage my own health, prescriptions, and daily schedule.</div>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={!googleRoleModal.selectedRole || loading}
+              onClick={async () => {
+                const ok = await googleLogin(googleRoleModal.token, googleRoleModal.selectedRole, true);
+                if (ok === true) {
+                  const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
+                  if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
+                    navigate('/dashboard');
+                  } else {
+                    navigate('/my-dashboard');
+                  }
+                }
+              }}
+              style={{
+                width: '100%', padding: '14px', borderRadius: '14px',
+                background: !googleRoleModal.selectedRole ? '#94A3B8' : '#3B82F6',
+                color: '#ffffff', fontWeight: '600', fontSize: '1rem', border: 'none', cursor: !googleRoleModal.selectedRole ? 'not-allowed' : 'pointer',
+                boxShadow: !googleRoleModal.selectedRole ? 'none' : '0 10px 15px -3px rgba(59, 130, 246, 0.3)'
+              }}
+            >
+              {loading ? 'Creating Account...' : 'Confirm & Complete Registration'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

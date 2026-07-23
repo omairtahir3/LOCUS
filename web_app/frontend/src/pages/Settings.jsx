@@ -31,11 +31,18 @@ export default function SettingsPage() {
 
       {/* Profile */}
       <div className="card mb-4">
-        <div className="card-header">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <User size={18} />
             <div className="card-title">Profile Information</div>
           </div>
+          {(user?.picture || user?.profile_picture) ? (
+            <img src={user.picture || user.profile_picture} alt="" style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }} />
+          ) : (
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>
+              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+          )}
         </div>
         <div className="grid-2">
           <div className="form-group">

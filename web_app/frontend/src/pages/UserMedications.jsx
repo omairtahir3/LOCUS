@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { userAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Pill, Plus, Edit3, Trash2, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { formatSmartDate } from '../utils/dateUtils';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function UserMedications() {
+  const { user } = useAuth();
   const [medications, setMedications] = useState([]);
   const [history, setHistory] = useState([]);
   const [schedule, setSchedule] = useState([]);
@@ -148,25 +151,31 @@ export default function UserMedications() {
                         <span className={`badge ${
                           s.status === 'taken' ? 'badge-success' :
                           s.status === 'missed' ? 'badge-danger' :
+                          s.status === 'snoozed' ? 'badge-warning' :
                           s.status === 'needs_verification' ? 'badge-warning' : 'badge-neutral'
                         }`}>
                           {statusIcon(s.status)} {s.status}
                         </span>
                         {s.status === 'taken' && s.verification_method && (
                           <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                            Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual' ? 'Manual' : s.verification_method}
+                            Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual_caregiver' ? 'Caregiver' : s.verification_method === 'manual' ? 'Manual' : s.verification_method}
                           </div>
                         )}
                       </td>
                       <td>
-                        {s.status === 'needs_verification' && (
+                        {s.status === 'needs_verification' && user?.role === 'elderly' && (
+                          <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Clock size={12} /> Awaiting Caregiver Review
+                          </span>
+                        )}
+                        {s.status === 'needs_verification' && user?.role !== 'elderly' && (
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button 
                               className="btn btn-sm" 
                               style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }}
                               onClick={async () => {
                                 try {
-                                  await userAPI.updateLog(s.id, { status: 'taken', verification_method: 'manual', notes: 'Manually verified after AI failure' });
+                                  await userAPI.updateLog(s.id || s._id, { status: 'taken', verification_method: 'manual', notes: 'Manually verified' });
                                   loadData();
                                 } catch(e) { alert('Verification failed'); }
                               }}
@@ -178,12 +187,56 @@ export default function UserMedications() {
                               style={{ background: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)' }}
                               onClick={async () => {
                                 try {
-                                  await userAPI.updateLog(s.id, { status: 'missed', verification_method: 'manual', notes: 'Manually marked as missed' });
+                                  await userAPI.updateLog(s.id || s._id, { status: 'scheduled', verification_method: 'manual', notes: 'Returned to scheduled' });
                                   loadData();
                                 } catch(e) { alert('Update failed'); }
                               }}
                             >
                               <XCircle size={14} /> No
+                            </button>
+                          </div>
+                        )}
+                        {['camera_off', 'skipped'].includes(s.status) && user?.role !== 'elderly' && (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button 
+                              className="btn btn-sm" 
+                              style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}
+                              onClick={async () => {
+                                try {
+                                  if (s.id || s._id) {
+                                    await userAPI.updateLog(s.id || s._id, { status: 'taken', verification_method: 'manual', notes: 'Manually confirmed' });
+                                  } else {
+                                    const timeParts = s.scheduled_time.split(':');
+                                    const dt = new Date();
+                                    dt.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), 0, 0);
+                                    await userAPI.createLog({
+                                      medication_id: s.medication_id,
+                                      scheduled_time: dt.toISOString(),
+                                      status: 'taken',
+                                      verification_method: 'manual',
+                                    });
+                                  }
+                                  loadData();
+                                } catch(e) { alert('Update failed'); }
+                              }}
+                            >
+                              <CheckCircle size={14} /> Take (Manual)
+                            </button>
+                          </div>
+                        )}
+                        {['scheduled', 'pending', 'snoozed'].includes(s.status) && (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button 
+                              className="btn btn-sm btn-secondary" 
+                              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                              onClick={async () => {
+                                try {
+                                  await userAPI.snoozeLog(s.id || s._id, { snooze_duration_minutes: 10 });
+                                  loadData();
+                                } catch(e) { alert('Snooze failed'); }
+                              }}
+                            >
+                              <Clock size={14} /> Snooze 10m
                             </button>
                           </div>
                         )}
@@ -293,23 +346,28 @@ export default function UserMedications() {
                         {(() => {
                            if (!log.scheduled_time) return '-';
                            const ds = log.scheduled_time.endsWith('Z') ? log.scheduled_time : log.scheduled_time + 'Z';
-                           const d = new Date(ds);
-                           return isNaN(d.getTime()) ? log.scheduled_time : d.toLocaleString();
+                           return formatSmartDate(ds);
                         })()}
                       </td>
                       <td style={{ fontWeight: 600 }}>{log.medication_name || 'Unknown'}</td>
                       <td className="text-muted">{log.dosage || '-'}</td>
                       <td>
-                        <span className={`badge ${
-                          log.status === 'taken' ? 'badge-success' :
-                          log.status === 'missed' ? 'badge-danger' :
-                          log.status === 'needs_verification' ? 'badge-warning' : 'badge-neutral'
-                        }`}>
-                          {statusIcon(log.status)} {log.status}
-                        </span>
+                        {(() => {
+                          const ds = (log.status === 'skipped' || log.status === 'camera_off') ? 'camera_off' : log.status;
+                          return (
+                            <span className={`badge ${
+                              ds === 'taken' ? 'badge-success' :
+                              ds === 'missed' ? 'badge-danger' :
+                              ds === 'needs_verification' ? 'badge-warning' : 'badge-neutral'
+                            }`}>
+                              {statusIcon(ds)} {ds === 'camera_off' ? 'CAMERA OFF' : (ds || '').toUpperCase().replace('_', ' ')}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="text-muted text-sm">
                         {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera' :
+                         log.verification_method === 'manual_caregiver' ? 'Caregiver' :
                          log.verification_method === 'manual' ? 'Manual' :
                          log.verification_method || '-'}
                         {log.confidence_score != null && (

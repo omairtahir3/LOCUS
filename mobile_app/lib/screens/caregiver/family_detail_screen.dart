@@ -56,6 +56,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
     final taken = adh?['taken'] ?? 0;
     final missed = adh?['missed'] ?? 0;
     final snoozed = adh?['snoozed'] ?? 0;
+    final skipped = adh?['skipped'] ?? 0;
     final pct = adh?['adherence_percentage'] ?? 0;
 
     return Scaffold(
@@ -114,16 +115,17 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
               ),
               const SizedBox(height: 16),
 
-              // ── Today's stats ──
-              Row(
+              // ── 7-Day Stats ──
+              Text('7-Day Stats', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   _statChip('Taken', '$taken', AppColors.success),
-                  const SizedBox(width: 8),
                   _statChip('Missed', '$missed', AppColors.danger),
-                  const SizedBox(width: 8),
-                  _statChip('Snoozed', '$snoozed', AppColors.warning),
-                  const SizedBox(width: 8),
-                  _statChip('Adherence', '${(pct is num ? pct : 0).toStringAsFixed(0)}%', AppColors.primary),
+                  _statChip('Skipped', '$skipped', AppColors.warning),
+                  _statChip('Target', '${(pct is num ? pct : 0).toStringAsFixed(0)}%', AppColors.primary),
                 ],
               ),
               const SizedBox(height: 20),
@@ -353,31 +355,133 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
 
   // ── Schedule Card ──
   Widget _scheduleCard(Map<String, dynamic> s) {
+    final status = s['status'] ?? 'scheduled';
+    final showActions = status == 'scheduled' || status == 'needs_verification' || status == 'missed';
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(8)),
-            child: Icon(Icons.medication, size: 18, color: AppColors.primary),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(8)),
+                child: Icon(Icons.medication, size: 18, color: AppColors.primary),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s['medication_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text('${s['dosage'] ?? ''} • ${s['scheduled_time'] ?? ''}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  ],
+                ),
+              ),
+              _statusChip(status),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (showActions) ...[
+            const SizedBox(height: 10),
+            Row(
               children: [
-                Text(s['medication_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                Text('${s['dosage'] ?? ''} • ${s['scheduled_time'] ?? ''}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                Expanded(
+                  child: SizedBox(
+                    height: 34,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _caregiverMarkTaken(s),
+                      icon: const Icon(Icons.check_circle, size: 14),
+                      label: const Text('Mark Taken', style: TextStyle(fontSize: 11)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ),
+                ),
+                if (status == 'needs_verification') ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SizedBox(
+                      height: 34,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _caregiverReschedule(s),
+                        icon: const Icon(Icons.schedule, size: 14),
+                        label: const Text('Reschedule', style: TextStyle(fontSize: 11)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF92400E),
+                          side: const BorderSide(color: Color(0xFFFDE68A)),
+                          backgroundColor: const Color(0xFFFEF3C7),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
-          ),
-          _statusChip(s['status'] ?? 'scheduled'),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _caregiverMarkTaken(Map<String, dynamic> s) async {
+    try {
+      final logId = s['log_id'] ?? s['id'];
+      if (logId != null) {
+        await ApiService.updateLog(logId, 'taken', notes: 'Confirmed by caregiver');
+      } else {
+        final timeParts = (s['scheduled_time'] as String).split(':');
+        final now = DateTime.now();
+        final dt = DateTime(now.year, now.month, now.day, int.parse(timeParts[0]), int.parse(timeParts[1]));
+        await ApiService.recordDose(
+          s['medication_id'],
+          'taken',
+          dt.toIso8601String(),
+          notes: 'Confirmed by caregiver',
+        );
+      }
+      _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Marked as taken'), backgroundColor: AppColors.success),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
+  }
+
+  Future<void> _caregiverReschedule(Map<String, dynamic> s) async {
+    try {
+      final logId = s['log_id'] ?? s['id'];
+      if (logId != null) {
+        await ApiService.updateLog(logId, 'scheduled', notes: 'Rescheduled by caregiver');
+      }
+      _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rescheduled — camera will keep verifying'), backgroundColor: AppColors.warning),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
   }
 
   // ── History Card ──

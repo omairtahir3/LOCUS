@@ -16,9 +16,9 @@ class ApiService {
     }
     
     // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
-    // and the laptop's actual IP (192.168.1.10) for physical Android devices via USB.
+    // and the laptop's actual IP for physical Android devices via Wi-Fi/USB.
     if (kIsWeb) return 'http://localhost:5000/api';
-    return 'http://192.168.1.10:5000/api';
+    return 'http://192.168.1.12:5000/api';
   }
 
   static late SharedPreferences _prefs;
@@ -29,7 +29,17 @@ class ApiService {
     _prefs = await SharedPreferences.getInstance();
     _token = _prefs.getString('locus_token');
     final userJson = _prefs.getString('locus_user');
-    if (userJson != null) _user = jsonDecode(userJson);
+    if (userJson != null) {
+      final decoded = jsonDecode(userJson);
+      // Unwrap nested 'user' key from legacy cached sessions
+      if (decoded is Map && decoded['user'] is Map && decoded['_id'] == null) {
+        _user = Map<String, dynamic>.from(decoded['user']);
+        // Re-save in unwrapped format
+        await _prefs.setString('locus_user', jsonEncode(_user));
+      } else {
+        _user = Map<String, dynamic>.from(decoded);
+      }
+    }
   }
 
   static bool get isLoggedIn => _token != null;
@@ -41,6 +51,16 @@ class ApiService {
     'Content-Type': 'application/json',
     if (_token != null) 'Authorization': 'Bearer $_token',
   };
+
+  static Future<Map<String, dynamic>> put(String endpoint, Map<String, dynamic> body) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl$endpoint'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    if (res.body.isEmpty) return {'statusCode': res.statusCode};
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
 
   // ── Auth ────────────────────────────────────────────────────────────────
 
@@ -69,9 +89,16 @@ class ApiService {
     if (res.statusCode == 200) {
       final token = data['access_token'] ?? data['token'];
       _token = token;
-      // Fetch user profile from /me
+      // Fetch user profile from /me — response is { user: { _id, name, email, role, ... } }
       final meRes = await http.get(Uri.parse('$baseUrl/auth/me'), headers: _headers);
-      final user = meRes.statusCode == 200 ? jsonDecode(meRes.body) : {'email': email};
+      Map<String, dynamic> user;
+      if (meRes.statusCode == 200) {
+        final body = jsonDecode(meRes.body);
+        // Unwrap nested 'user' key if present
+        user = body['user'] is Map ? Map<String, dynamic>.from(body['user']) : Map<String, dynamic>.from(body);
+      } else {
+        user = {'email': email};
+      }
       await _saveSession(token, user);
     }
     return {'statusCode': res.statusCode, 'data': data};
@@ -82,6 +109,64 @@ class ApiService {
     _user = user;
     await _prefs.setString('locus_token', token);
     await _prefs.setString('locus_user', jsonEncode(user));
+  }
+
+  static Future<Map<String, dynamic>> googleLogin(String googleToken, {String role = 'caregiver', bool confirmRole = false}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/google'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'token': googleToken, 'role': role, 'confirmRole': confirmRole}),
+    );
+    final data = jsonDecode(res.body);
+    if (res.statusCode == 200 && data['requiresRole'] != true) {
+      final token = data['access_token'] ?? data['token'];
+      _token = token;
+      final meRes = await http.get(Uri.parse('$baseUrl/auth/me'), headers: _headers);
+      Map<String, dynamic> user;
+      if (meRes.statusCode == 200) {
+        final body = jsonDecode(meRes.body);
+        user = body['user'] is Map ? Map<String, dynamic>.from(body['user']) : Map<String, dynamic>.from(body);
+      } else {
+        user = data['user'] is Map ? Map<String, dynamic>.from(data['user']) : {};
+      }
+      await _saveSession(token, user);
+    }
+    return {'statusCode': res.statusCode, 'data': data};
+  }
+
+  static Future<Map<String, dynamic>> forgotPassword(String email) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/forgot-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+      final data = jsonDecode(res.body);
+      return {'statusCode': res.statusCode, 'data': data};
+    } catch (e) {
+      return {'statusCode': 500, 'data': {'error': e.toString()}};
+    }
+  }
+
+  static Future<Map<String, dynamic>> resetPassword({required String id, required String token, required String newPassword}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/reset-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'id': id, 'token': token, 'newPassword': newPassword}),
+      );
+      final data = jsonDecode(res.body);
+      return {'statusCode': res.statusCode, 'data': data};
+    } catch (e) {
+      return {'statusCode': 500, 'data': {'error': e.toString()}};
+    }
+  }
+
+  static Future<void> logout() async {
+    _token = null;
+    _user = null;
+    await _prefs.remove('locus_token');
+    await _prefs.remove('locus_user');
   }
 
   static Future<void> clearToken() async {
@@ -96,7 +181,15 @@ class ApiService {
   static Future<List<dynamic>> getSchedule({String? userId}) async {
     final query = userId != null ? '?userId=$userId' : '';
     final res = await http.get(Uri.parse('$baseUrl/medications/schedule/today$query'), headers: _headers);
-    if (res.statusCode == 200) return jsonDecode(res.body) is List ? jsonDecode(res.body) : [];
+    if (res.statusCode == 200) {
+      final list = (jsonDecode(res.body) is List ? jsonDecode(res.body) as List : []).toList();
+      list.sort((a, b) {
+        final tA = (a is Map && a['scheduled_time'] != null) ? a['scheduled_time'].toString() : '00:00';
+        final tB = (b is Map && b['scheduled_time'] != null) ? b['scheduled_time'].toString() : '00:00';
+        return tA.compareTo(tB);
+      });
+      return list;
+    }
     return [];
   }
 
@@ -112,7 +205,22 @@ class ApiService {
     final res = await http.get(Uri.parse('$baseUrl/medications$query'), headers: _headers);
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
-      return data is List ? data : (data['medications'] ?? []);
+      final list = (data is List ? data : (data['medications'] ?? [])).toList();
+      for (var med in list) {
+        if (med is Map && med['scheduled_times'] is List) {
+          (med['scheduled_times'] as List).sort((a, b) => a.toString().compareTo(b.toString()));
+        }
+      }
+      list.sort((a, b) {
+        final timesA = (a is Map && a['scheduled_times'] is List) ? a['scheduled_times'] as List : [];
+        final timesB = (b is Map && b['scheduled_times'] is List) ? b['scheduled_times'] as List : [];
+        final tA = timesA.isNotEmpty ? timesA.first.toString() : '99:99';
+        final tB = timesB.isNotEmpty ? timesB.first.toString() : '99:99';
+        final comp = tA.compareTo(tB);
+        if (comp != 0) return comp;
+        return ((a is Map ? a['name'] : '') ?? '').toString().compareTo(((b is Map ? b['name'] : '') ?? '').toString());
+      });
+      return list;
     }
     return [];
   }
@@ -157,6 +265,18 @@ class ApiService {
     );
     if (res.statusCode >= 400) {
       throw Exception(jsonDecode(res.body)['error'] ?? 'Failed to update log');
+    }
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> snoozeLog(String logId, {int minutes = 10}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/medications/logs/$logId/snooze'),
+      headers: _headers,
+      body: jsonEncode({'snooze_duration_minutes': minutes}),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Failed to snooze log');
     }
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
@@ -324,6 +444,22 @@ class ApiService {
     await http.delete(Uri.parse('$baseUrl/notifications/$id'), headers: _headers);
   }
 
+  static Future<void> respondNotification(String id, String message) async {
+    await http.post(
+      Uri.parse('$baseUrl/notifications/$id/respond'),
+      headers: _headers,
+      body: jsonEncode({'message': message}),
+    );
+  }
+
+  static Future<void> snoozeNotification(String id, {int minutes = 10}) async {
+    await http.post(
+      Uri.parse('$baseUrl/notifications/$id/snooze'),
+      headers: _headers,
+      body: jsonEncode({'snooze_duration_minutes': minutes}),
+    );
+  }
+
   // ── AI Detection (proxied through Node.js backend) ─────────────────────
 
   static Future<Map<String, dynamic>> startDetection({
@@ -361,11 +497,28 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getKeyframes({int limit = 50}) async {
-    final res = await http.get(Uri.parse('$baseUrl/detection/keyframes?limit=$limit'), headers: _headers);
+    final res = await http.get(
+      Uri.parse('$baseUrl/detection/keyframes?limit=$limit'),
+      headers: _headers,
+    );
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       return data is List ? data : [];
     }
     return [];
   }
+
+  static Future<List<dynamic>> getEvidence({int limit = 50}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/detection/evidence?limit=$limit'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
+  }
+
+  static String evidenceImageUrl(String evidenceId) => '$baseUrl/detection/evidence/$evidenceId/image';
 }

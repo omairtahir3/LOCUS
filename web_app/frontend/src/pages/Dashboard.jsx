@@ -60,6 +60,8 @@ export default function Dashboard() {
     ? Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.adherence_percentage || 0), 0) / users.length 
     : 0;
   const missedDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.missed || 0), 0);
+  const skippedDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.skipped || 0), 0);
+  const takenDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.taken || 0), 0);
 
   const handleClearNotifications = async () => {
     try {
@@ -289,6 +291,20 @@ export default function Dashboard() {
           <div className="p-stat-value">{missedDoses}</div>
           <div className="p-stat-label">Missed Doses</div>
           {missedDoses > 0 && <div className="p-stat-trend" style={{ color: 'var(--danger)' }}>Critical</div>}
+        </div>
+        <div className="p-stat-card">
+          <div className="p-stat-icon" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}>
+            <AlertTriangle size={24} />
+          </div>
+          <div className="p-stat-value">{skippedDoses}</div>
+          <div className="p-stat-label">Camera Off (7d)</div>
+        </div>
+        <div className="p-stat-card">
+          <div className="p-stat-icon" style={{ background: 'var(--success-light)', color: 'var(--success)' }}>
+            <CheckCircle size={24} />
+          </div>
+          <div className="p-stat-value">{takenDoses}</div>
+          <div className="p-stat-label">Taken (7d)</div>
         </div>
       </div>
       <div className="dashboard-grid">

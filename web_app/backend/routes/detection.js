@@ -10,7 +10,7 @@ const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
 // Unprotected because standard <img> tags cannot send Authorization headers
 router.get('/keyframes/:id/image', async (req, res) => {
   try {
-    const url = `${AI_BACKEND}/api/detection/keyframes/${req.params.id}/image`;
+    const url = `${AI_BACKEND}/api/keyframes/${req.params.id}/image`;
     const response = await axios({ method: 'get', url, responseType: 'stream', timeout: 10000 });
     res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
     response.data.pipe(res);
@@ -19,6 +19,23 @@ router.get('/keyframes/:id/image', async (req, res) => {
       res.status(404).json({ error: 'Keyframe not found' });
     } else {
       res.status(500).json({ error: 'Failed to fetch keyframe image' });
+    }
+  }
+});
+
+// GET /api/detection/evidence/:id/image — serve evidence image (binary pipe)
+// Unprotected because <img> tags cannot send Authorization headers
+router.get('/evidence/:id/image', async (req, res) => {
+  try {
+    const url = `${AI_BACKEND}/api/keyframes/evidence/${req.params.id}/image`;
+    const response = await axios({ method: 'get', url, responseType: 'stream', timeout: 10000 });
+    res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    response.data.pipe(res);
+  } catch (err) {
+    if (err.response?.status === 404) {
+      res.status(404).json({ error: 'Evidence frame not found' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch evidence image' });
     }
   }
 });
@@ -55,9 +72,29 @@ async function proxy(req, res, method, path) {
 }
 
 // POST /api/detection/start
-router.post('/start', (req, res) => {
+router.post('/start', async (req, res) => {
   if (!req.body) req.body = {};
   req.body.user_id = req.user._id.toString();
+
+  // Mark camera_used = true for this specific scheduled dose
+  if (req.body.medication_id && req.body.scheduled_time) {
+    try {
+      const MedicationLog = require('../models/MedicationLog');
+      // scheduled_time passed from frontend is ISO string, parse it to ensure match or match date loosely if needed.
+      // But standard exact match works if they pass the exact ISO string.
+      await MedicationLog.findOneAndUpdate(
+        { 
+          user_id: req.user._id, 
+          medication_id: req.body.medication_id,
+          scheduled_time: new Date(req.body.scheduled_time)
+        },
+        { $set: { camera_used: true } }
+      );
+    } catch (e) {
+      console.error('[Detection Proxy] Failed to update camera_used flag', e.message);
+    }
+  }
+
   return proxy(req, res, 'post', '/api/detection/start');
 });
 
@@ -76,6 +113,9 @@ router.get('/medicine-count', (req, res) => proxy(req, res, 'get', '/api/detecti
 // GET /api/detection/scheduler — get medication scheduler state
 router.get('/scheduler', (req, res) => proxy(req, res, 'get', '/api/scheduler/status'));
 
+// Configure AI pipeline camera
+router.post('/configure', (req, res) => proxy(req, res, 'post', '/api/configure'));
+
 // GET /api/detection/keyframes — list stored keyframes
 router.get('/keyframes', async (req, res) => {
   try {
@@ -93,26 +133,85 @@ router.get('/keyframes', async (req, res) => {
       params.set('user_id', req.query.user_id);
     }
 
-    const url = `${AI_BACKEND}/api/detection/keyframes?${params.toString()}`;
+    const url = `${AI_BACKEND}/api/keyframes?${params.toString()}`;
     const response = await axios.get(url, { timeout: 60000 });
     let keyframes = response.data;
 
-    // Additional access control: caregivers can only see their monitored users
+    // Additional access control: caregivers can only see their monitored users (or their own frames)
     if (isCaregiverLike && req.user.role !== 'admin') {
       const allowedUserIds = [req.user._id.toString()];
-      if (req.user.monitoring_users) {
+      if (req.user.monitoring_users && Array.isArray(req.user.monitoring_users)) {
         req.user.monitoring_users.forEach(id => allowedUserIds.push(id.toString()));
       }
-      keyframes = keyframes.filter(kf => {
-        if (!kf.user_id) return false;
-        return allowedUserIds.includes(kf.user_id);
-      });
+      keyframes = keyframes.filter(kf => kf && kf.user_id && allowedUserIds.includes(kf.user_id.toString()));
     }
 
     res.json(keyframes);
   } catch (err) {
     console.error('[Detection Proxy] GET /api/detection/keyframes ERROR:', err.message);
     res.status(500).json({ error: 'Failed to fetch keyframes' });
+  }
+});
+
+// GET /api/detection/keyframes/sync — fetch keyframes and base64 for local offloading
+router.get('/keyframes/sync', async (req, res) => {
+  try {
+    const params = new URLSearchParams();
+    if (req.query.user_id) params.set('user_id', req.query.user_id);
+    else params.set('user_id', req.user._id.toString());
+    
+    const url = `${AI_BACKEND}/api/keyframes/sync?${params.toString()}`;
+    const response = await axios.get(url, { timeout: 60000 });
+    res.json(response.data);
+  } catch (err) {
+    console.error('[Detection Proxy] GET /api/detection/keyframes/sync ERROR:', err.message);
+    res.status(500).json({ error: 'Failed to sync keyframes' });
+  }
+});
+
+// POST /api/detection/keyframes/sync/confirm — confirm local storage to delete from backend
+router.post('/keyframes/sync/confirm', async (req, res) => {
+  try {
+    const url = `${AI_BACKEND}/api/keyframes/sync/confirm`;
+    const response = await axios.post(url, req.body, { timeout: 60000 });
+    res.json(response.data);
+  } catch (err) {
+    console.error('[Detection Proxy] POST /api/detection/keyframes/sync/confirm ERROR:', err.message);
+    res.status(500).json({ error: 'Failed to confirm sync' });
+  }
+});
+
+// GET /api/detection/evidence — list evidence frames
+router.get('/evidence', async (req, res) => {
+  try {
+    const params = new URLSearchParams();
+    if (req.query.limit) params.set('limit', req.query.limit);
+
+    // For normal users, only show their own evidence
+    const isCaregiverLike = req.user.role === 'admin' || req.user.role === 'caregiver' || req.user.role === 'family_member';
+    if (!isCaregiverLike) {
+      params.set('user_id', req.user._id.toString());
+    } else if (req.query.user_id) {
+      params.set('user_id', req.query.user_id);
+    }
+
+    const url = `${AI_BACKEND}/api/keyframes/evidence?${params.toString()}`;
+    const response = await axios.get(url, { timeout: 60000 });
+    let evidence = response.data || [];
+
+    // Additional access control: caregivers can only see evidence of their monitored users (or their own)
+    if (isCaregiverLike && req.user.role !== 'admin') {
+      const allowedUserIds = [req.user._id.toString()];
+      if (req.user.monitoring_users && Array.isArray(req.user.monitoring_users)) {
+        req.user.monitoring_users.forEach(id => allowedUserIds.push(id.toString()));
+      }
+      evidence = evidence.filter(ev => ev && ev.user_id && allowedUserIds.includes(ev.user_id.toString()));
+    }
+
+    res.json(evidence);
+  } catch (err) {
+    console.error('[Detection Proxy] GET /api/detection/evidence ERROR:', err.message);
+    res.status(500).json({ error: 'Failed to fetch evidence frames' });
   }
 });
 

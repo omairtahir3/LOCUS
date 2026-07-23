@@ -79,8 +79,37 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('locus_user');
   };
 
+  const googleLogin = async (googleToken, role = 'caregiver', confirmRole = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authAPI.googleLogin(googleToken, role, confirmRole);
+      if (res.data.requiresRole) {
+        setLoading(false);
+        return res.data;
+      }
+      const { user: u, token: t } = res.data;
+      
+      if (u.role === 'elderly') {
+        setError('Elderly users must use the LOCUS mobile app. Web access is restricted.');
+        return false;
+      }
+      
+      setUser(u);
+      setToken(t);
+      localStorage.setItem('locus_token', t);
+      localStorage.setItem('locus_user', JSON.stringify(u));
+      return true;
+    } catch (err) {
+      setError(err.response?.data?.error || 'Google Sign-In failed');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, error, login, register, logout, setError }}>
+    <AuthContext.Provider value={{ user, token, loading, error, login, register, googleLogin, logout, setError }}>
       {children}
     </AuthContext.Provider>
   );

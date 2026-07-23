@@ -71,6 +71,34 @@ export default function Medications() {
     }
   };
 
+  const markAsMissed = async (item) => {
+    try {
+      if (item.log_id || item.id || item._id) {
+        const logId = item.log_id || item.id || item._id;
+        await medicationAPI.updateLog(logId, {
+          status: 'missed',
+          verification_method: 'manual',
+          notes: 'Marked as missed by caregiver',
+        });
+      } else {
+        const [hh, mm] = (item.scheduled_time || '00:00').split(':');
+        const dt = new Date();
+        dt.setHours(parseInt(hh), parseInt(mm), 0, 0);
+        await medicationAPI.createLog({
+          medication_id: item.medication_id,
+          scheduled_time: dt.toISOString(),
+          status: 'missed',
+          verification_method: 'manual',
+          notes: 'Marked as missed by caregiver',
+        });
+      }
+      loadMedData();
+    } catch (err) {
+      console.error('Failed to mark as missed:', err);
+      alert('Failed to update. Please try again.');
+    }
+  };
+
   const statusIcon = (s) => {
     switch (s) {
       case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
@@ -150,7 +178,6 @@ export default function Medications() {
                       <th>Dosage</th>
                       <th>Status</th>
                       <th>Verified By</th>
-                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -163,26 +190,11 @@ export default function Medications() {
                           {renderStatus(s.status, s.notes)}
                           {s.status === 'taken' && s.verification_method && (
                             <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method}
+                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual_caregiver' ? 'Caregiver' : s.verification_method === 'manual' ? 'Manual' : s.verification_method}
                             </div>
                           )}
                         </td>
-                        <td className="text-muted text-sm">{s.verification_method ? (['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method) : '—'}</td>
-                        <td>
-                          {['camera_off', 'skipped', 'missed', 'scheduled', 'needs_verification'].includes(s.status) && (
-                            <button
-                              className="btn btn-sm"
-                              style={{
-                                background: 'var(--success-light, #D1FAE5)', color: 'var(--success, #059669)',
-                                border: '1px solid var(--success, #059669)', borderRadius: 8,
-                                fontSize: '0.75rem', padding: '4px 10px',
-                              }}
-                              onClick={() => markAsTaken(s)}
-                            >
-                              <CheckCircle size={12} /> Taken
-                            </button>
-                          )}
-                        </td>
+                        <td className="text-muted text-sm">{s.verification_method ? (['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual_caregiver' ? 'Caregiver' : s.verification_method === 'manual' ? 'Manual' : s.verification_method) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -230,18 +242,29 @@ export default function Medications() {
                         </td>
                         <td className="text-muted text-sm">{h.notes || '—'}</td>
                         <td>
-                          {['camera_off', 'skipped', 'missed'].includes(h.status) && (
-                            <button
-                              className="btn btn-sm"
-                              style={{
-                                background: 'var(--success-light, #D1FAE5)', color: 'var(--success, #059669)',
-                                border: '1px solid var(--success, #059669)', borderRadius: 8,
-                                fontSize: '0.75rem', padding: '4px 10px',
-                              }}
-                              onClick={() => markAsTaken(h, true)}
-                            >
-                              <CheckCircle size={12} /> Mark Taken
-                            </button>
+                          {['camera_off', 'skipped', 'scheduled', 'needs_verification'].includes(h.status) && (
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button
+                                className="btn btn-sm"
+                                style={{
+                                  background: 'var(--success-light, #D1FAE5)', color: 'var(--success, #059669)',
+                                  border: '1px solid var(--success, #059669)', borderRadius: 8,
+                                  fontSize: '0.75rem', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4
+                                }}
+                                onClick={() => markAsTaken(h, true)}
+                              >
+                                <CheckCircle size={12} /> Taken
+                              </button>
+                              <button
+                                className="btn btn-sm btn-danger"
+                                style={{
+                                  borderRadius: 8, fontSize: '0.75rem', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4
+                                }}
+                                onClick={() => markAsMissed(h)}
+                              >
+                                <XCircle size={12} /> Missed
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>

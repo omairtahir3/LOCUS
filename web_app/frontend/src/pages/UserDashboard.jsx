@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { userAPI } from '../services/api';
+import { userAPI, authAPI, detectionAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
   Pill, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp,
-  ChevronRight, Calendar, Zap, Bell, Target, ArrowRight, Activity
+  ChevronRight, Calendar, Zap, Bell, Target, ArrowRight, Activity, Camera
 } from 'lucide-react';
 
 export default function UserDashboard() {
@@ -12,8 +12,15 @@ export default function UserDashboard() {
   const [adherence, setAdherence] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // AI Config State
+  const [configModal, setConfigModal] = useState(false);
+  const [cameraUrl, setCameraUrl] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [rtmpHost, setRtmpHost] = useState('');
+
   useEffect(() => {
     loadData();
+    authAPI.getRtmpHost().then(res => setRtmpHost(res.data.host)).catch(() => setRtmpHost(window.location.hostname));
     const interval = setInterval(() => {
       if (!document.hidden) loadData();
     }, 30000);
@@ -60,6 +67,82 @@ export default function UserDashboard() {
     }
   };
 
+  const markAsMissed = async (item) => {
+    try {
+      if (item.id || item.log_id) {
+        await userAPI.updateLog(item.log_id || item.id, {
+          status: 'missed',
+          verification_method: 'manual',
+          notes: 'Manually marked as missed'
+        });
+      } else {
+        const timeParts = item.scheduled_time.split(':');
+        const dt = new Date();
+        dt.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), 0, 0);
+        await userAPI.createLog({
+          medication_id: item.medication_id,
+          scheduled_time: dt.toISOString(),
+          status: 'missed',
+          verification_method: 'manual',
+        });
+      }
+      loadData();
+    } catch (err) {
+      console.error('Failed to mark as missed:', err);
+    }
+  };
+
+  const markAsCameraOff = async (item) => {
+    try {
+      if (item.id || item.log_id) {
+        await userAPI.updateLog(item.log_id || item.id, {
+          status: 'camera_off',
+          verification_method: 'manual',
+          notes: 'Manually marked as camera off'
+        });
+      } else {
+        const timeParts = item.scheduled_time.split(':');
+        const dt = new Date();
+        dt.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), 0, 0);
+        await userAPI.createLog({
+          medication_id: item.medication_id,
+          scheduled_time: dt.toISOString(),
+          status: 'camera_off',
+          verification_method: 'manual',
+        });
+      }
+      loadData();
+    } catch (err) {
+      console.error('Failed to update medication status:', err);
+    }
+  };
+
+  const saveCameraConfig = async () => {
+    setSavingConfig(true);
+    try {
+      let finalUrl = cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '');
+      if (finalUrl && !finalUrl.startsWith('rtsp')) {
+        finalUrl = `rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/${finalUrl}`;
+      }
+
+      await detectionAPI.configure({
+        user_id: user._id,
+        camera_stream_url: finalUrl
+      });
+      
+      // Update user context temporarily so the UI reflects changes without full reload
+      if (user) {
+        user.camera_stream_url = finalUrl;
+      }
+
+      setConfigModal(false);
+    } catch (err) {
+      alert('Failed to save AI configuration');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   const dismissMed = async (item) => {
     try {
       // Set back to scheduled — the AI pipeline continues watching and
@@ -91,6 +174,8 @@ export default function UserDashboard() {
   const todayAdherence = adherence?.adherence_percentage || 0;
   const takenWeek = adherence?.total_taken || adherence?.taken || 0;
   const totalWeek = adherence?.total_scheduled || 0;
+  const missedWeek = adherence?.total_missed || adherence?.missed || 0;
+  const skippedWeek = adherence?.skipped || 0;
 
   const todayTotal = schedule.length;
   const todayTaken = schedule.filter(s => s.status === 'taken').length;
@@ -247,6 +332,28 @@ export default function UserDashboard() {
         <p>You're doing great. Stay on track today.</p>
       </header>
 
+      <div className="card" style={{ marginBottom: 32, borderRadius: 32 }}>
+        <div className="card-header" style={{ padding: '24px 32px' }}>
+          <div>
+            <h3 className="card-title">My Live AI Monitor</h3>
+            <p className="card-subtitle">Real-time camera feed & AI status</p>
+          </div>
+          <button 
+            className="btn btn-outline-primary btn-sm" 
+            onClick={() => {
+              const url = user?.camera_stream_url || '';
+              if (url.includes('127.0.0.1:8554/live/')) {
+                setCameraUrl(url.split('/live/')[1]);
+              } else {
+                setCameraUrl(url);
+              }
+              setConfigModal(true);
+            }}>
+            <Camera size={16} style={{ marginRight: 6 }} /> AI Camera Settings
+          </button>
+        </div>
+      </div>
+
       <div className="main-stat-row">
         {upcoming ? (
           <div className="hero-dose-card">
@@ -310,60 +417,22 @@ export default function UserDashboard() {
                   </div>
                   <div>
                     {s.status === 'taken' && <span className="badge badge-success"><CheckCircle size={14} /> Taken</span>}
-                    {s.status === 'missed' && (
+
+                    {(s.status === 'missed' || s.status === 'camera_off' || s.status === 'skipped') && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span className="badge badge-danger"><XCircle size={14} /> Missed</span>
-                        {user?.role !== 'elderly' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle size={14} /> Take
-                          </button>
-                        )}
                       </div>
                     )}
                     {['scheduled', 'pending', 'snoozed'].includes(s.status) && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {user?.role !== 'elderly' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle size={14} /> Take
-                          </button>
-                        )}
                         <span className="badge" style={{ background: '#E0F2FE', color: '#0369A1', border: '1px solid #BAE6FD', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Activity size={14} /> Pending Camera Verification
+                          <Activity size={14} /> {s.status === 'snoozed' ? 'Snoozed' : 'Pending Camera Verification'}
                         </span>
-                        <button className="btn btn-sm btn-secondary" onClick={() => snoozeMed(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Clock size={12} /> Snooze 10m
-                        </button>
                       </div>
                     )}
-                    {((s.status === 'camera_off' && s.notes === 'pending_camera_verification')) && (
-                      <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Activity size={14} /> Pending Camera Verification
-                      </span>
-                    )}
-                    {((s.status === 'camera_off' && s.notes !== 'pending_camera_verification') || s.status === 'skipped') && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="badge badge-neutral"><Clock size={14} /> CAMERA OFF</span>
-                        {user?.role !== 'elderly' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle size={14} /> Take
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {s.status === 'needs_verification' && user?.role === 'elderly' && (
-                      <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Clock size={12} /> Awaiting Caregiver Review
-                      </span>
-                    )}
-                    {s.status === 'needs_verification' && user?.role !== 'elderly' && (
+                    {s.status === 'needs_verification' && (
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn btn-primary btn-sm" onClick={() => markAsTaken(s)} style={{ borderRadius: 10 }}>Confirm</button>
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => dismissMed(s)}
-                          style={{ borderRadius: 10, background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A' }}
-                          title="Reschedule — camera will keep verifying"
-                        >Reschedule</button>
+                        <span className="badge badge-warning"><Activity size={14} /> Verification Needed</span>
                       </div>
                     )}
                   </div>
@@ -388,8 +457,12 @@ export default function UserDashboard() {
               </svg>
               <div className="circle-text">{adherencePercent.toFixed(0)}%</div>
             </div>
-            <p style={{ color: '#64748B', fontSize: '0.95rem' }}>
+            <p style={{ color: '#64748B', fontSize: '0.95rem', lineHeight: 1.5 }}>
               You've taken <strong>{takenWeek}</strong> out of <strong>{totalWeek}</strong> scheduled doses this week.
+              <br/>
+              <span style={{color: 'var(--danger)'}}>Missed: <strong>{missedWeek}</strong></span>
+              <span style={{margin: '0 8px'}}>•</span>
+              <span style={{color: 'var(--warning)'}}>Camera Off: <strong>{skippedWeek}</strong></span>
             </p>
           </div>
 
@@ -403,6 +476,49 @@ export default function UserDashboard() {
           </div>
         </section>
       </div>
+
+      {/* AI Config Modal */}
+      {configModal && (
+        <div className="modal-overlay" onClick={() => setConfigModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: '1.25rem' }}>AI Camera Configuration</h3>
+            <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
+              To connect a third-party camera, configure it to stream via RTMP to LOCUS. Provide a unique Stream Key for this camera below.
+            </p>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Stream Key</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                value={cameraUrl}
+                onChange={e => setCameraUrl(e.target.value)}
+                placeholder="e.g. gopro, living_room_cam"
+              />
+            </div>
+            
+            {cameraUrl && (
+              <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Camera Configuration URL
+                </div>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
+                  Copy and paste this URL into your camera's RTMP streaming settings:
+                </div>
+                <code style={{ display: 'block', padding: '10px', background: 'var(--bg)', borderRadius: '4px', border: '1px dashed var(--border-light)', wordBreak: 'break-all', userSelect: 'all' }}>
+                  rtmp://{rtmpHost || window.location.hostname}/live/{cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '')}
+                </code>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button className="btn btn-ghost" onClick={() => setConfigModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveCameraConfig} disabled={savingConfig}>
+                {savingConfig ? 'Saving...' : 'Save Configuration'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

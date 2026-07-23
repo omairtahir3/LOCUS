@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { detectionAPI } from '../services/api';
+import { detectionAPI, caregiverAPI } from '../services/api';
+// Local IDB import removed
 import { useAuth } from '../context/AuthContext';
-import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle } from 'lucide-react';
+import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User } from 'lucide-react';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -13,36 +14,65 @@ export default function KeyframeAudit() {
   const { user } = useAuth();
   const [keyframes, setKeyframes] = useState([]);
   const [evidenceFrames, setEvidenceFrames] = useState([]);
+  const [userMap, setUserMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
   const [lastResult, setLastResult] = useState(null);
   const [filter, setFilter] = useState('all'); // 'all' | 'medicine_only'
   const [page, setPage] = useState(1);
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState('');
   const PER_PAGE = 12;
 
   useEffect(() => {
     loadData();
-    // Auto-refresh every 30 seconds (not 10 — page was too slow)
+    // Auto-refresh every 30 seconds
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user, selectedUser]);
 
   const loadData = async () => {
     try {
+      let currentSelectedUser = selectedUser;
+      let map = {};
+      
+      if (user?.role === 'caregiver') {
+        const usersRes = await caregiverAPI.getUsers().catch(() => ({ data: [] }));
+        const list = usersRes.data || [];
+        setUsers(list);
+        list.forEach(u => {
+          map[u._id] = u.name;
+        });
+        
+        if (list.length > 0 && !currentSelectedUser) {
+          currentSelectedUser = list[0]._id;
+          setSelectedUser(currentSelectedUser);
+        }
+      }
+      
+      const queryParams = { limit: 40 };
+      if (currentSelectedUser) {
+        queryParams.user_id = currentSelectedUser;
+      }
+
       // Don't pass user_id — the Node.js proxy handles filtering by role:
       // caregivers see monitored users' frames, normal users see only their own
       const [kfRes, evidenceRes, statusRes] = await Promise.all([
-        detectionAPI.getKeyframes({ limit: 20 }),
-        detectionAPI.getEvidence({ limit: 20 }).catch(() => ({ data: [] })),
+        detectionAPI.getKeyframes(queryParams),
+        detectionAPI.getEvidence(queryParams).catch(() => ({ data: [] })),
         detectionAPI.getStatus(),
       ]);
       
-      const allFrames = kfRes.data || [];
+      let allFrames = kfRes.data || [];
+      
+      // Local IndexedDB merging is disabled. Keyframes are now fetched centrally.
+      
       allFrames.sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at));
       
       const evidence = evidenceRes.data || [];
       evidence.sort((a, b) => new Date(b.saved_at || b.detected_at || 0) - new Date(a.saved_at || a.detected_at || 0));
       
+      setUserMap(map);
       setKeyframes(allFrames);
       setEvidenceFrames(evidence);
       setLastResult(statusRes.data?.last_result || null);
@@ -84,7 +114,20 @@ export default function KeyframeAudit() {
           <h2 className="page-title">Keyframe Confidence Audit</h2>
           <p className="page-description">Per-frame AI evidence for medication intake verification</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {user?.role === 'caregiver' && users.length > 0 && (
+            <select
+              className="form-select"
+              value={selectedUser}
+              onChange={e => setSelectedUser(e.target.value)}
+              style={{ width: '100%', maxWidth: 240 }}
+            >
+              <option value="">Select Family Member</option>
+              {users.map(u => (
+                <option key={u._id} value={u._id}>{u.name}</option>
+              ))}
+            </select>
+          )}
           <button
             className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('all')}
@@ -194,6 +237,11 @@ export default function KeyframeAudit() {
                       </span>
                     </div>
                     <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
+                    {user?.role === 'caregiver' && (
+                      <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                        <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
+                      </div>
+                    )}
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                       {ev.medication_name || 'Unknown'} · {ev.detection_status || ''}
                     </div>
@@ -263,6 +311,11 @@ export default function KeyframeAudit() {
                         }}>{ev.detection_status || 'pending'}</span>
                       </div>
                       <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
+                      {user?.role === 'caregiver' && (
+                        <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                          <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
+                        </div>
+                      )}
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                         {ev.medication_name || 'Unknown'} · {((ev.detection_confidence || ev.phase_score || 0) * 100).toFixed(0)}% confidence
                       </div>
@@ -336,7 +389,7 @@ export default function KeyframeAudit() {
                     }}>
                       <img
                         loading="lazy"
-                        src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
+                        src={kf.base64_image ? `data:image/jpeg;base64,${kf.base64_image}` : detectionAPI.getKeyframeImage(kf.keyframe_id)}
                         alt=""
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         onError={(e) => { e.target.style.display = 'none'; }}
@@ -346,6 +399,12 @@ export default function KeyframeAudit() {
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Clock size={12} />
                         {kf.saved_at ? new Date(kf.saved_at).toLocaleString() : 'Unknown time'}
+                        {user?.role === 'caregiver' && (
+                          <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
+                            <User size={10} style={{ marginRight: 4 }} />
+                            {userMap[kf.user_id] || 'Unknown User'}
+                          </span>
+                        )}
                         {isMedFrame && phaseInfo && (
                           <span className="badge" style={{
                             background: phaseInfo.color + '22', color: phaseInfo.color,
@@ -389,7 +448,7 @@ export default function KeyframeAudit() {
                     <div style={{ padding: 16, borderTop: '1px solid var(--border-light)' }}>
                       <img
                         loading="lazy"
-                        src={detectionAPI.getKeyframeImage(kf.keyframe_id)}
+                        src={kf.base64_image ? `data:image/jpeg;base64,${kf.base64_image}` : detectionAPI.getKeyframeImage(kf.keyframe_id)}
                         alt={`Keyframe ${kf.keyframe_id}`}
                         style={{
                           width: '100%', maxHeight: 400, objectFit: 'contain',

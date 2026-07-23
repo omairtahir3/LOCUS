@@ -16,6 +16,10 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
+// Start notification and escalation scheduler
+const notificationScheduler = require('./utils/notificationScheduler');
+notificationScheduler.init();
+
 // Middleware
 app.use(cors());
 app.use(express.json());

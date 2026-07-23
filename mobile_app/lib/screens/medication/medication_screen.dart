@@ -132,10 +132,20 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
       );
     }
 
-    // Check if all doses are completed (taken/missed/snoozed)
+    // Separate by status groups
     final pending = _schedule.where((d) {
       final s = d['status'] ?? 'scheduled';
-      return s == 'scheduled' || s == 'pending';
+      return s == 'scheduled' || s == 'pending' || s == 'snoozed';
+    }).toList();
+
+    final needsAttention = _schedule.where((d) {
+      final s = d['status'] ?? '';
+      return s == 'needs_verification' || s == 'missed';
+    }).toList();
+
+    final completed = _schedule.where((d) {
+      final s = d['status'] ?? '';
+      return s == 'taken';
     }).toList();
 
     return RefreshIndicator(
@@ -143,7 +153,15 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Show pending doses first
+          // Items needing attention first
+          if (needsAttention.isNotEmpty) ...[
+            _sectionHeader('Needs Attention', Icons.warning_amber, AppColors.warning),
+            const SizedBox(height: 8),
+            ...needsAttention.map((dose) => _doseCard(dose as Map<String, dynamic>)),
+            const SizedBox(height: 16),
+          ],
+
+          // Upcoming scheduled doses
           if (pending.isNotEmpty) ...[
             _sectionHeader('Upcoming', Icons.schedule, AppColors.primary),
             const SizedBox(height: 8),
@@ -151,10 +169,16 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
             const SizedBox(height: 16),
           ],
 
-          // Completed doses are now removed instantly and only show in History tab
+          // Completed doses
+          if (completed.isNotEmpty) ...[
+            _sectionHeader('Completed', Icons.check_circle_outline, AppColors.success),
+            const SizedBox(height: 8),
+            ...completed.map((dose) => _doseCard(dose as Map<String, dynamic>)),
+            const SizedBox(height: 16),
+          ],
 
-          // If no more pending, show completion message
-          if (pending.isEmpty) ...[
+          // If nothing is pending or needing attention, show completion
+          if (pending.isEmpty && needsAttention.isEmpty) ...[
             const SizedBox(height: 24),
             Center(
               child: Container(
@@ -169,7 +193,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                   children: [
                     Icon(Icons.check_circle, color: AppColors.success, size: 20),
                     const SizedBox(width: 10),
-                    Text('No more medicines scheduled for today',
+                    Text('All medicines handled for today',
                         style: TextStyle(color: AppColors.success, fontWeight: FontWeight.w600, fontSize: 13)),
                   ],
                 ),
@@ -199,6 +223,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
       case 'taken':   statusColor = AppColors.success; statusIcon = Icons.check_circle; break;
       case 'missed':  statusColor = AppColors.danger; statusIcon = Icons.cancel; break;
       case 'snoozed': statusColor = AppColors.warning; statusIcon = Icons.snooze; break;
+      case 'camera_off': statusColor = const Color(0xFF6B7280); statusIcon = Icons.videocam_off; break;
       default:        statusColor = AppColors.primary; statusIcon = Icons.schedule; break;
     }
 
@@ -230,39 +255,50 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
               ),
             ),
             if (status == 'needs_verification')
-              // AI pipeline requested confirmation — all users can confirm/deny
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
-                  const SizedBox(width: 6),
-                  _actionBtn(Icons.snooze, AppColors.warning, () => _logDose(dose, 'snoozed')),
-                  const SizedBox(width: 6),
-                  _actionBtn(Icons.close, AppColors.danger, () => _logDose(dose, 'missed')),
-                ],
-              )
-            else if (status == 'scheduled' || status == 'pending')
               _isElderly
+                // Elderly: caregiver decides
                 ? Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(color: AppColors.primary.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.camera_alt, size: 14, color: AppColors.primary),
+                        Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
                         const SizedBox(width: 4),
-                        Text('PENDING CAMERA VERIFICATION', style: TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.w800)),
+                        Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
                       ],
                     ),
                   )
+                // Normal user: self-manage when auto-verification fails
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
                       const SizedBox(width: 6),
-                      _actionBtn(Icons.close, AppColors.danger, () => _logDose(dose, 'missed')),
+                      _actionBtn(Icons.refresh, AppColors.warning, () => _logDose(dose, 'scheduled')),
                     ],
                   )
+            else if (status == 'scheduled' || status == 'pending' || status == 'snoozed')
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!_isElderly) ...[
+                    _actionBtn(Icons.check, AppColors.success, () => _logDose(dose, 'taken')),
+                    const SizedBox(width: 6),
+                  ],
+                  _actionBtn(Icons.snooze, AppColors.warning, () async {
+                    try {
+                      final logId = dose['_id'] ?? dose['id'];
+                      if (logId != null) {
+                        await ApiService.snoozeLog(logId.toString(), minutes: 10);
+                        _loadData();
+                      }
+                    } catch (_) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to snooze')));
+                    }
+                  }),
+                ],
+              )
             else
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -272,7 +308,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                   children: [
                     Icon(statusIcon, size: 14, color: statusColor),
                     const SizedBox(width: 4),
-                    Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                    Text(status.replaceAll('_', ' ').toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -746,6 +782,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
             case 'taken':   color = AppColors.success; icon = Icons.check_circle; break;
             case 'missed':  color = AppColors.danger; icon = Icons.cancel; break;
             case 'snoozed': color = AppColors.warning; icon = Icons.snooze; break;
+            case 'camera_off': color = const Color(0xFF6B7280); icon = Icons.videocam_off; break;
             default:        color = AppColors.textMuted; icon = Icons.circle_outlined; break;
           }
 
@@ -765,20 +802,23 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 _formatDate(h['scheduled_time'] ?? h['createdAt'] ?? ''),
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
               ),
-              trailing: status == 'needs_verification'
-                ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _actionBtn(Icons.check, AppColors.success, () => _logDose({'log_id': h['_id']}, 'taken')),
-                      const SizedBox(width: 6),
-                      _actionBtn(Icons.close, AppColors.danger, () => _logDose({'log_id': h['_id']}, 'missed')),
-                    ],
-                  )
-                : Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(6)),
-                    child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
-                  ),
+              trailing: (status == 'needs_verification' && !_isElderly)
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _actionBtn(Icons.check, AppColors.success, () => _logDose({'log_id': h['_id']}, 'taken')),
+                        const SizedBox(width: 6),
+                        _actionBtn(Icons.refresh, AppColors.warning, () => _logDose({'log_id': h['_id']}, 'scheduled')),
+                      ],
+                    )
+                  : Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(6)),
+                      child: Text(
+                        status == 'needs_verification' ? 'AWAITING CAREGIVER' : status.replaceAll('_', ' ').toUpperCase(),
+                        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700),
+                      ),
+                    ),
             ),
           );
         },

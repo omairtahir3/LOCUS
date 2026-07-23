@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { caregiverAPI, medicationAPI } from '../services/api';
+import { caregiverAPI, medicationAPI, detectionAPI, authAPI } from '../services/api';
 import {
   ArrowLeft, Pill, CheckCircle, XCircle, Clock, AlertTriangle,
-  MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell
+  MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell, Camera
 } from 'lucide-react';
 import { formatSmartDate } from '../utils/dateUtils';
 
@@ -18,9 +18,16 @@ export default function FamilyMemberDetail() {
   const [msgTitle, setMsgTitle] = useState('');
   const [msgBody, setMsgBody] = useState('');
   const [sending, setSending] = useState(false);
+  
+  // AI Config State
+  const [configModal, setConfigModal] = useState(false);
+  const [cameraUrl, setCameraUrl] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [rtmpHost, setRtmpHost] = useState('');
 
   useEffect(() => {
     loadData();
+    authAPI.getRtmpHost().then(res => setRtmpHost(res.data.host)).catch(() => setRtmpHost(window.location.hostname));
 
     // Refresh every 30s (not 5s) — skip when tab is hidden
     const interval = setInterval(() => {
@@ -47,6 +54,27 @@ export default function FamilyMemberDetail() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveCameraConfig = async () => {
+    setSavingConfig(true);
+    try {
+      let finalUrl = cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '');
+      if (finalUrl && !finalUrl.startsWith('rtsp')) {
+        finalUrl = `rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/${finalUrl}`;
+      }
+
+      await detectionAPI.configure({
+        user_id: userId,
+        camera_stream_url: finalUrl
+      });
+      setConfigModal(false);
+      loadData();
+    } catch (err) {
+      alert('Failed to save AI configuration');
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -120,6 +148,19 @@ export default function FamilyMemberDetail() {
           <p className="text-muted text-sm">{user?.email} • {user?.phone || 'No phone'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button 
+            className="btn btn-outline-primary btn-sm" 
+            onClick={() => {
+              const url = user?.camera_stream_url || '';
+              if (url.includes('127.0.0.1:8554/live/')) {
+                setCameraUrl(url.split('/live/')[1]);
+              } else {
+                setCameraUrl(url);
+              }
+              setConfigModal(true);
+            }}>
+            <Camera size={16} /> AI Camera
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setMsgModal(true)}>
             <MessageSquare size={16} /> Send Message
           </button>
@@ -194,7 +235,7 @@ export default function FamilyMemberDetail() {
         </div>
       </div>
 
-      <div className="grid-2">
+      <div className="grid-2" style={{ alignItems: 'flex-start' }}>
         {/* Today's Schedule */}
         <div className="card">
           <div className="card-header">
@@ -217,7 +258,6 @@ export default function FamilyMemberDetail() {
                     <th>Medication</th>
                     <th>Dosage</th>
                     <th>Status</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -229,11 +269,12 @@ export default function FamilyMemberDetail() {
                       <td>
                         {(() => {
                           const displayStatus = (s.status === 'camera_off' && s.notes === 'pending_camera_verification')
-                            ? 'scheduled' : (s.status === 'skipped' ? 'camera_off' : s.status);
+                            ? 'scheduled' : s.status;
                           return (
                             <span className={`badge ${
                               displayStatus === 'taken' ? 'badge-success' :
                               displayStatus === 'needs_verification' ? 'badge-warning' :
+                              (displayStatus === 'camera_off' || displayStatus === 'skipped') ? 'badge-warning' :
                               displayStatus === 'missed' ? 'badge-danger' :
                               displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
                             }`}>
@@ -243,68 +284,8 @@ export default function FamilyMemberDetail() {
                         })()}
                         {s.status === 'taken' && s.verification_method && (
                             <div style={{ fontSize: '0.7rem', marginTop: 4, color: 'var(--text-muted)' }}>
-                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : ['manual', 'manual_caregiver'].includes(s.verification_method) ? 'Caregiver' : s.verification_method}
+                              Verified: {['visual', 'Camera', 'ai_visual'].includes(s.verification_method) ? 'Camera' : s.verification_method === 'manual_caregiver' ? 'Caregiver' : s.verification_method === 'manual' ? 'Manual' : s.verification_method}
                             </div>
-                        )}
-                      </td>
-                      <td>
-                        {(s.status === 'scheduled' || s.status === 'needs_verification' || s.status === 'missed' || s.status === 'camera_off' || s.status === 'skipped') && (
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              className="btn btn-sm"
-                              style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 8, fontSize: '0.75rem', padding: '4px 10px' }}
-                              onClick={async () => {
-                                try {
-                                  if (s.log_id || s.id) {
-                                    await medicationAPI.updateLog(s.log_id || s.id, {
-                                      status: 'taken',
-                                      verification_method: 'manual',
-                                      notes: 'Confirmed by caregiver',
-                                    });
-                                  } else {
-                                    const [hh, mm] = s.scheduled_time.split(':');
-                                    const dt = new Date();
-                                    dt.setHours(parseInt(hh), parseInt(mm), 0, 0);
-                                    await medicationAPI.createLog({
-                                      medication_id: s.medication_id,
-                                      scheduled_time: dt.toISOString(),
-                                      status: 'taken',
-                                      verification_method: 'manual',
-                                      notes: 'Confirmed by caregiver',
-                                    });
-                                  }
-                                  loadData();
-                                } catch (err) {
-                                  console.error('Failed to mark as taken:', err);
-                                  alert('Failed to update. Please try again.');
-                                }
-                              }}
-                            >
-                              <CheckCircle size={12} /> Taken
-                            </button>
-                            {s.status === 'needs_verification' && (
-                              <button
-                                className="btn btn-sm"
-                                style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: 8, fontSize: '0.75rem', padding: '4px 10px' }}
-                                onClick={async () => {
-                                  try {
-                                    if (s.log_id || s.id) {
-                                      await medicationAPI.updateLog(s.log_id || s.id, {
-                                        status: 'scheduled',
-                                        notes: 'Rescheduled by caregiver',
-                                      });
-                                    }
-                                    loadData();
-                                  } catch (err) {
-                                    console.error('Failed to reschedule:', err);
-                                    alert('Failed to reschedule. Please try again.');
-                                  }
-                                }}
-                              >
-                                <Clock size={12} /> Reschedule
-                              </button>
-                            )}
-                          </div>
                         )}
                       </td>
                     </tr>
@@ -456,6 +437,49 @@ export default function FamilyMemberDetail() {
               <button className="btn btn-secondary" onClick={() => setMsgModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={sendMessage} disabled={sending}>
                 <Send size={16} /> {sending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Config Modal */}
+      {configModal && (
+        <div className="modal-overlay" onClick={() => setConfigModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: '1.25rem' }}>AI Camera Configuration</h3>
+            <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
+              To connect a third-party camera, configure it to stream via RTMP to LOCUS. Provide a unique Stream Key for this camera below.
+            </p>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Stream Key</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                value={cameraUrl}
+                onChange={e => setCameraUrl(e.target.value)}
+                placeholder="e.g. gopro, living_room_cam"
+              />
+            </div>
+            
+            {cameraUrl && (
+              <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Camera Configuration URL
+                </div>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
+                  Copy and paste this URL into your camera's RTMP streaming settings:
+                </div>
+                <code style={{ display: 'block', padding: '10px', background: 'var(--bg)', borderRadius: '4px', border: '1px dashed var(--border-light)', wordBreak: 'break-all', userSelect: 'all' }}>
+                  rtmp://{rtmpHost || window.location.hostname}/live/{cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '')}
+                </code>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button className="btn btn-ghost" onClick={() => setConfigModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveCameraConfig} disabled={savingConfig}>
+                {savingConfig ? 'Saving...' : 'Save Configuration'}
               </button>
             </div>
           </div>

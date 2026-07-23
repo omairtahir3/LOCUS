@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera } from 'lucide-react';
 import { detectionAPI } from '../services/api';
+// Local IDB import removed
 
 const FILTERS = ['All', 'People', 'Places', 'Objects', 'Events', 'Medicine'];
 
@@ -18,13 +19,34 @@ export default function MemorySearch() {
   const [medKeyframes, setMedKeyframes] = useState([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
 
-  // Load medication keyframes on mount
+  // Load medication keyframes and evidence on mount
   useEffect(() => {
     const fetchMedKeyframes = async () => {
       setLoadingMeds(true);
       try {
-        const res = await detectionAPI.getKeyframes({ medication_only: true, limit: 30 });
-        setMedKeyframes(res.data || []);
+        // Load from backend directly
+        const [kfRes, evRes] = await Promise.all([
+          detectionAPI.getKeyframes({ medication_only: true, limit: 30 }),
+          detectionAPI.getEvidence({ limit: 30 }).catch(() => ({ data: [] }))
+        ]);
+        
+        let allMeds = kfRes.data || [];
+        const evData = evRes.data || [];
+        
+        // Merge evidence frames
+        const existingIds = new Set(allMeds.map(k => k.keyframe_id));
+        evData.forEach(ev => {
+          if (!existingIds.has(ev.id || ev.keyframe_id)) {
+             // normalize evidence to look like a keyframe
+             allMeds.push({
+               ...ev,
+               keyframe_id: ev.id || ev.keyframe_id,
+               medication_detected: true
+             });
+          }
+        });
+        
+        setMedKeyframes(allMeds);
       } catch (e) {
         console.error('Failed to load medication keyframes:', e);
       } finally {
@@ -34,8 +56,8 @@ export default function MemorySearch() {
     fetchMedKeyframes();
   }, []);
 
-  // Build medicine memory items from real keyframe data (only medicine_taken frames)
-  const takenKeyframes = medKeyframes.filter(kf => kf.medicine_taken);
+  // Build medicine memory items from real keyframe data
+  const takenKeyframes = medKeyframes.filter(kf => kf.medication_detected || kf.phase_role);
   const medMemories = takenKeyframes.map((kf, i) => {
     const dt = kf.detected_at ? new Date(kf.detected_at) : kf.saved_at ? new Date(kf.saved_at) : null;
     const now = new Date();
@@ -73,6 +95,7 @@ export default function MemorySearch() {
     return {
       id: `med-${kf.keyframe_id || i}`,
       keyframe_id: kf.keyframe_id,
+      base64_image: kf.base64_image,
       title: `Took ${kf.medication_name || 'medication'}`,
       time: timeLabel,
       icon: Pill,
@@ -192,7 +215,7 @@ export default function MemorySearch() {
                             background: '#111', position: 'relative',
                           }}>
                             <img
-                              src={detectionAPI.getKeyframeImage(m.keyframe_id)}
+                              src={m.phase_role ? detectionAPI.getEvidenceImage(m.keyframe_id) : detectionAPI.getKeyframeImage(m.keyframe_id)}
                               alt=""
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               onError={(e) => { e.target.style.display = 'none'; }}

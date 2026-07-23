@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'theme/app_theme.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
@@ -17,13 +20,32 @@ import 'screens/caregiver/medications_screen.dart';
 import 'screens/caregiver/notifications_screen.dart';
 import 'screens/caregiver/location_screen.dart';
 import 'screens/caregiver/activity_feed_screen.dart';
-import 'screens/caregiver/detection_screen.dart';
+
 import 'screens/caregiver/keyframe_audit_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+      debugPrint('[Firebase] Initialized successfully');
+    } catch (e) {
+      debugPrint('[Firebase] Initialization failed (missing config?): $e');
+    }
+  }
+
   await ApiService.init();
   await NotificationService.init();
+
+  // Setup background message handler
+  if (!kIsWeb) {
+    try {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('[FCM] Background handler setup failed: $e');
+    }
+  }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -53,6 +75,15 @@ class LocusApp extends StatelessWidget {
   }
 }
 
+// FCM Background handler must be top-level
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (!kIsWeb) {
+    await Firebase.initializeApp();
+    debugPrint("Handling a background message: ${message.messageId}");
+  }
+}
+
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -64,6 +95,60 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final _medScreenKey = GlobalKey<MedicationScreenState>();
   final _homeScreenKey = GlobalKey<HomeScreenState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _setupFirebaseMessaging();
+  }
+
+  Future<void> _setupFirebaseMessaging() async {
+    if (kIsWeb) return; // Do not attempt FCM on web
+
+    try {
+      final messaging = FirebaseMessaging.instance;
+      
+      // Request permission
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      // Get FCM token
+      final token = await messaging.getToken();
+      if (token != null) {
+        debugPrint('[FCM] Token obtained: $token');
+        await _sendTokenToBackend(token);
+      }
+
+      // Listen for token refreshes
+      messaging.onTokenRefresh.listen((newToken) {
+        _sendTokenToBackend(newToken);
+      });
+
+      // Handle messages when app is in foreground
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        if (message.notification != null) {
+          NotificationService.showImmediate(
+            title: message.notification!.title ?? 'New Alert',
+            body: message.notification!.body ?? '',
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('[FCM] Setup failed: $e');
+    }
+  }
+
+  Future<void> _sendTokenToBackend(String token) async {
+    try {
+      await ApiService.put('/auth/fcm-token', {'token': token});
+      debugPrint('[FCM] Token sent to backend successfully');
+    } catch (e) {
+      debugPrint('[FCM] Failed to send token to backend: $e');
+    }
+  }
 
   bool get _isCaregiver => ApiService.userRole == 'caregiver';
 
@@ -80,7 +165,7 @@ class _MainShellState extends State<MainShell> {
           MedicationScreen(key: _medScreenKey),
           const ActivityScreen(),
           const MemoryScreen(),
-          const SettingsScreen(),
+          const _NormalUserMoreScreen(),
         ];
 
   List<BottomNavigationBarItem> get _navItems => _isCaregiver
@@ -96,7 +181,7 @@ class _MainShellState extends State<MainShell> {
           BottomNavigationBarItem(icon: Icon(Icons.medication_outlined), activeIcon: Icon(Icons.medication), label: 'Meds'),
           BottomNavigationBarItem(icon: Icon(Icons.timeline_outlined), activeIcon: Icon(Icons.timeline), label: 'Activity'),
           BottomNavigationBarItem(icon: Icon(Icons.search_outlined), activeIcon: Icon(Icons.search), label: 'Memory'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), activeIcon: Icon(Icons.settings), label: 'Settings'),
+          BottomNavigationBarItem(icon: Icon(Icons.more_horiz_outlined), activeIcon: Icon(Icons.more_horiz), label: 'More'),
         ];
 
   @override
@@ -114,7 +199,23 @@ class _MainShellState extends State<MainShell> {
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
+            onPressed: () {
+              if (_isCaregiver) {
+                setState(() => _currentIndex = 3);
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(
+                        title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+                      ),
+                      body: const NotificationsScreen(),
+                    ),
+                  ),
+                );
+              }
+            },
           ),
         ],
       ),
@@ -160,7 +261,7 @@ class _MoreScreen extends StatelessWidget {
           const SizedBox(height: 20),
           _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationScreen()),
           _moreTile(context, Icons.timeline_outlined, 'Activity Feed', 'Behavioral monitoring & analysis', AppColors.accent, const ActivityFeedScreen()),
-          _moreTile(context, Icons.shield_outlined, 'AI Detection', 'Real-time medication intake pipeline', AppColors.info, const DetectionScreen()),
+
           _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen()),
           _moreTile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
         ],
@@ -169,6 +270,49 @@ class _MoreScreen extends StatelessWidget {
   }
 
   Widget _moreTile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, size: 22, color: color),
+        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(desc, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+        trailing: Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: screen))),
+      ),
+    );
+  }
+}
+
+// ── Normal user More screen (Keyframe Audit, Settings) ──────────────────
+class _NormalUserMoreScreen extends StatelessWidget {
+  const _NormalUserMoreScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text('Monitoring & settings', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          const SizedBox(height: 20),
+          _tile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Medicine evidence & AI frames', AppColors.accent, const KeyframeAuditScreen()),
+          _tile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
+        ],
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),

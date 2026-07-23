@@ -15,21 +15,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _loading = true;
   String _filter = 'all';
 
-  static const _filters = [
-    {'key': 'all', 'label': 'All'},
-    {'key': 'unread', 'label': 'Unread'},
-    {'key': 'missed_dose', 'label': 'Missed'},
-    {'key': 'emergency', 'label': 'Emergency'},
-    {'key': 'dose_confirmed', 'label': 'Confirmed'},
-  ];
+  List<Map<String, String>> get _filters {
+    return [
+      {'key': 'all', 'label': 'All'},
+      {'key': 'unread', 'label': 'Unread'},
+      if (ApiService.userRole != 'caregiver') {'key': 'dose_reminder', 'label': 'Reminders'},
+      {'key': 'missed', 'label': 'Missed'},
+      {'key': 'camera_off_alert', 'label': 'Camera Off'},
+      {'key': 'alerts', 'label': 'Alerts'},
+    ];
+  }
 
   static const Map<String, Map<String, dynamic>> _typeConfig = {
     'missed_dose': {'icon': Icons.medication, 'color': AppColors.danger, 'bg': AppColors.dangerLight, 'label': 'Missed Dose'},
     'dose_confirmed': {'icon': Icons.check_circle, 'color': AppColors.success, 'bg': AppColors.successLight, 'label': 'Confirmed'},
     'dose_reminder': {'icon': Icons.notifications, 'color': AppColors.info, 'bg': AppColors.infoLight, 'label': 'Reminder'},
+    'camera_off_alert': {'icon': Icons.warning_amber, 'color': AppColors.warning, 'bg': AppColors.warningLight, 'label': 'Camera Off'},
     'emergency': {'icon': Icons.warning_amber, 'color': AppColors.warning, 'bg': AppColors.warningLight, 'label': 'Emergency'},
+    'escalated': {'icon': Icons.warning, 'color': AppColors.danger, 'bg': AppColors.dangerLight, 'label': 'Escalated Alert'},
     'status_check': {'icon': Icons.notifications, 'color': AppColors.accent, 'bg': AppColors.accentLight, 'label': 'Status Check'},
-    'caregiver_message': {'icon': Icons.notifications, 'color': AppColors.primary, 'bg': AppColors.primaryLight, 'label': 'Message'},
+    'caregiver_message': {'icon': Icons.message, 'color': AppColors.primary, 'bg': AppColors.primaryLight, 'label': 'Message'},
+    'consecutive_misses': {'icon': Icons.error_outline, 'color': AppColors.danger, 'bg': AppColors.dangerLight, 'label': 'Consecutive Misses'},
+    'declining_adherence': {'icon': Icons.trending_down, 'color': AppColors.warning, 'bg': AppColors.warningLight, 'label': 'Adherence Alert'},
+    'low_confidence_detections': {'icon': Icons.help_outline, 'color': AppColors.warning, 'bg': AppColors.warningLight, 'label': 'Detection Alert'},
   };
 
   @override
@@ -56,7 +64,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   List<dynamic> get _filtered {
     if (_filter == 'all' || _filter == 'unread') return _notifications;
-    return _notifications.where((n) => n['type'] == _filter).toList();
+    return _notifications.where((n) {
+      final t = n['type'] as String? ?? '';
+      if (_filter == 'missed') return t == 'missed_dose' || t == 'consecutive_misses';
+      if (_filter == 'alerts') return t != 'missed_dose' && t != 'consecutive_misses' && t != 'camera_off_alert' && t != 'dose_reminder';
+      return t == _filter;
+    }).toList();
   }
 
   Map<String, dynamic> _getConfig(String? type) {
@@ -109,9 +122,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
                       selected: isSelected,
-                      label: Text(f['label'] as String),
+                      label: Text(f['label']!),
                       onSelected: (_) {
-                        setState(() => _filter = f['key'] as String);
+                        setState(() => _filter = f['key']!);
                         _loadNotifs();
                       },
                       selectedColor: AppColors.primaryLight,
@@ -192,6 +205,76 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                 Text(n['message'] ?? '', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                                 const SizedBox(height: 4),
                                 Text(_formatTime(n['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                                if (n['escalated'] == true) ...[
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(6)),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.warning_amber_rounded, size: 12, color: Colors.white),
+                                        SizedBox(width: 4),
+                                        Text('ESCALATED', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                if (n['type'] == 'dose_reminder' && n['is_dismissed'] != true) ...[
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 4,
+                                    children: [
+                                      if (n['medication_log_id'] != null && ApiService.userRole != 'elderly')
+                                        ElevatedButton.icon(
+                                          onPressed: () async {
+                                            await ApiService.updateLog(n['medication_log_id'], 'taken');
+                                            _loadNotifs();
+                                          },
+                                          icon: const Icon(Icons.check_circle, size: 12),
+                                          label: const Text('Take', style: TextStyle(fontSize: 10)),
+                                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(60, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                        ),
+                                      OutlinedButton.icon(
+                                        onPressed: () async {
+                                          await ApiService.snoozeNotification(n['_id'], minutes: 10);
+                                          _loadNotifs();
+                                        },
+                                        icon: const Icon(Icons.snooze, size: 12),
+                                        label: const Text('Snooze 10m', style: TextStyle(fontSize: 10)),
+                                        style: OutlinedButton.styleFrom(minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (n['type'] == 'status_check' && n['acknowledged_at'] == null) ...[
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 4,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: () async {
+                                          await ApiService.respondNotification(n['_id'], "I'm okay, all good!");
+                                          _loadNotifs();
+                                        },
+                                        icon: const Icon(Icons.thumb_up_alt_outlined, size: 12),
+                                        label: const Text("I'm Okay", style: TextStyle(fontSize: 10)),
+                                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () async {
+                                          await ApiService.respondNotification(n['_id'], "Please call me");
+                                          _loadNotifs();
+                                        },
+                                        icon: const Icon(Icons.phone_outlined, size: 12),
+                                        label: const Text("Please Call Me", style: TextStyle(fontSize: 10)),
+                                        style: OutlinedButton.styleFrom(minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ),

@@ -39,11 +39,16 @@ router.get('/users/:userId/summary', async (req, res) => {
 
     const recentLogs = await MedicationLog.find({
       user_id: { $in: [userOid, userIdStr] },
-      scheduled_time: { $gte: weekAgo }
+      scheduled_time: { $gte: weekAgo },
+      status: { $ne: 'scheduled' }   // Hide pending/scheduled — they'll be retaken
     }).populate('medication_id', 'name dosage');
 
-    const counts = { taken: 0, missed: 0, snoozed: 0, skipped: 0, scheduled: 0 };
-    recentLogs.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+    const counts = { taken: 0, missed: 0, snoozed: 0, skipped: 0 };
+    recentLogs.forEach(l => { 
+      let st = l.status;
+      if (st === 'camera_off') st = 'skipped';
+      if (counts[st] !== undefined) counts[st]++; 
+    });
 
     const totalValid = counts.taken + counts.missed;
 
@@ -61,7 +66,7 @@ router.get('/users/:userId/summary', async (req, res) => {
         total: recentLogs.length,
         adherence_percentage: totalValid > 0
           ? parseFloat(((counts.taken / totalValid) * 100).toFixed(1))
-          : 0,
+          : 0,  // No resolved doses = 0%
         logs: recentLogs,
         period: '7_days',
       },
@@ -166,7 +171,8 @@ router.get('/users/:userId/anomalies', async (req, res) => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const recentLogs = await MedicationLog.find({
       user_id: req.params.userId,
-      scheduled_time: { $gte: weekAgo }
+      scheduled_time: { $gte: weekAgo },
+      status: { $ne: 'scheduled' }
     }).sort({ scheduled_time: -1 });
 
     let consecutiveMisses = 0;

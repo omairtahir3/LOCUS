@@ -26,9 +26,37 @@ export default function UserHistory() {
     }
   };
 
+  const markAsTaken = async (log) => {
+    try {
+      await userAPI.updateLog(log._id || log.id, {
+        status: 'taken',
+        verification_method: 'manual',
+        notes: 'Manually verified from history'
+      });
+      loadData();
+    } catch (err) {
+      console.error('Failed to update medication status:', err);
+    }
+  };
+
+  const markAsMissed = async (log) => {
+    try {
+      await userAPI.updateLog(log._id || log.id, {
+        status: 'missed',
+        verification_method: 'manual',
+        notes: 'Manually marked as missed'
+      });
+      loadData();
+    } catch (err) {
+      console.error('Failed to mark as missed:', err);
+    }
+  };
+
   const filtered = statusFilter === 'all'
     ? history
-    : history.filter(h => h.status === statusFilter);
+    : statusFilter === 'camera_off'
+      ? history.filter(h => h.status === 'camera_off' || h.status === 'skipped')
+      : history.filter(h => h.status === statusFilter);
 
   // Group by date
   const grouped = {};
@@ -47,6 +75,8 @@ export default function UserHistory() {
     switch (s) {
       case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
       case 'missed': return <XCircle size={14} style={{ color: 'var(--danger)' }} />;
+      case 'skipped':
+      case 'camera_off': return <XCircle size={14} style={{ color: 'var(--warning)' }} />;
       case 'needs_verification': return <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />;
       default: return <Clock size={14} style={{ color: 'var(--text-muted)' }} />;
     }
@@ -65,7 +95,7 @@ export default function UserHistory() {
 
       {/* Adherence Summary Stats */}
       {adherence && (
-        <div className="stat-grid">
+        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
           <div className="stat-card">
             <div className="stat-icon success"><TrendingUp size={20} /></div>
             <div>
@@ -88,9 +118,16 @@ export default function UserHistory() {
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon warning"><Calendar size={20} /></div>
+            <div className="stat-icon warning"><XCircle size={20} /></div>
             <div>
-              <div className="stat-value">{adherence.days_tracked || 0}</div>
+              <div className="stat-value">{adherence.skipped || 0}</div>
+              <div className="stat-label">Camera Off</div>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon" style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}><Calendar size={20} /></div>
+            <div>
+              <div className="stat-value">{adherence.days_tracked || 7}</div>
               <div className="stat-label">Days Tracked</div>
             </div>
           </div>
@@ -102,7 +139,7 @@ export default function UserHistory() {
         display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center'
       }}>
         <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-        {['all', 'taken', 'missed', 'snoozed', 'needs_verification'].map(f => (
+        {['all', 'taken', 'missed', 'camera_off', 'snoozed', 'needs_verification'].map(f => (
           <button
             key={f}
             onClick={() => setStatusFilter(f)}
@@ -171,7 +208,7 @@ export default function UserHistory() {
                       {log.dosage || ''}
                       {log.verification_method && (
                         <span style={{ marginLeft: 8 }}>
-                          via {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera AI' : ['manual', 'manual_caregiver'].includes(log.verification_method) ? 'Manually Verified' : log.verification_method}
+                          via {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera AI' : log.verification_method === 'manual_caregiver' ? 'Caregiver' : log.verification_method === 'manual' ? 'Manual' : log.verification_method}
                         </span>
                       )}
                     </div>
@@ -179,10 +216,29 @@ export default function UserHistory() {
                   <span className={`badge ${
                     log.status === 'taken' ? 'badge-success' :
                     log.status === 'missed' ? 'badge-danger' :
+                    (log.status === 'camera_off' || log.status === 'skipped') ? 'badge-warning' :
                     log.status === 'needs_verification' ? 'badge-warning' : 'badge-neutral'
                   }`}>
-                    {statusIcon(log.status)} {log.status}
+                    {statusIcon(log.status)} {log.status === 'skipped' ? 'camera off' : log.status.replace('_', ' ')}
                   </span>
+                  {(log.status === 'camera_off' || log.status === 'skipped' || log.status === 'needs_verification') && (
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button 
+                        className="btn btn-primary btn-sm" 
+                        onClick={() => markAsTaken(log)} 
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <CheckCircle size={12} /> Take
+                      </button>
+                      <button 
+                        className="btn btn-danger btn-sm" 
+                        onClick={() => markAsMissed(log)} 
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', borderRadius: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <XCircle size={12} /> Missed
+                      </button>
+                    </div>
+                  )}
                   {log.confidence_score != null && (
                     <span style={{
                       fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)',

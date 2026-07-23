@@ -24,6 +24,8 @@ class HomeScreenState extends State<HomeScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
   }
 
+  bool get _isElderly => ApiService.userRole == 'elderly';
+
   void reload() => _loadData();
 
   @override
@@ -86,15 +88,18 @@ class HomeScreenState extends State<HomeScreen> {
   Widget _buildStatCards() {
     final taken = _summary?['taken'] ?? _summary?['counts']?['taken'] ?? 0;
     final missed = _summary?['missed'] ?? _summary?['counts']?['missed'] ?? 0;
+    final skipped = _summary?['skipped'] ?? _summary?['counts']?['skipped'] ?? 0;
     final adherence = _summary?['adherence_percentage'] ?? 0;
 
     return Row(
       children: [
         _statCard('Taken', '$taken', AppColors.success, Icons.check_circle_outline),
-        const SizedBox(width: 12),
+        const SizedBox(width: 6),
         _statCard('Missed', '$missed', AppColors.danger, Icons.cancel_outlined),
-        const SizedBox(width: 12),
-        _statCard('Adherence', '${adherence is num ? adherence.toStringAsFixed(0) : adherence}%', AppColors.primary, Icons.analytics_outlined),
+        const SizedBox(width: 6),
+        _statCard('Skipped', '$skipped', AppColors.warning, Icons.warning_amber_outlined),
+        const SizedBox(width: 6),
+        _statCard('Target', '${adherence is num ? adherence.toStringAsFixed(0) : adherence}%', AppColors.primary, Icons.analytics_outlined),
       ],
     );
   }
@@ -268,24 +273,92 @@ class HomeScreenState extends State<HomeScreen> {
             ),
           ),
           if (status == 'needs_verification')
+            _isElderly
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
+                      const SizedBox(width: 4),
+                      Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _logDose(dose, 'taken'),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.check, color: AppColors.success, size: 18),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => _logDose(dose, 'scheduled'),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                      ),
+                    ),
+                  ],
+                )
+          else if (status == 'scheduled' || status == 'pending' || status == 'snoozed')
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                GestureDetector(
-                  onTap: () => _logDose(dose, 'taken'),
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.check, color: AppColors.success, size: 18),
+                if (!_isElderly) ...[
+                  GestureDetector(
+                    onTap: () => _logDose(dose, 'taken'),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.check, color: AppColors.success, size: 18),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 4),
+                      Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 GestureDetector(
-                  onTap: () => _logDose(dose, 'missed'),
+                  onTap: () async {
+                    try {
+                      final logId = dose['_id'] ?? dose['id'];
+                      if (logId != null) {
+                        await ApiService.snoozeLog(logId.toString(), minutes: 10);
+                        _loadData();
+                      }
+                    } catch (_) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to snooze')));
+                    }
+                  },
                   child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.warning.withAlpha(80))),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.snooze, size: 14, color: AppColors.warning),
+                        const SizedBox(width: 4),
+                        Text('SNOOZE', style: TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
                   ),
                 ),
               ],

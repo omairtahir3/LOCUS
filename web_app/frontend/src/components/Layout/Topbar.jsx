@@ -9,7 +9,6 @@ const pageTitles = {
   '/location':      'Location Map',
   '/activity':      'Activity Feed',
   '/settings':      'Settings',
-  '/detection':     'AI Detection',
   '/keyframes':     'Keyframe Audit',
   '/my-dashboard':  'My Dashboard',
   '/my-medications':'My Medications',
@@ -25,9 +24,9 @@ export default function Topbar() {
   if (path.startsWith('/family/')) title = 'Family Member Details';
 
   return (
-    <header className="topbar">
-      <h1 className="topbar-title">{title}</h1>
-      <div className="topbar-right">
+    <header className="topbar" style={{ position: 'fixed', top: 0, left: '260px', width: 'calc(100vw - 260px)', display: 'flex', alignItems: 'center', paddingLeft: '40px', zIndex: 1000, backgroundColor: '#ffffff' }}>
+      <h1 className="topbar-title" style={{ margin: 0, flex: 1 }}>{title}</h1>
+      <div className="topbar-right" style={{ position: 'absolute', right: '40px' }}>
         <div style={{ position: 'relative' }}>
           <input
             type="text"

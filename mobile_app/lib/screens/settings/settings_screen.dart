@@ -24,7 +24,21 @@ class SettingsScreen extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
             child: Row(
               children: [
-                CircleAvatar(radius: 28, backgroundColor: AppColors.primary, child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700))),
+                user?['picture'] != null && user!['picture'].toString().isNotEmpty
+                    ? ClipOval(
+                        child: Image.network(
+                          user['picture'],
+                          width: 56,
+                          height: 56,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => CircleAvatar(
+                            radius: 28,
+                            backgroundColor: AppColors.primary,
+                            child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                      )
+                    : CircleAvatar(radius: 28, backgroundColor: AppColors.primary, child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700))),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(

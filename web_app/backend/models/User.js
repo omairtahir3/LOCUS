@@ -6,6 +6,9 @@ const UserSchema = new mongoose.Schema({
   email:        { type: String, required: true, unique: true, lowercase: true },
   password:     { type: String, required: true },
   role:         { type: String, enum: ['user', 'elderly', 'caregiver', 'admin'], default: 'user' },
+  picture:      { type: String, default: null },
+  profile_picture: { type: String, default: null },
+  fcm_token:       { type: String, default: null },
 
   // For elderly users — list of caregiver user IDs who can view their data
   caregiver_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
@@ -23,11 +26,31 @@ const UserSchema = new mongoose.Schema({
   },
 
   phone:        { type: String, default: null },
+  camera_stream_url: { type: String, default: null },  // RTSP/RTMP camera URL for this elderly user's AI pipeline
   is_active:    { type: Boolean, default: true },
 }, { timestamps: true });
 
+const os = require('os');
+
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
 // Hash password before saving
 UserSchema.pre('save', async function () {
+  // Automatically generate RTMP link for new users
+  if (this.isNew && !this.camera_stream_url) {
+    this.camera_stream_url = `rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/${this._id}`;
+  }
+
   if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 10);
 });

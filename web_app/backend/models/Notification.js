@@ -17,6 +17,7 @@ const NotificationSchema = new mongoose.Schema({
       'status_check',       // caregiver requested status check
       'caregiver_message',  // message from caregiver
       'system',             // general system alert
+      'camera_off_alert',   // camera turned off during medication window
     ],
     required: true
   },

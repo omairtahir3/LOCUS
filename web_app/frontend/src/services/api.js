@@ -36,6 +36,10 @@ export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   getMe:    ()     => api.get('/auth/me'),
   linkCaregiver: (email) => api.post('/auth/link-caregiver', { caregiver_email: email }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (data) => api.post('/auth/reset-password', data),
+  googleLogin: (token, role, confirmRole = false) => api.post('/auth/google', { token, role, confirmRole }),
+  getRtmpHost: () => api.get('/auth/rtmp-host'),
 };
 
 // ── Medications ──────────────────────────────────────────────────────────────
@@ -48,6 +52,7 @@ export const medicationAPI = {
   // Logs
   createLog:   (data)   => api.post('/medications/logs', data),
   updateLog:   (id, data) => api.patch(`/medications/logs/${id}`, data),
+  snoozeLog:   (id, data) => api.post(`/medications/logs/${id}/snooze`, data),
   getHistory:  (params) => api.get('/medications/logs/history', { params }),
   getDailySummary: (params) => api.get('/medications/summary/daily', { params }),
 };
@@ -69,6 +74,8 @@ export const notificationAPI = {
   markAllRead:  ()       => api.patch('/notifications/read-all'),
   acknowledge:  (id)     => api.patch(`/notifications/${id}/acknowledge`),
   dismiss:      (id)     => api.delete(`/notifications/${id}`),
+  respond:      (id, data) => api.post(`/notifications/${id}/respond`, data),
+  snooze:       (id, data) => api.post(`/notifications/${id}/snooze`, data),
 };
 
 // ── AI Detection (proxied to FastAPI) ────────────────────────────────────────
@@ -78,8 +85,13 @@ export const detectionAPI = {
   analyze:   (data) => api.post('/detection/analyze', data),
   getStatus: ()     => api.get('/detection/status'),
   getSchedulerStatus: () => api.get('/detection/scheduler'),
+  configure: (data) => api.post('/detection/configure', data),
   getKeyframes:      (params) => api.get('/detection/keyframes', { params }),
+  syncKeyframes:     (userId) => api.get('/detection/keyframes/sync', { params: { user_id: userId } }),
+  confirmSync:       (keyframeIds) => api.post('/detection/keyframes/sync/confirm', { keyframe_ids: keyframeIds }),
   getKeyframeImage:  (id) => `${API_BASE}/detection/keyframes/${id}/image`,
+  getEvidence:       (params) => api.get('/detection/evidence', { params }),
+  getEvidenceImage:  (id) => `${API_BASE}/detection/evidence/${id}/image`,
 };
 
 // ── Normal User API (Node.js backend) ─────────────────────────────────────────
@@ -91,6 +103,7 @@ export const userAPI = {
   getAdherence:   () => api.get('/medications/summary/daily'), // Use Node.js daily summary
   createLog:      (data) => api.post('/medications/logs/', data),
   updateLog:      (id, data) => api.patch(`/medications/logs/${id}`, data),
+  snoozeLog:      (id, data) => api.post(`/medications/logs/${id}/snooze`, data),
   createMedication: (data) => api.post('/medications', data),
   updateMedication: (id, data) => api.put(`/medications/${id}`, data),
   deleteMedication: (id) => api.delete(`/medications/${id}`),
