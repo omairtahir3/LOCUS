@@ -29,6 +29,7 @@ class DetectionStartRequest(BaseModel):
     display: bool = False       # show video window (for testing only)
     expected_medicine_count: int = 0  # how many medicines expected at this time
     scheduled_times: list = []  # ["08:00", "20:00"] — only scan near these times
+    test_mode: bool = False     # if True, creates dummy medication for stream testing
 
 
 class DetectionAnalyzeRequest(BaseModel):
@@ -51,7 +52,18 @@ async def start_detection(req: DetectionStartRequest, db=Depends(get_db)):
     scheduled_time_used = req.scheduled_time
     all_scheduled_times = req.scheduled_times or []
     
-    if req.medication_id:
+    # TEST MODE: use dummy medication for stream testing without DB
+    if req.test_mode:
+        medication_ids = ["test_mode_dummy"]
+        expected_count = 1
+        if not scheduled_time_used:
+            from datetime import datetime
+            scheduled_time_used = datetime.now().strftime("%H:%M")  # Current time
+        all_scheduled_times = [scheduled_time_used]
+        user_id = req.user_id or "test_user"
+        print(f"[Detection] TEST MODE: Using dummy medication at {scheduled_time_used}")
+        meds = []  # No DB lookup needed
+    elif req.medication_id:
         # Explicit medication ID provided
         from bson import ObjectId
         m = await db.medications.find_one({"_id": ObjectId(req.medication_id)})
@@ -141,6 +153,9 @@ async def start_detection(req: DetectionStartRequest, db=Depends(get_db)):
         token=token,
         user_id=user_id
     )
+    
+    # For testing: force active to bypass schedule window checking
+    _pipeline.force_active = True
 
     # Resolve video source: use env var if not explicitly provided
     raw_source = req.source.strip() if req.source else ""

@@ -116,7 +116,7 @@ class MedicationDetectionPipeline:
                         "updated_at": ts_now,
                     }
                     db.medication_logs.insert_one(log_doc)
-                    print(f"[Pipeline] [DB-Log] ✓ {med_id} logged as {status.upper()} (conf={confidence:.2f})")
+                    print(f"[Pipeline] [DB-Log] OK {med_id} logged as {status.upper()} (conf={confidence:.2f})")
                 except Exception as ex:
                     print(f"[Pipeline] [DB-Log] Error for {med_id}: {ex}")
 
@@ -165,7 +165,7 @@ class MedicationDetectionPipeline:
                     resp = httpx.post("http://localhost:5000/api/medications/logs", json=payload, headers=headers, timeout=10.0)
                     if resp.status_code in (200, 201):
                         logged_count += 1
-                        print(f"[Pipeline] [DB-Log-Batch] ✓ API Logged {med_id} as {status.upper()} ({logged_count}/{pills_to_log})")
+                        print(f"[Pipeline] [DB-Log-Batch] OK API Logged {med_id} as {status.upper()} ({logged_count}/{pills_to_log})")
                     else:
                         print(f"[Pipeline] [DB-Log-Batch] API error for {med_id}: {resp.status_code} {resp.text}")
                 except Exception as ex:
@@ -418,7 +418,7 @@ class MedicationDetectionPipeline:
                     best_overlap = effective
                 if effective >= overlap_threshold:
                     in_hand_count += 1
-                    print(f"  [PillInHand] ✓ Pill confirmed in hand "
+                    print(f"  [PillInHand] OK Pill confirmed in hand "
                           f"(overlap={overlap:.2f}, size={size_ratio:.2f}, "
                           f"conf={det['confidence']:.2f}, palm_ok={is_near_palm})")
                     break
@@ -626,7 +626,7 @@ class MedicationDetectionPipeline:
         # Blend: 70% weighted average, 30% weakest phase.
         # This ensures strong overall evidence dominates while a single
         # failed phase still drags the score down meaningfully.
-        # Example: P1=0.725, P2=1.0, P3=1.0 -> 0.7*0.904 + 0.3*0.725 = 0.851 ✓
+        # Example: P1=0.725, P2=1.0, P3=1.0 -> 0.7*0.904 + 0.3*0.725 = 0.851 OK
         # Example: P1=1.0,   P2=1.0, P3=0.0 -> 0.7*0.650 + 0.3*0.000 = 0.455 ✗
         confidence = (weighted_avg * 0.70) + (min_phase * 0.30)
 
@@ -1070,7 +1070,7 @@ class MedicationDetectionPipeline:
                 print(f"[BatchAnalysis] No Phase 1 (pill in hand) from frame {search_start}")
                 break
 
-            print(f"  [Phase1] ✓ Best pill-in-hand at frame {p1_idx} "
+            print(f"  [Phase1] OK Best pill-in-hand at frame {p1_idx} "
                   f"(pill={p1_data['best_pill']:.2f}, count={p1_data['in_hand_count']})")
 
             # ── PHASE 2: Hand moves toward mouth (ONLY frames AFTER P1) ──
@@ -1141,13 +1141,13 @@ class MedicationDetectionPipeline:
                 elif p2_data["hand_y"] < 0.55:
                     p2_score = max(p2_score, 0.80)
                 p2_score = max(p2_score, 0.75)
-                print(f"  [Phase2] ✓ Best hand-toward-mouth at frame {p2_idx} "
+                print(f"  [Phase2] OK Best hand-toward-mouth at frame {p2_idx} "
                       f"(hand_y={p2_data['hand_y']:.2f}, motion={p2_data['motion']:.2f}, "
                       f"composite={best_p2_composite:.2f}, score={p2_score:.2f})")
             else:
                 # Hand disappeared for 3+ frames = body cam evidence
                 p2_score = 0.80
-                print(f"  [Phase2] ✓ Hand disappeared for {consecutive_no_hand} frames at {p2_idx}")
+                print(f"  [Phase2] OK Hand disappeared for {consecutive_no_hand} frames at {p2_idx}")
 
             # ── PHASE 3: Hand comes back EMPTY (ONLY frames AFTER P2) ──
             # Pick the BEST empty-hand frame: hand visible, no pill, lowest pill confidence.
@@ -1181,7 +1181,7 @@ class MedicationDetectionPipeline:
                 search_start = p2_idx + 1
                 continue
 
-            print(f"  [Phase3] ✓ Best hand-back-empty at frame {p3_idx} "
+            print(f"  [Phase3] OK Best hand-back-empty at frame {p3_idx} "
                   f"(pill={p3_data['best_pill']:.2f}, hands={p3_data['hands']}, "
                   f"in_hand={p3_data['pill_in_hand']}, score={best_p3_score:.2f})")
 
@@ -1283,9 +1283,9 @@ class MedicationDetectionPipeline:
             seq_num = len(results) + 1
             print(f"\n{'='*50}")
             print(f"  BATCH ANALYSIS — Sequence #{seq_num}")
-            print(f"  Phase 1 (pill in hand):    {p1_score:.2f} ✓  [frame {p1_idx}]")
-            print(f"  Phase 2 (hand to mouth):   {p2_score:.2f} ✓  [frame {p2_idx}]")
-            print(f"  Phase 3 (hand back empty): {p3_score:.2f} ✓  [frame {p3_idx}]")
+            print(f"  Phase 1 (pill in hand):    {p1_score:.2f} OK  [frame {p1_idx}]")
+            print(f"  Phase 2 (hand to mouth):   {p2_score:.2f} OK  [frame {p2_idx}]")
+            print(f"  Phase 3 (hand back empty): {p3_score:.2f} OK  [frame {p3_idx}]")
             print(f"  Pills in hand: {p1_data['in_hand_count']}")
             print(f"  Confidence: {confidence:.3f}")
             print(f"  Classification: {classification['classification']}")

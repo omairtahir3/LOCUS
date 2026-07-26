@@ -55,7 +55,8 @@ async def _get_camera_url_for_user(user_id):
     except Exception as e:
         print(f"[Scheduler] Could not look up camera for user {user_id}: {e}")
     
-    return _get_default_camera_source()
+    # Default to the user's dedicated live stream
+    return f"rtsp://127.0.0.1:8554/live/{user_id}"
 
 
 def _spawn_pipeline_for_user(user_id, camera_url):
@@ -263,7 +264,7 @@ async def _start_pipeline_for_session(session, user_id):
             pipeline._batch_last_analysis = 0
         session.pipeline_started = True
         session.medicines_taken = already_taken
-        print(f"[Scheduler] ✓ Pipeline updated for user {user_id} session {session.time_slot} "
+        print(f"[Scheduler] OK Pipeline updated for user {user_id} session {session.time_slot} "
               f"({session.expected_count} expected, {already_taken} already taken)")
     else:
         print(f"[Scheduler] ! Pipeline not yet running for user {user_id} — "
@@ -382,6 +383,29 @@ async def _backfill_expired_slots():
                     continue
 
             for sched_time in med.get("scheduled_times", []):
+                
+                # IMPORTANT: DO NOT backfill slots that occurred BEFORE the user created this medication!
+                start_date = med.get("start_date") or med.get("createdAt")
+                if start_date:
+                    try:
+                        # If start_date is already a datetime object (from motor)
+                        if isinstance(start_date, datetime):
+                            pass # already a datetime
+                        else:
+                            # It's a string
+                            if start_date.endswith('Z'):
+                                start_date = start_date[:-1] + '+00:00'
+                            start_date = datetime.fromisoformat(start_date)
+                            
+                        # Ensure the datetime is timezone aware (defaulting to UTC if none is provided)
+                        if start_date.tzinfo is None:
+                            start_date = start_date.replace(tzinfo=timezone.utc)
+                        # Check if the start of the day we're processing is BEFORE the medication's start date
+                        if day_start.replace(tzinfo=timezone.utc) < start_date.replace(hour=0, minute=0, second=0, microsecond=0):
+                            continue # Skip this medication for this historical day
+                    except Exception as e:
+                        print(f"Error parsing start_date {start_date} for med {med.get('_id')}: {e}")
+                        
                 try:
                     sh, sm = map(int, sched_time.split(":"))
                 except (ValueError, IndexError):

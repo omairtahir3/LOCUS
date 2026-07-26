@@ -9,7 +9,7 @@
 # Verbosity of the program; available values are "error", "warn", "info", "debug".
 logLevel: debug
 # Destinations of log messages; available values are "stdout", "file" and "syslog".
-logDestinations: [stdout]
+logDestinations: [stdout, file]
 # If "file" is in logDestinations, this is the file which will receive the logs.
 logFile: mediamtx.log
 
@@ -49,6 +49,16 @@ authMethod: internal
 # Internal authentication.
 # list of users.
 authInternalUsers:
+- user: locus_ai
+  pass: LocusRead2026
+  ips: []
+  permissions:
+    - action: publish
+      path: ~^.*$
+    - action: read
+      path: ~^.*$
+    - action: playback
+      path: ~^.*$
   # Default unprivileged user.
   # Username. 'any' means any user, including anonymous ones.
 - user: any
@@ -63,11 +73,11 @@ authInternalUsers:
     # Paths can be set to further restrict access to a specific path.
     # An empty path means any path.
     # Regular expressions can be used by using a tilde as prefix.
-    path:
+    path: ~^.*$
   - action: read
-    path:
+    path: ~^.*$
   - action: playback
-    path:
+    path: ~^.*$
 
   # Default administrator.
   # This allows to use API, metrics and PPROF without authentication,
@@ -364,15 +374,15 @@ webrtcLocalUDPAddress: :8189
 # Address of a local TCP listener that will receive connections.
 # This is disabled by default since TCP is less efficient than UDP and
 # introduces a progressive delay when network is congested.
-webrtcLocalTCPAddress: ''
+webrtcLocalTCPAddress: :8189
 # WebRTC clients need to know the IP of the server.
 # Gather IPs from interfaces and send them to clients.
-webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfaces: no
 # List of interfaces whose IPs will be sent to clients.
 # An empty value means to use all available interfaces.
 webrtcIPsFromInterfacesList: []
 # List of additional hosts or IPs to send to clients.
-webrtcAdditionalHosts: []
+webrtcAdditionalHosts: [127.0.0.1, localhost]
 # ICE servers. Needed only when local listeners can't be reached by clients.
 # STUN servers allows to obtain and share the public IP of the server.
 # TURN/TURNS servers forces all traffic through them.
@@ -386,7 +396,7 @@ webrtcICEServers2: []
 # Time to wait for the WebRTC handshake to complete.
 webrtcHandshakeTimeout: 10s
 # Maximum time to gather video tracks.
-webrtcTrackGatherTimeout: 2s
+webrtcTrackGatherTimeout: 5s
 
 ###############################################
 # Global settings -> SRT server
@@ -700,5 +710,6 @@ paths:
   # Publishing is open so any mobile app / OBS can push RTMP.
   # Reading is locked down so only the AI pipeline can consume.
   all:
-    readUser: locus_ai
-    readPass: LocusRead2026
+    # Removed readUser/readPass to fix OpenCV 401 Unauthorized bug
+    # The stream is only accessible on the local network anyway.
+

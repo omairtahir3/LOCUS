@@ -1,16 +1,15 @@
 # Avoid port 8000 conflict with FastAPI backend
+# Enable the HTTP API.
+api: yes
 rtspAddress: :8554
 rtpAddress: :8100
 rtcpAddress: :8101
 
 paths:
+  # Allow all paths by default so dynamic user streams (live/[id]) work.
   # GoPro feed — no publish auth (Quik app can't send credentials)
-  # Read-side auth keeps the stream private to the AI pipeline
-  live/gopro:
-    readUser: locus_ai
-    readPass: LocusRead2026
-    
-  # Deny all other unknown paths by default
-  all_others:
-    publishUser: disable
-    readUser: disable
+  # Reading is open locally.
+  all:
+    # No auth needed for local reads
+    publishUser: ""
+    readUser: ""

@@ -53,8 +53,6 @@ class KeyframeStorage:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        
-
         user_dir = os.path.join(self.storage_dir, uid, today)
 
         os.makedirs(user_dir, exist_ok=True)
@@ -69,7 +67,13 @@ class KeyframeStorage:
 
         if not success:
 
-            print(f"[KeyframeStorage] ERROR: Failed to write image to {img_path}")
+            print(f"[KeyframeStorage.save] ✗ ERROR: Failed to write image to {img_path}")
+
+        else:
+
+            print(f"[KeyframeStorage] Successfully saved frame to: {img_path}")
+
+            print(f"[KeyframeStorage.save] OK Saved {keyframe_id}.jpg for user={uid}")
 
 
 
@@ -83,9 +87,15 @@ class KeyframeStorage:
 
         }
 
-        with open(meta_path, "w") as f:
+        try:
 
-            json.dump(meta, f, indent=2)
+            with open(meta_path, "w") as f:
+
+                json.dump(meta, f, indent=2)
+
+        except Exception as e:
+
+            print(f"[KeyframeStorage.save] ✗ ERROR writing metadata: {e}")
 
 
 
@@ -126,97 +136,52 @@ class KeyframeStorage:
         entries = []
 
         try:
-
             user_dirs = [os.path.join(self.storage_dir, str(user_id))] if user_id else [f.path for f in os.scandir(self.storage_dir) if f.is_dir()]
-
             for u_dir in user_dirs:
-
                 if not os.path.exists(u_dir): continue
-
                 for d_dir in os.scandir(u_dir):
-
                     if not d_dir.is_dir(): continue
-
                     for entry in os.scandir(d_dir.path):
-
                         if entry.is_file() and entry.name.endswith('.json'):
-
                             try:
-
-                                entries.append((entry.stat().st_mtime, entry.path))
-
+                                entries.append((entry.stat().st_mtime, entry.path, d_dir.name))
                             except OSError:
-
                                 pass
-
             
-
             # Legacy flat files
-
             if not user_id:
-
                 for entry in os.scandir(self.storage_dir):
-
                     if entry.is_file() and entry.name.endswith('.json'):
-
-                        try:
-
-                            entries.append((entry.stat().st_mtime, entry.path))
-
-                        except OSError:
-
-                            pass
-
+                        try: entries.append((entry.stat().st_mtime, entry.path, "unknown_date"))
+                        except OSError: pass
         except OSError:
-
             pass
-
-
 
         entries.sort(key=lambda x: x[0], reverse=True)
 
-
-
         keyframes = []
-
-        for _mtime, meta_path in entries:
-
+        for _mtime, meta_path, date_str in entries:
             if len(keyframes) >= limit:
-
                 break
-
             try:
-
                 with open(meta_path, "r") as f:
-
                     meta = json.load(f)
-
                     meta["keyframe_id"] = os.path.basename(meta_path).replace(".json", "")
-
-
+                    meta["date"] = date_str
+                    if "timestamp" in meta and "saved_at" not in meta:
+                        meta["saved_at"] = meta["timestamp"]
 
                     if medication_only and not meta.get("medication_detected"):
-
                         continue
-
                         
-
                     stored_uid = meta.get("user_id", "")
-
                     if user_id and stored_uid and str(stored_uid) != str(user_id):
-
                         continue
-
-
 
                     keyframes.append(meta)
-
             except (json.JSONDecodeError, IOError):
-
                 continue
-
         keyframes.sort(key=lambda k: k.get("saved_at", ""), reverse=True)
-
         return keyframes
 
 
@@ -382,7 +347,6 @@ EVIDENCE_STORAGE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
 
     "evidence_storage"
-
 )
 
 
@@ -438,8 +402,6 @@ class EvidenceStorage:
         uid = str(metadata.get("user_id", "unknown"))
 
         today = datetime.now().strftime("%Y-%m-%d")
-
-        
 
         user_dir = os.path.join(self.storage_dir, uid, today)
 
@@ -512,43 +474,24 @@ class EvidenceStorage:
         entries = []
 
         try:
-
             user_dirs = [os.path.join(self.storage_dir, str(user_id))] if user_id else [f.path for f in os.scandir(self.storage_dir) if f.is_dir()]
-
             for u_dir in user_dirs:
-
                 if not os.path.exists(u_dir): continue
-
                 for d_dir in os.scandir(u_dir):
-
                     if not d_dir.is_dir(): continue
-
                     for entry in os.scandir(d_dir.path):
-
                         if entry.is_file() and entry.name.endswith('.json'):
-
                             try:
-
-                                entries.append((entry.stat().st_mtime, entry.path))
-
+                                entries.append((entry.stat().st_mtime, entry.path, d_dir.name))
                             except OSError:
-
                                 pass
-
             
-
             if not user_id:
-
                 for entry in os.scandir(self.storage_dir):
-
                     if entry.is_file() and entry.name.endswith('.json'):
-
-                        try: entries.append((entry.stat().st_mtime, entry.path))
-
+                        try: entries.append((entry.stat().st_mtime, entry.path, "unknown_date"))
                         except OSError: pass
-
         except OSError:
-
             pass
 
 
@@ -559,7 +502,7 @@ class EvidenceStorage:
 
         evidence = []
 
-        for _mtime, meta_path in entries:
+        for _mtime, meta_path, date_str in entries:
 
             if len(evidence) >= limit: break
 
@@ -570,6 +513,9 @@ class EvidenceStorage:
                     meta = json.load(f)
 
                     meta["evidence_id"] = os.path.basename(meta_path).replace(".json", "")
+                    meta["date"] = date_str
+                    if "timestamp" in meta and "saved_at" not in meta:
+                        meta["saved_at"] = meta["timestamp"]
 
 
 
@@ -923,6 +869,8 @@ class KeyframeExtractor:
 
         to_save = sorted_candidates[:5]
 
+        print(f"[KeyframeExtractor] Flushing {len(to_save)} keyframes to disk (user={self.user_id})")
+
 
 
         # Save in background thread so we don't block the camera loop
@@ -931,7 +879,13 @@ class KeyframeExtractor:
 
             for blur_score, keyframe_id, frame, metadata in candidates:
 
-                storage.save(keyframe_id, frame, metadata)
+                try:
+
+                    storage.save(keyframe_id, frame, metadata)
+
+                except Exception as e:
+
+                    print(f"[KeyframeExtractor._flush_window] ERROR saving {keyframe_id}: {e}")
 
 
 
@@ -1211,29 +1165,19 @@ class VideoSource:
 
     """
 
-    Abstracts the video input source.
+    Thread-safe video source wrapper for webcam, file, RTSP, RTMP.
 
-    Supports webcam, video file, and GoPro Hero 13 WiFi/RTMP stream.
+    For live streams (RTSP/RTMP), uses a background thread to read frames
 
-    Uses a background thread to read frames, preventing buffer lag on live streams.
+    and cache the latest one. Main thread reads via .read().
+
+    Key: Return the LATEST frame (even if not new), don't break on stale frames.
 
     """
 
-
-
     def __init__(self, source=0):
 
-        """
-
-        source=0 for webcam
-
-        source="path/to/video.mp4" for file
-
-        source="gopro" for GoPro Hero 13 WiFi preview stream
-
-        source="rtmp://..." for live stream
-
-        """
+        """source=0 for webcam, path/to/video.mp4 for file, rtmp://... for live stream"""
 
         self.source = source
 
@@ -1241,11 +1185,7 @@ class VideoSource:
 
         self._is_gopro = False
 
-
-
-        self._frame = None
-
-        self._ret = False
+        self._is_live = isinstance(source, int) or (isinstance(source, str) and ("rtmp://" in source or "rtsp://" in source or "gopro" in source.lower()))
 
         self._running = False
 
@@ -1253,9 +1193,17 @@ class VideoSource:
 
         
 
-        # We need threading for live streams to avoid infinite buffer latency
+        # Live stream frame caching with simple lock
 
-        self._is_live = isinstance(source, int) or (isinstance(source, str) and ("rtmp://" in source or "rtsp://" in source or "gopro" in source.lower()))
+        self._frame_lock = threading.Lock()
+
+        self._ret = False
+
+        self._frame = None
+
+        self._stream_dead = False
+
+        self._last_frame_time = 0
 
 
 
@@ -1289,15 +1237,15 @@ class VideoSource:
 
                 import os
 
-                # Force TCP transport for RTSP to prevent H264 decode errors
-
-                # from UDP packet loss. Increase probesize for stable stream init.
-
+                # Force TCP transport for RTSP to prevent H264 decode errors from UDP packet loss
+                # Increase probesize (2MB) for stable stream init, increase stimeout to 20s for slow streams
+                # Add fflags;nobuffer and flags;low_delay to ensure data flows immediately (no buffering)
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
 
-                    "rtsp_transport;tcp|fflags;nobuffer|analyzeduration;1000000|probesize;1000000"
+                    "rtsp_transport;tcp|analyzeduration;2000000|probesize;2000000|stimeout;20000000|fflags;nobuffer|flags;low_delay"
 
                 )
+                print(f"[VideoSource] FFMPEG options configured for RTMP/RTSP reliability")
 
                 
 
@@ -1313,7 +1261,7 @@ class VideoSource:
 
             if not self.cap.isOpened() and self._is_live:
 
-                max_retries = 60  # 5 minutes of retrying
+                max_retries = 12  # 1 minute of retrying (12 * 5s)
 
                 for attempt in range(1, max_retries + 1):
 
@@ -1321,9 +1269,11 @@ class VideoSource:
 
                     time.sleep(5)
 
-                    self.cap = cv2.VideoCapture(self.source)
+                    self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
 
                     if self.cap.isOpened():
+
+                        print(f"[VideoSource] OK Stream connected on attempt {attempt}")
 
                         break
 
@@ -1331,25 +1281,45 @@ class VideoSource:
 
             if not self.cap.isOpened():
 
-                raise RuntimeError(f"Could not open video source: {self.source}")
+                raise RuntimeError(f"Could not open video source: {self.source}. Check RTMP URL and stream status.")
 
                 
 
             if self._is_live:
 
-                # Prime the first frame
-
-                self._ret, self._frame = self.cap.read()
+                # Start background thread to read frames continuously
 
                 self._running = True
+
+                self._stream_dead = False
 
                 self._thread = threading.Thread(target=self._update, daemon=True)
 
                 self._thread.start()
 
+                
+
+                # Wait for first frame (up to 5 seconds)
+
+                _wait_start = time.time()
+
+                while not self._ret and (time.time() - _wait_start) < 5.0:
+
+                    time.sleep(0.05)
+
+                
+
+                if self._ret:
+
+                    print(f"[VideoSource] OK Stream live and receiving frames")
+
+                else:
+
+                    print(f"[VideoSource] ! No frames yet within 5s - stream may be slow to start")
 
 
-        print(f"Video source opened: {self.source}")
+
+        print(f"[VideoSource] OK Video source opened: {self.source}")
 
         return self
 
@@ -1357,75 +1327,145 @@ class VideoSource:
 
     def _update(self):
 
-        """Background thread that constantly reads the latest frame to clear the buffer."""
+        """Background thread continuously reads frames from live stream."""
+
+        consecutive_fails = 0
+
+        
 
         while self._running:
 
-            if self.cap:
+            if not self.cap:
+
+                time.sleep(0.01)
+
+                continue
+
+            
+
+            try:
 
                 ret, frame = self.cap.read()
 
-                if ret:
+                
 
-                    self._ret, self._frame = ret, frame
+                if ret and frame is not None:
 
-                    self._new_frame = True
+                    # Successfully read a frame — cache it
+
+                    with self._frame_lock:
+
+                        self._ret = True
+
+                        self._frame = frame
+
+                        self._last_frame_time = time.time()
+
+                    
+
+                    consecutive_fails = 0
 
                 else:
 
-                    self._ret = False
+                    # Frame read failed
+
+                    consecutive_fails += 1
+
+                    
+
+                    if consecutive_fails > 120:  # ~12 seconds of failures = stream is really dead
+
+                        print(f"[VideoSource._update] ✗ {consecutive_fails} failed reads (12+ sec) - stream dead")
+
+                        self._stream_dead = True
+
+                        self._running = False
+
+                        break
+
+                    
+
+                    time.sleep(0.1)
+
+            
+
+            except Exception as e:
+
+                print(f"[VideoSource._update] Exception: {e}")
+
+                consecutive_fails += 1
+
+                
+
+                if consecutive_fails > 120:
+
+                    self._stream_dead = True
 
                     self._running = False
 
                     break
 
-            else:
+                
 
-                time.sleep(0.005)
+                time.sleep(0.1)
 
 
 
     def read(self):
 
-        """Read next frame. Returns (success, frame)."""
+        """
+
+        Read the latest frame for live streams.
+
+        For live streams: returns the most recent frame cached by background thread.
+
+        Never returns False just because there's no NEW frame - we cache and reuse frames.
+
+        This prevents false disconnects on slight timing mismatches.
+
+        """
 
         if self.cap is None:
 
             return False, None
 
-            
+        
 
         if self._is_live:
 
-            if self._is_gopro:
+            # For live streams, check if stream is permanently dead
 
-                return self.cap.read()
-
-                
-
-            # Wait for a truly NEW frame so the AI pipeline doesn't spin out of control processing duplicates
-
-            timeout = 0
-
-            while not getattr(self, '_new_frame', False) and self._running and timeout < 1000:
-
-                time.sleep(0.005)
-
-                timeout += 1
-
-                
-
-            if not getattr(self, '_new_frame', False):
+            if self._stream_dead:
 
                 return False, None
 
             
 
-            self._new_frame = False
+            # Return the latest frame we have (even if not brand new)
 
-            return self._ret, self._frame
+            with self._frame_lock:
+
+                ret = self._ret
+
+                frame = self._frame
+
+            
+
+            # If we haven't gotten any frame yet, return False
+
+            if not ret or frame is None:
+
+                return False, None
+
+            
+
+            # Return the cached frame
+
+            return True, frame
 
         else:
+
+            # For files, read directly
 
             return self.cap.read()
 

@@ -449,38 +449,23 @@ export default function FamilyMemberDetail() {
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
             <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: '1.25rem' }}>AI Camera Configuration</h3>
             <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
-              To connect a third-party camera, configure it to stream via RTMP to LOCUS. Provide a unique Stream Key for this camera below.
+              To connect a third-party camera (e.g. GoPro), configure it to stream via RTMP to LOCUS.
             </p>
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="form-label">Stream Key</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                value={cameraUrl}
-                onChange={e => setCameraUrl(e.target.value)}
-                placeholder="e.g. gopro, living_room_cam"
-              />
-            </div>
             
-            {cameraUrl && (
-              <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Camera Configuration URL
-                </div>
-                <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
-                  Copy and paste this URL into your camera's RTMP streaming settings:
-                </div>
-                <code style={{ display: 'block', padding: '10px', background: 'var(--bg)', borderRadius: '4px', border: '1px dashed var(--border-light)', wordBreak: 'break-all', userSelect: 'all' }}>
-                  rtmp://{rtmpHost || window.location.hostname}/live/{cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '')}
-                </code>
+            <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Camera Configuration URL
               </div>
-            )}
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
+                Copy and paste this exact URL into your camera's RTMP streaming settings:
+              </div>
+              <code style={{ display: 'block', padding: '10px', background: 'var(--bg)', borderRadius: '4px', border: '1px dashed var(--border-light)', wordBreak: 'break-all', userSelect: 'all', fontSize: '1.05rem', fontWeight: 700 }}>
+                rtmp://{rtmpHost || window.location.hostname}/live/{user?._id}
+              </code>
+            </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button className="btn btn-ghost" onClick={() => setConfigModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveCameraConfig} disabled={savingConfig}>
-                {savingConfig ? 'Saving...' : 'Save Configuration'}
-              </button>
+              <button className="btn btn-primary" onClick={() => setConfigModal(false)}>Close</button>
             </div>
           </div>
         </div>

@@ -151,10 +151,11 @@ export default function UserMedications() {
                         <span className={`badge ${
                           s.status === 'taken' ? 'badge-success' :
                           s.status === 'missed' ? 'badge-danger' :
-                          s.status === 'snoozed' ? 'badge-warning' :
-                          s.status === 'needs_verification' ? 'badge-warning' : 'badge-neutral'
+                          s.status === 'snoozed' ? 'badge-secondary' :
+                          s.status === 'needs_verification' ? 'badge-warning' : 
+                          (s.status === 'camera_off' || s.status === 'skipped') ? 'badge-warning' : 'badge-neutral'
                         }`}>
-                          {statusIcon(s.status)} {s.status}
+                          {statusIcon(s.status)} {s.status === 'camera_off' ? 'CAMERA OFF' : (s.status || '').toUpperCase().replace('_', ' ')}
                         </span>
                         {s.status === 'taken' && s.verification_method && (
                           <div style={{ fontSize: '0.75rem', marginTop: 4, color: 'var(--text-muted)' }}>
@@ -388,52 +389,52 @@ export default function UserMedications() {
       {/* Add Modal */}
       {showAddModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 450, padding: 24, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 16 }}>
+          <div className="modal-content" style={{ maxWidth: 450, padding: 24, border: '1px solid rgba(0,0,0,0.1)', borderRadius: 16, backgroundColor: '#ffffff' }}>
             <div className="modal-header" style={{ marginBottom: 20 }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff' }}>Add New Medication</h3>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0F172A' }}>Add New Medication</h3>
               <button 
                 className="btn btn-sm btn-ghost" 
                 onClick={() => setShowAddModal(false)}
                 style={{ padding: 4 }}
               >
-                <XCircle size={20} color="#fff" />
+                <XCircle size={20} color="#64748B" />
               </button>
             </div>
             
             <form onSubmit={handleAddSubmit}>
               <div className="form-group">
-                <label className="form-label" style={{ color: '#ebebeb', marginBottom: 6 }}>Medication Name</label>
+                <label className="form-label" style={{ color: '#475569', marginBottom: 6 }}>Medication Name</label>
                 <input 
                   type="text" 
                   className="form-input" 
                   value={newMed.name} 
                   onChange={e => setNewMed({ ...newMed, name: e.target.value })}
                   placeholder="e.g. Panadol" 
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#000', borderRadius: 12 }}
+                  style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#000', borderRadius: 12 }}
                   required 
                 />
               </div>
 
               <div className="form-group" style={{ marginTop: 16 }}>
-                <label className="form-label" style={{ color: '#ebebeb', marginBottom: 6 }}>Dosage</label>
+                <label className="form-label" style={{ color: '#475569', marginBottom: 6 }}>Dosage</label>
                 <input 
                   type="text" 
                   className="form-input" 
                   value={newMed.dosage} 
                   onChange={e => setNewMed({ ...newMed, dosage: e.target.value })}
                   placeholder="e.g. 500mg" 
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#000', borderRadius: 12 }}
+                  style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#000', borderRadius: 12 }}
                   required 
                 />
               </div>
 
               <div className="form-group" style={{ marginTop: 16 }}>
-                <label className="form-label" style={{ color: '#ebebeb', marginBottom: 6 }}>Frequency</label>
+                <label className="form-label" style={{ color: '#475569', marginBottom: 6 }}>Frequency</label>
                 <select 
                   className="form-select" 
                   value={newMed.frequency}
                   onChange={e => setNewMed({ ...newMed, frequency: e.target.value })}
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#000', background: 'var(--surface)', borderRadius: 12 }}
+                  style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#000', background: '#fff', borderRadius: 12 }}
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -443,7 +444,7 @@ export default function UserMedications() {
 
               {newMed.frequency === 'custom' && (
                 <div className="form-group" style={{ marginTop: 16 }}>
-                  <label className="form-label" style={{ color: '#ebebeb', marginBottom: 8 }}>Select Days</label>
+                  <label className="form-label" style={{ color: '#475569', marginBottom: 8 }}>Select Days</label>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {DAYS.map((day, idx) => (
                       <button
@@ -461,9 +462,9 @@ export default function UserMedications() {
                           padding: '6px 10px',
                           borderRadius: 8,
                           fontSize: '0.75rem',
-                          border: '1px solid rgba(255,255,255,0.3)',
+                          border: '1px solid rgba(0,0,0,0.1)',
                           background: newMed.days_of_week.includes(idx) ? 'var(--primary)' : 'transparent',
-                          color: '#fff',
+                          color: newMed.days_of_week.includes(idx) ? '#fff' : '#475569',
                           cursor: 'pointer',
                           transition: 'all 0.2s'
                         }}
@@ -476,22 +477,22 @@ export default function UserMedications() {
               )}
 
               <div className="form-group" style={{ marginTop: 16 }}>
-                <label className="form-label text-sm" style={{ color: '#ebebeb', marginBottom: 6 }}>Target Scheduled Time</label>
+                <label className="form-label text-sm" style={{ color: '#475569', marginBottom: 6 }}>Target Scheduled Time</label>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <input 
                     type="time" 
                     className="form-input" 
                     value={newMed.times[0]} 
                     onChange={e => setNewMed({ ...newMed, times: [e.target.value] })}
-                    style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#000', borderRadius: 12 }}
+                    style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#000', borderRadius: 12 }}
                     required 
                   />
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: 12, marginTop: 28, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 12 }} onClick={() => setShowAddModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ border: '1px solid #fff', color: '#fff', borderRadius: 12 }}>Save Medication</button>
+                <button type="button" className="btn btn-ghost" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#475569', borderRadius: 12, backgroundColor: '#fff' }} onClick={() => setShowAddModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ border: '1px solid transparent', color: '#fff', borderRadius: 12, backgroundColor: 'var(--primary)' }}>Save Medication</button>
               </div>
             </form>
           </div>

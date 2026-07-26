@@ -38,12 +38,24 @@ const sendEmail = async ({ to, subject, html }) => {
       console.log(`[Nodemailer Simulation] To: ${to} | Subject: "${subject}"`);
       return true;
     }
-    await transporter.sendMail({
+
+    const mailOptions = {
       from: process.env.EMAIL_FROM || 'LOCUS <noreply@locus-assist.com>',
       to,
       subject,
       html,
-    });
+    };
+
+    const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
+    if (fs.existsSync(logoPath)) {
+      mailOptions.attachments = [{
+        filename: 'logo.png',
+        path: logoPath,
+        cid: 'locuslogo'
+      }];
+    }
+
+    await transporter.sendMail(mailOptions);
     return true;
   } catch (err) {
     console.error('Email send error:', err.message);
@@ -79,22 +91,10 @@ const sendPushNotification = async ({ userId, title, body, payload = {} }) => {
   }
 };
 
-// Pre-load logo as base64 to ensure it renders in email clients
-let cachedLogoDataUri = '';
-try {
-  const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
-  if (fs.existsSync(logoPath)) {
-    const b64 = fs.readFileSync(logoPath, 'base64');
-    cachedLogoDataUri = `data:image/png;base64,${b64}`;
-  }
-} catch (e) {
-  console.error('Could not load logo for email:', e.message);
-}
-
 // Generate premium interactive HTML email template with LOCUS branding
 const getLocusEmailHtml = ({ title, message, type, medicationLogId, notificationId }) => {
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
-  const logoSrc = cachedLogoDataUri || `${appUrl}/logo.png`;
+  const logoSrc = 'cid:locuslogo';
   
   let badgeText = 'SYSTEM NOTIFICATION';
   let badgeColor = '#064E3B'; // Dark green
