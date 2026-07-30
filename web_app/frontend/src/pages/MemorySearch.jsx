@@ -27,7 +27,7 @@ export default function MemorySearch() {
         // Load from backend directly
         const [kfRes, evRes] = await Promise.all([
           detectionAPI.getKeyframes({ medication_only: true, limit: 30 }),
-          detectionAPI.getEvidence({ limit: 30 }).catch(() => ({ data: [] }))
+          detectionAPI.getMedicationFrames({ limit: 30 }).catch(() => ({ data: [] }))
         ]);
         
         let allMeds = kfRes.data || [];
@@ -215,7 +215,7 @@ export default function MemorySearch() {
                             background: '#111', position: 'relative',
                           }}>
                             <img
-                              src={m.phase_role ? detectionAPI.getEvidenceImage(m.keyframe_id) : detectionAPI.getKeyframeImage(m.keyframe_id)}
+                              src={m.phase_role ? detectionAPI.getMedicationFrameImage(m.keyframe_id) : detectionAPI.getKeyframeImage(m.keyframe_id)}
                               alt=""
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               onError={(e) => { e.target.style.display = 'none'; }}

@@ -40,6 +40,7 @@ export const authAPI = {
   resetPassword: (data) => api.post('/auth/reset-password', data),
   googleLogin: (token, role, confirmRole = false) => api.post('/auth/google', { token, role, confirmRole }),
   getRtmpHost: () => api.get('/auth/rtmp-host'),
+  updatePreferences: (data) => api.put('/auth/preferences', data),
 };
 
 // ── Medications ──────────────────────────────────────────────────────────────
@@ -90,8 +91,8 @@ export const detectionAPI = {
   syncKeyframes:     (userId) => api.get('/detection/keyframes/sync', { params: { user_id: userId } }),
   confirmSync:       (keyframeIds) => api.post('/detection/keyframes/sync/confirm', { keyframe_ids: keyframeIds }),
   getKeyframeImage:  (id) => `${API_BASE}/detection/keyframes/${id}/image`,
-  getEvidence:       (params) => api.get('/detection/evidence', { params }),
-  getEvidenceImage:  (id) => `${API_BASE}/detection/evidence/${id}/image`,
+  getMedicationFrames:       (params) => api.get('/detection/medication_frames', { params }),
+  getMedicationFrameImage:  (id) => `${API_BASE}/detection/medication_frames/${id}/image`,
 };
 
 // ── Normal User API (Node.js backend) ─────────────────────────────────────────

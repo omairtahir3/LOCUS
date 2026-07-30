@@ -2,12 +2,39 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  Map<String, dynamic>? _user;
+
+  @override
+  void initState() {
+    super.initState();
+    _user = ApiService.user;
+  }
+
+  Future<void> _updatePref(String key, bool val) async {
+    if (_user == null) return;
+    final prefs = Map<String, dynamic>.from(_user!['notification_prefs'] ?? {});
+    prefs[key] = val;
+    setState(() {
+      _user!['notification_prefs'] = prefs;
+    });
+    try {
+      await ApiService.updatePreferences(prefs);
+    } catch (e) {
+      prefs[key] = !val;
+      if (mounted) setState(() { _user!['notification_prefs'] = prefs; });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final user = ApiService.user;
+    final user = _user;
     final name = user?['name'] ?? 'User';
     final email = user?['email'] ?? '';
     final role = ApiService.userRole;
@@ -82,9 +109,9 @@ class SettingsScreen extends StatelessWidget {
                   const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                 ]),
                 const SizedBox(height: 16),
-                _toggleRow('Push Notifications', 'Get push alerts', true),
-                _toggleRow('Missed Dose Alerts', 'Alert when a dose is missed', true),
-                _toggleRow('Emergency Alerts', 'Panic button notifications', true),
+                _toggleRow('Push Notifications', 'Get push alerts', user?['notification_prefs']?['push'] ?? true, (val) => _updatePref('push', val)),
+                _toggleRow('Missed Dose Alerts', 'Alert when a dose is missed', user?['notification_prefs']?['missed_dose'] ?? true, (val) => _updatePref('missed_dose', val)),
+                _toggleRow('Emergency Alerts', 'Panic button notifications', user?['notification_prefs']?['emergency'] ?? true, (val) => _updatePref('emergency', val)),
               ],
             ),
           ),
@@ -133,7 +160,7 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _toggleRow(String title, String desc, bool initial) {
+  Widget _toggleRow(String title, String desc, bool initial, Function(bool) onChanged) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
@@ -147,7 +174,7 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          Switch(value: initial, onChanged: (_) {}, activeTrackColor: AppColors.primary),
+          Switch(value: initial, onChanged: onChanged, activeTrackColor: AppColors.primary),
         ],
       ),
     );

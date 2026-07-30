@@ -18,7 +18,7 @@ class ApiService {
     // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
     // and the laptop's actual IP for physical Android devices via Wi-Fi/USB.
     if (kIsWeb) return 'http://localhost:5000/api';
-    return 'http://192.168.1.12:5000/api';
+    return 'http://192.168.1.9:5000/api';
   }
 
   static late SharedPreferences _prefs;
@@ -174,6 +174,22 @@ class ApiService {
     _user = null;
     await _prefs.remove('locus_token');
     await _prefs.remove('locus_user');
+  }
+
+  static Future<void> updatePreferences(Map<String, dynamic> prefs) async {
+    if (_token == null) throw Exception('Not authenticated');
+    final res = await http.put(
+      Uri.parse('$baseUrl/auth/preferences'),
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token'},
+      body: jsonEncode(prefs),
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      _user?['notification_prefs'] = data['notification_prefs'];
+      await _prefs.setString('locus_user', jsonEncode(_user));
+    } else {
+      throw Exception('Failed to update preferences');
+    }
   }
 
   // ── Medications (for own use or caregiver viewing) ──────────────────────
@@ -508,9 +524,9 @@ class ApiService {
     return [];
   }
 
-  static Future<List<dynamic>> getEvidence({int limit = 50}) async {
+  static Future<List<dynamic>> getMedicationFrames({int limit = 50}) async {
     final res = await http.get(
-      Uri.parse('$baseUrl/detection/evidence?limit=$limit'),
+      Uri.parse('$baseUrl/detection/medication_frames?limit=$limit'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -520,5 +536,5 @@ class ApiService {
     return [];
   }
 
-  static String evidenceImageUrl(String evidenceId) => '$baseUrl/detection/evidence/$evidenceId/image';
+  static String medicationFrameImageUrl(String frameId) => '$baseUrl/detection/medication_frames/$frameId/image';
 }

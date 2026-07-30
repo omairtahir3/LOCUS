@@ -61,7 +61,10 @@ router.post('/google', async (req, res) => {
 
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: [
+        process.env.GOOGLE_CLIENT_ID, 
+        '244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com' // locus-d2fe5 web client id
+      ],
     });
     const { email, name, picture } = ticket.getPayload();
 
@@ -292,6 +295,22 @@ router.get('/rtmp-host', protect, (req, res) => {
     }
   }
   res.json({ host: bestIp });
+});
+
+// PUT /api/auth/preferences - Update notification preferences
+router.put('/preferences', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.notification_prefs = { ...user.notification_prefs, ...req.body };
+    await user.save();
+    res.json({ message: 'Preferences updated successfully', notification_prefs: user.notification_prefs });
+  } catch (err) {
+    console.error('[Auth] PUT /api/auth/preferences ERROR:', err.message);
+    res.status(500).json({ error: 'Server error updating preferences' });
+  }
 });
 
 module.exports = router;

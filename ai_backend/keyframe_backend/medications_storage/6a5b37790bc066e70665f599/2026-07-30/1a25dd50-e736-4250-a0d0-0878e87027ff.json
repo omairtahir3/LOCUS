@@ -1,0 +1,16 @@
+{
+  "id": "1a25dd50-e736-4250-a0d0-0878e87027ff",
+  "phase_role": "phase3_pill_gone",
+  "phase_order": 3,
+  "frame_index": 23,
+  "phase_score": 0.7,
+  "detection_confidence": 0.78,
+  "detection_status": "needs_verification",
+  "medication_name": "panadol",
+  "medication_id": "6a6a8f600eb0b019f0bbd604",
+  "medicine_taken": true,
+  "user_id": "6a5b37790bc066e70665f599",
+  "detected_at": "2026-07-30T00:53:44.065101+00:00",
+  "file": "1a25dd50-e736-4250-a0d0-0878e87027ff.jpg",
+  "saved_at": "2026-07-30T05:53:44.080292+05:00"
+}

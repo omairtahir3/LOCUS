@@ -8,6 +8,19 @@ export default function SettingsPage() {
   const [linkEmail, setLinkEmail] = useState('');
   const [linkMsg, setLinkMsg] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [prefs, setPrefs] = useState(user?.notification_prefs || { push: true, email: true, missed_dose: true, emergency: true });
+
+  const handleTogglePref = async (key) => {
+    const newVal = !prefs[key];
+    const newPrefs = { ...prefs, [key]: newVal };
+    setPrefs(newPrefs);
+    try {
+      await authAPI.updatePreferences(newPrefs);
+    } catch (err) {
+      console.error('Failed to update pref', err);
+      setPrefs(prefs); // rollback
+    }
+  };
 
   const handleLinkUser = async () => {
     if (!linkEmail) return;
@@ -96,11 +109,10 @@ export default function SettingsPage() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {[
-            { label: 'Push Notifications', desc: 'Get push notifications for all alerts', key: 'push', checked: user?.notification_prefs?.push ?? true },
-            { label: 'Email Notifications', desc: 'Receive email alerts for critical events', key: 'email', checked: user?.notification_prefs?.email ?? true },
-            { label: 'SMS Alerts', desc: 'Text message alerts for emergencies', key: 'sms', checked: user?.notification_prefs?.sms ?? false },
-            { label: 'Missed Dose Alerts', desc: 'Get notified when a family member misses a dose', key: 'missed_dose', checked: user?.notification_prefs?.missed_dose ?? true },
-            { label: 'Emergency Alerts', desc: '"I\'m Lost" and panic button notifications', key: 'emergency', checked: user?.notification_prefs?.emergency ?? true },
+            { label: 'Push Notifications', desc: 'Get push notifications for all alerts', key: 'push' },
+            { label: 'Email Notifications', desc: 'Receive email alerts for critical events', key: 'email' },
+            { label: 'Missed Dose Alerts', desc: 'Get notified when a family member misses a dose', key: 'missed_dose' },
+            { label: 'Emergency Alerts', desc: '"I\'m Lost" and panic button notifications', key: 'emergency' },
           ].map(pref => (
             <div key={pref.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -108,14 +120,19 @@ export default function SettingsPage() {
                 <div className="text-xs text-muted">{pref.desc}</div>
               </div>
               <label style={{ position: 'relative', width: 44, height: 24, cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked={pref.checked} style={{ opacity: 0, width: 0, height: 0 }} />
+                <input 
+                  type="checkbox" 
+                  checked={!!prefs[pref.key]} 
+                  onChange={() => handleTogglePref(pref.key)}
+                  style={{ opacity: 0, width: 0, height: 0 }} 
+                />
                 <span style={{
                   position: 'absolute', inset: 0, borderRadius: 12,
-                  background: pref.checked ? 'var(--primary)' : 'var(--border)',
+                  background: prefs[pref.key] ? 'var(--primary)' : 'var(--border)',
                   transition: 'background 0.2s',
                 }}>
                   <span style={{
-                    position: 'absolute', top: 2, left: pref.checked ? 22 : 2,
+                    position: 'absolute', top: 2, left: prefs[pref.key] ? 22 : 2,
                     width: 20, height: 20, borderRadius: '50%', background: 'white',
                     transition: 'left 0.2s', boxShadow: 'var(--shadow-sm)',
                   }} />

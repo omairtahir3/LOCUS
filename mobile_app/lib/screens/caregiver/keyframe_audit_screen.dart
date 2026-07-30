@@ -34,7 +34,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
     setState(() => _loading = true);
     try {
       final results = await Future.wait([
-        ApiService.getEvidence(limit: 100),
+        ApiService.getMedicationFrames(limit: 100),
         ApiService.getKeyframes(limit: 50),
       ]);
       setState(() {
@@ -303,7 +303,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           child: AspectRatio(
                             aspectRatio: 16 / 9,
                             child: Image.network(
-                              ApiService.evidenceImageUrl(evId),
+                              ApiService.medicationFrameImageUrl(evId),
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 color: AppColors.borderLight,
@@ -388,7 +388,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.network(
-              ApiService.evidenceImageUrl(evId),
+              ApiService.medicationFrameImageUrl(evId),
               fit: BoxFit.contain,
               height: 200,
               width: double.infinity,

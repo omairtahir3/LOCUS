@@ -59,7 +59,7 @@ export default function KeyframeAudit() {
       // caregivers see monitored users' frames, normal users see only their own
       const [kfRes, evidenceRes, statusRes] = await Promise.all([
         detectionAPI.getKeyframes(queryParams),
-        detectionAPI.getEvidence(queryParams).catch(() => ({ data: [] })),
+        detectionAPI.getMedicationFrames(queryParams).catch(() => ({ data: [] })),
         detectionAPI.getStatus(),
       ]);
       
@@ -221,7 +221,7 @@ export default function KeyframeAudit() {
                 }}>
                   <img
                     loading="lazy"
-                    src={detectionAPI.getEvidenceImage(evId)}
+                    src={detectionAPI.getMedicationFrameImage(evId)}
                     alt={phaseInfo.label}
                     style={{ width: '100%', height: 140, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44` }}
                     onError={(e) => { e.target.style.display = 'none'; }}
@@ -292,7 +292,7 @@ export default function KeyframeAudit() {
                   }}>
                     <img
                       loading="lazy"
-                      src={detectionAPI.getEvidenceImage(evId)}
+                      src={detectionAPI.getMedicationFrameImage(evId)}
                       alt={phaseInfo.label}
                       style={{ width: '100%', height: 180, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44`, cursor: 'pointer' }}
                       onClick={() => toggleExpand(evId)}
@@ -327,7 +327,7 @@ export default function KeyframeAudit() {
                     {isOpen && (
                       <div style={{ padding: 12, borderTop: '1px solid var(--border-light)' }}>
                         <img
-                          src={detectionAPI.getEvidenceImage(evId)}
+                          src={detectionAPI.getMedicationFrameImage(evId)}
                           alt={`Evidence ${evId}`}
                           style={{ width: '100%', maxHeight: 400, objectFit: 'contain', borderRadius: 'var(--radius-md)', background: '#000' }}
                         />

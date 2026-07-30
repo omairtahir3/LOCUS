@@ -178,6 +178,8 @@ router.post('/logs', async (req, res) => {
       existing.status = status;
       if (verification_method) existing.verification_method = verification_method;
       if (notes) existing.notes = notes;
+      if (confidence_score !== undefined) existing.confidence_score = confidence_score;
+      if (keyframe_id) existing.keyframe_id = keyframe_id;
       if (status === 'taken' && !existing.taken_at) existing.taken_at = new Date();
       await existing.save();
 

@@ -19,7 +19,6 @@ const UserSchema = new mongoose.Schema({
   // Notification preferences
   notification_prefs: {
     email:           { type: Boolean, default: true },
-    sms:             { type: Boolean, default: false },
     push:            { type: Boolean, default: true },
     missed_dose:     { type: Boolean, default: true },
     emergency:       { type: Boolean, default: true },

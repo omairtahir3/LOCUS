@@ -23,19 +23,19 @@ router.get('/keyframes/:id/image', async (req, res) => {
   }
 });
 
-// GET /api/detection/evidence/:id/image — serve evidence image (binary pipe)
+// GET /api/detection/medication_frames/:id/image — serve medication frame image (binary pipe)
 // Unprotected because <img> tags cannot send Authorization headers
-router.get('/evidence/:id/image', async (req, res) => {
+router.get('/medication_frames/:id/image', async (req, res) => {
   try {
-    const url = `${AI_BACKEND}/api/keyframes/evidence/${req.params.id}/image`;
+    const url = `${AI_BACKEND}/api/keyframes/medication_frames/${req.params.id}/image`;
     const response = await axios({ method: 'get', url, responseType: 'stream', timeout: 10000 });
     res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
     response.data.pipe(res);
   } catch (err) {
     if (err.response?.status === 404) {
-      res.status(404).json({ error: 'Evidence frame not found' });
+      res.status(404).json({ error: 'Medication frame not found' });
     } else {
-      res.status(500).json({ error: 'Failed to fetch evidence image' });
+      res.status(500).json({ error: 'Failed to fetch medication frame image' });
     }
   }
 });
@@ -181,13 +181,12 @@ router.post('/keyframes/sync/confirm', async (req, res) => {
   }
 });
 
-// GET /api/detection/evidence — list evidence frames
-router.get('/evidence', async (req, res) => {
+// GET /api/detection/medication_frames — list medication frames
+router.get('/medication_frames', async (req, res) => {
   try {
-    const params = new URLSearchParams();
-    if (req.query.limit) params.set('limit', req.query.limit);
+    const params = new URLSearchParams(req.query);
 
-    // For normal users, only show their own evidence
+    // For normal users, only show their own medication frames
     const isCaregiverLike = req.user.role === 'admin' || req.user.role === 'caregiver' || req.user.role === 'family_member';
     if (!isCaregiverLike) {
       params.set('user_id', req.user._id.toString());
@@ -195,11 +194,11 @@ router.get('/evidence', async (req, res) => {
       params.set('user_id', req.query.user_id);
     }
 
-    const url = `${AI_BACKEND}/api/keyframes/evidence?${params.toString()}`;
+    const url = `${AI_BACKEND}/api/keyframes/medication_frames?${params.toString()}`;
     const response = await axios.get(url, { timeout: 60000 });
     let evidence = response.data || [];
 
-    // Additional access control: caregivers can only see evidence of their monitored users (or their own)
+    // Additional access control: caregivers can only see medication frames of their monitored users (or their own)
     if (isCaregiverLike && req.user.role !== 'admin') {
       const allowedUserIds = [req.user._id.toString()];
       if (req.user.monitoring_users && Array.isArray(req.user.monitoring_users)) {
@@ -210,8 +209,8 @@ router.get('/evidence', async (req, res) => {
 
     res.json(evidence);
   } catch (err) {
-    console.error('[Detection Proxy] GET /api/detection/evidence ERROR:', err.message);
-    res.status(500).json({ error: 'Failed to fetch evidence frames' });
+    console.error('[Detection Proxy] GET /api/detection/medication_frames ERROR:', err.message);
+    res.status(500).json({ error: 'Failed to fetch medication frames' });
   }
 });
 

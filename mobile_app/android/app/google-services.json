@@ -12,7 +12,20 @@
           "package_name": "com.locus.locus_mobile"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "244657783963-la2n4q5hratm7gfcbspglg8deu2vi60r.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.locus.locus_mobile",
+            "certificate_hash": "f26d00457e9397c9cd1edfafcb9de63e25c73749"
+          }
+        },
+        {
+          "client_id": "244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCvDUgsSx9vCFKjB3iytTPyIIJrGsXRpbY"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

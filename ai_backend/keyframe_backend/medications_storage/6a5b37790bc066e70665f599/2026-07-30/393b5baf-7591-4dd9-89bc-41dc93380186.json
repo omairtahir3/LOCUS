@@ -1,0 +1,16 @@
+{
+  "id": "393b5baf-7591-4dd9-89bc-41dc93380186",
+  "phase_role": "phase2_grip_motion",
+  "phase_order": 2,
+  "frame_index": 20,
+  "phase_score": 0.8,
+  "detection_confidence": 0.78,
+  "detection_status": "needs_verification",
+  "medication_name": "panadol",
+  "medication_id": "6a6a8f600eb0b019f0bbd604",
+  "medicine_taken": true,
+  "user_id": "6a5b37790bc066e70665f599",
+  "detected_at": "2026-07-30T00:53:44.046077+00:00",
+  "file": "393b5baf-7591-4dd9-89bc-41dc93380186.jpg",
+  "saved_at": "2026-07-30T05:53:44.062097+05:00"
+}

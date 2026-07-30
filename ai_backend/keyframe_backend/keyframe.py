@@ -342,30 +342,33 @@ class KeyframeStorage:
 
 # Evidence storage lives inside keyframe_backend/evidence_storage/
 
-EVIDENCE_STORAGE_DIR = os.path.join(
+MEDICATION_EVIDENCE_STORAGE_DIR = os.path.join(
 
     os.path.dirname(os.path.abspath(__file__)),
 
-    "evidence_storage"
+    "medications_storage"
+
 )
 
 
 
 
 
-class EvidenceStorage:
+class MedicationEvidenceStorage:
 
     """
 
-    Persists medicine evidence frames (Phase 1/2/3 keyframes from successful
+    Persists medicine evidence frame images to disk.
 
-    batch analysis detections) to disk with automatic TTL-based cleanup.
+    Metadata is saved to a flat .json file (currently)
+
+    and eventually to MongoDB (eventlogs).
 
     
 
     Storage layout:
 
-        evidence_storage/
+        medications_storage/
 
             <user_id>/
 
@@ -373,13 +376,13 @@ class EvidenceStorage:
 
                     <uuid>.jpg          - the evidence frame image
 
-                    <uuid>.json         - metadata
+                    <uuid>.json         - the evidence metadata
 
     """
 
 
 
-    def __init__(self, storage_dir=EVIDENCE_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
+    def __init__(self, storage_dir=MEDICATION_EVIDENCE_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
 
         self.storage_dir = storage_dir
 
@@ -707,29 +710,15 @@ class KeyframeExtractor:
 
 
 
-        # Window: flush every window_duration seconds using wall-clock time
-
-        self.window_duration = window_duration
-
-        self._window_start_time = time.time()
-
-        self._window_candidates = []
-
-
-
-        # Save the top N sharpest frames per 1-second window to disk
-
-        self.top_n_per_window = top_n_per_window
-
-
+        # Smart scene logic configuration
+        self._last_scene_save_time = 0.0
+        self.scene_cooldown_seconds = 10.0
+        self.scene_motion_threshold = 15.0
+        self.on_scene_saved = None
 
         # Local storage
-
         self.save_locally = save_locally
-
         self.storage = KeyframeStorage() if save_locally else None
-
-
 
     def compute_motion_score(self, frame):
 
@@ -845,77 +834,13 @@ class KeyframeExtractor:
 
 
 
-    def _flush_window(self):
-
-        """
-
-        Flush top 5 sharpest frames to disk in a background thread.
-
-        Non-blocking so the camera loop never stalls on disk I/O.
-
-        """
-
-        if not self._window_candidates or not self.storage:
-
-            self._window_candidates = []
-
-            return
-
-
-
-        # Sort by blur score (sharpest first), take top 5
-
-        sorted_candidates = sorted(self._window_candidates, key=lambda c: c[0], reverse=True)
-
-        to_save = sorted_candidates[:5]
-
-        print(f"[KeyframeExtractor] Flushing {len(to_save)} keyframes to disk (user={self.user_id})")
-
-
-
-        # Save in background thread so we don't block the camera loop
-
-        def _write(candidates, storage):
-
-            for blur_score, keyframe_id, frame, metadata in candidates:
-
-                try:
-
-                    storage.save(keyframe_id, frame, metadata)
-
-                except Exception as e:
-
-                    print(f"[KeyframeExtractor._flush_window] ERROR saving {keyframe_id}: {e}")
-
-
-
-        t = threading.Thread(target=_write, args=(to_save, self.storage), daemon=True)
-
-        t.start()
-
-
-
-        self._window_candidates = []
-
-        self._window_start_time = time.time()
-
-
-
-    def flush_remaining(self):
-
-        """
-
-        Flush any remaining window candidates when the video ends.
-
-        Without this, the last incomplete window is lost.
-
-        """
-
-        if self._window_candidates and self.storage:
-
-            print(f"[KeyframeExtractor] Flushing remaining {len(self._window_candidates)} candidates from final window")
-
-            self._flush_window()
+    def _save_scene_async(self, keyframe_id, frame, metadata, motion_score):
+        try:
+            self.storage.save(keyframe_id, frame, metadata)
+            if self.on_scene_saved:
+                self.on_scene_saved(keyframe_id, motion_score)
+        except Exception as e:
+            print(f"[KeyframeExtractor] ERROR saving scene {keyframe_id}: {e}")
 
 
 
@@ -1072,54 +997,40 @@ class KeyframeExtractor:
         timestamp = datetime.now().astimezone().isoformat()
 
 
-
-        # 1. Disk: collect candidates, flush every window_duration seconds
-
+        # 1. Smart Scene disk saving
         if self.save_locally and self.storage:
-
-            metadata = {
-
-                "id": keyframe_id,
-
-                "timestamp": timestamp,
-
-                "motion_score": round(float(motion_score), 2),
-
-                "blur_score": round(blur_score, 2),
-
-                "width": frame.shape[1],
-
-                "height": frame.shape[0],
-
-                "user_id": getattr(self, "user_id", "")
-
-            }
-
-            # Only keep top_n candidates in memory (avoid frame.copy for every frame)
-
-            if len(self._window_candidates) < self.top_n_per_window:
-
-                self._window_candidates.append((blur_score, keyframe_id, frame.copy(), metadata))
-
-            else:
-
-                # Replace worst candidate if this frame is sharper
-
-                worst_idx = min(range(len(self._window_candidates)), key=lambda i: self._window_candidates[i][0])
-
-                if blur_score > self._window_candidates[worst_idx][0]:
-
-                    self._window_candidates[worst_idx] = (blur_score, keyframe_id, frame.copy(), metadata)
-
-
-
-            # Flush when window_duration of wall-clock time has passed
-
-            elapsed = time.time() - self._window_start_time
-
-            if elapsed >= self.window_duration:
-
-                self._flush_window()
+            now = time.time()
+            if motion_score > self.scene_motion_threshold and (now - self._last_scene_save_time) >= self.scene_cooldown_seconds:
+                self._pending_scene_capture = True
+                if not hasattr(self, '_scene_capture_frames'):
+                    self._scene_capture_frames = []
+            
+            if getattr(self, '_pending_scene_capture', False):
+                self._scene_capture_frames.append({
+                    'frame': frame.copy(),
+                    'blur_score': blur_score,
+                    'motion_score': motion_score,
+                    'timestamp': timestamp,
+                    'keyframe_id': keyframe_id
+                })
+                # Wait 15 frames (~0.5s) for motion to settle, then pick sharpest
+                if len(self._scene_capture_frames) >= 15:
+                    best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
+                    self._last_scene_save_time = now
+                    metadata = {
+                        "id": best['keyframe_id'],
+                        "timestamp": best['timestamp'],
+                        "motion_score": round(float(best['motion_score']), 2),
+                        "blur_score": round(float(best['blur_score']), 2),
+                        "width": best['frame'].shape[1],
+                        "height": best['frame'].shape[0],
+                        "user_id": getattr(self, "user_id", ""),
+                        "event_type": "scene_change"
+                    }
+                    t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
+                    t.start()
+                    self._pending_scene_capture = False
+                    self._scene_capture_frames = []
 
 
 
@@ -1265,7 +1176,8 @@ class VideoSource:
 
                 for attempt in range(1, max_retries + 1):
 
-                    print(f"[VideoSource] Stream not available, retrying in 5s... ({attempt}/{max_retries})")
+                    if attempt == 1 or attempt % 12 == 0:
+                        print(f"[VideoSource] Stream not available, retrying... ({attempt}/{max_retries})")
 
                     time.sleep(5)
 

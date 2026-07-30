@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import os
 
-from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, EvidenceStorage, EVIDENCE_STORAGE_DIR
+from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
 
@@ -21,7 +21,7 @@ def _get_storage():
 def _get_evidence_storage():
     global _evidence_storage
     if _evidence_storage is None:
-        _evidence_storage = EvidenceStorage(EVIDENCE_STORAGE_DIR)
+        _evidence_storage = MedicationEvidenceStorage(MEDICATION_EVIDENCE_STORAGE_DIR)
     return _evidence_storage
 
 
@@ -100,8 +100,8 @@ async def confirm_sync(body: dict):
 
 # ── Medicine Evidence Frames ─────────────────────────────────────────────
 
-@router.get("/evidence")
-async def list_evidence_frames(limit: int = 100, user_id: str = ""):
+@router.get("/medication_frames")
+async def list_medication_frames(limit: int = 100, user_id: str = ""):
     """
     List stored medicine evidence frames (Phase 1/2/3 from successful detections).
     Sorted newest-first. Auto-cleaned after 36 hours.
@@ -110,17 +110,17 @@ async def list_evidence_frames(limit: int = 100, user_id: str = ""):
     return storage.list_evidence(user_id=user_id or None, limit=limit)
 
 
-@router.get("/evidence/{evidence_id}/image")
-async def get_evidence_image(evidence_id: str):
+@router.get("/medication_frames/{evidence_id}/image")
+async def get_medication_frame_image(evidence_id: str):
     """
     Serve an evidence frame image by its ID.
     """
     import glob
-    matches = glob.glob(os.path.join(EVIDENCE_STORAGE_DIR, "*", "*", f"{evidence_id}.jpg"))
+    matches = glob.glob(os.path.join(MEDICATION_EVIDENCE_STORAGE_DIR, "*", "*", f"{evidence_id}.jpg"))
     if matches:
         img_path = matches[0]
     else:
-        img_path = os.path.join(EVIDENCE_STORAGE_DIR, f"{evidence_id}.jpg")
+        img_path = os.path.join(MEDICATION_EVIDENCE_STORAGE_DIR, f"{evidence_id}.jpg")
         
     if not os.path.exists(img_path):
         raise HTTPException(status_code=404, detail="Evidence frame not found")

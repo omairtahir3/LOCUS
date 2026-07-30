@@ -124,7 +124,7 @@ router.get('/users/:userId/verification-events', async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const logs = await MedicationLog.find({
       user_id: req.params.userId,
-      verification_method: 'visual',
+      verification_method: { $in: ['visual', 'ai_visual', 'Camera'] },
       confidence_score: { $ne: null }
     })
       .populate('medication_id', 'name dosage')

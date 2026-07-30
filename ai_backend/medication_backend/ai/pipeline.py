@@ -10,11 +10,32 @@ import time
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
+# ── Shared MongoDB connection pool (thread-safe, reused across all pipeline instances) ──
+_mongo_client = None
+_mongo_db = None
+
+def _get_mongo_db():
+    """Get or create a shared MongoDB connection. MongoClient is thread-safe."""
+    global _mongo_client, _mongo_db
+    if _mongo_client is None:
+        try:
+            from pymongo import MongoClient
+            from .core.config import MONGODB_URI, MONGODB_DB
+            _mongo_client = MongoClient(MONGODB_URI, maxPoolSize=20)
+            _mongo_db = _mongo_client[MONGODB_DB]
+            print("[Pipeline] Shared MongoDB connection pool initialized")
+        except Exception as e:
+            print(f"[Pipeline] WARNING: MongoDB connection failed: {e}")
+            return None
+    return _mongo_db
 
 # Confidence thresholds - tuned for real-world YOLO + MediaPipe accuracy
-THRESHOLD_AUTO_VERIFY   = 0.85   # auto log as "taken" — no user confirmation needed
-THRESHOLD_CONFIRM       = 0.65   # needs_verification — ask elderly/caregiver to confirm
-THRESHOLD_MISSED        = 0.65   # below this, mark as missed
+from .core.policy import ConfidencePolicy
+EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
+THRESHOLD_AUTO_VERIFY = EVENT_CONFIDENCE_POLICY.auto_verify_threshold
+THRESHOLD_CONFIRM = EVENT_CONFIDENCE_POLICY.confirmation_threshold
+THRESHOLD_MISSED = EVENT_CONFIDENCE_POLICY.confirmation_threshold
+
 
 
 class MedicationDetectionPipeline:
@@ -36,6 +57,11 @@ class MedicationDetectionPipeline:
         self.gesture   = GestureDetector()
         self.extractor = KeyframeExtractor(target_fps=3, buffer_seconds=5, user_id=user_id, save_locally=True,
                                                window_duration=1.0, top_n_per_window=1)
+        self.extractor.on_scene_saved = self._log_scene_to_db
+        from .core.policy import ConfidencePolicy
+        from .plugins.medication import MedicationIntakePlugin
+        self.event_policy = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
+        self.event_plugin = MedicationIntakePlugin()
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -49,6 +75,37 @@ class MedicationDetectionPipeline:
         self.scheduled_time = scheduled_time
         self.token = token
         self.user_id = user_id
+
+    def _log_scene_to_db(self, keyframe_id, motion_score):
+        """
+        Write a scene change activity log to MongoDB for Behavioral ML baseline.
+        """
+        if not self.user_id:
+            return
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            ts_now = datetime.utcnow()
+            doc = {
+                "user_id": ObjectId(str(self.user_id)),
+                "event_type": "activity",
+                "timestamp": ts_now,
+                "confidence": 1.0,
+                "details": {
+                    "action": "scene_change",
+                    "motion_score": motion_score,
+                    "description": "Significant activity detected"
+                },
+                "keyframe_id": keyframe_id,
+                "createdAt": ts_now,
+                "updatedAt": ts_now
+            }
+            db.eventlogs.insert_one(doc)
+            print(f"[Pipeline] [DB-Log] Logged scene_change activity event for {self.user_id}")
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log] Error logging scene change: {e}")
 
     def _log_detection_to_db(self, status, confidence, keyframe_id=None):
         """
@@ -98,10 +155,6 @@ class MedicationDetectionPipeline:
                         "user_id": ObjectId(str(user_id)),
                         "scheduled_time": {"$gte": start_win, "$lte": end_win},
                     })
-                    if existing:
-                        print(f"[Pipeline] [DB-Log] Log already exists for {med_id} at {sched_str}")
-                        continue
-
                     log_doc = {
                         "user_id": ObjectId(str(user_id)),
                         "medication_id": ObjectId(med_id),
@@ -110,13 +163,19 @@ class MedicationDetectionPipeline:
                         "verification_method": "Camera",
                         "confidence_score": round(confidence, 3),
                         "keyframe_id": keyframe_id,
-                        "taken_at": ts_now if status == "taken" else None,
                         "notes": f"AI detection (confidence: {confidence:.1%})",
-                        "created_at": ts_now,
                         "updated_at": ts_now,
                     }
-                    db.medication_logs.insert_one(log_doc)
-                    print(f"[Pipeline] [DB-Log] OK {med_id} logged as {status.upper()} (conf={confidence:.2f})")
+                    if status == "taken":
+                        log_doc["taken_at"] = ts_now
+
+                    if existing:
+                        db.medication_logs.update_one({"_id": existing["_id"]}, {"$set": log_doc})
+                        print(f"[Pipeline] [DB-Log] Updated existing log for {med_id} at {sched_str} to {status.upper()}")
+                    else:
+                        log_doc["created_at"] = ts_now
+                        db.medication_logs.insert_one(log_doc)
+                        print(f"[Pipeline] [DB-Log] OK {med_id} logged as {status.upper()} (conf={confidence:.2f})")
                 except Exception as ex:
                     print(f"[Pipeline] [DB-Log] Error for {med_id}: {ex}")
 
@@ -191,7 +250,7 @@ class MedicationDetectionPipeline:
         Phase 3 (pill gone):   best frame showing pill has disappeared
         """
         try:
-            from ai_backend.keyframe_backend.keyframe import EvidenceStorage, EVIDENCE_STORAGE_DIR
+            from ai_backend.keyframe_backend.keyframe import MedicationEvidenceStorage as EvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR as EVIDENCE_STORAGE_DIR
         except ImportError:
             try:
                 import sys
@@ -200,13 +259,13 @@ class MedicationDetectionPipeline:
                 locus_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
                 if locus_root not in sys.path:
                     sys.path.insert(0, locus_root)
-                from ai_backend.keyframe_backend.keyframe import EvidenceStorage, EVIDENCE_STORAGE_DIR
+                from ai_backend.keyframe_backend.keyframe import MedicationEvidenceStorage as EvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR as EVIDENCE_STORAGE_DIR
             except ImportError as ie:
                 print(f"[Pipeline] WARNING: Could not import EvidenceStorage: {ie}")
                 # Fallback: construct path manually
                 evidence_dir = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                    "keyframe_backend", "evidence_storage"
+                    "keyframe_backend", "medications_storage"
                 )
                 os.makedirs(evidence_dir, exist_ok=True)
                 EVIDENCE_STORAGE_DIR = evidence_dir
@@ -685,27 +744,19 @@ class MedicationDetectionPipeline:
         Classify event based on confidence thresholds from FE-7.
         Returns classification and recommended action.
         """
-        if confidence >= THRESHOLD_AUTO_VERIFY:
-            return {
-                "classification": "auto_verified",
-                "action": "log_automatically",
-                "message": "Medication intake detected and automatically verified",
-                "confidence": confidence
-            }
-        elif confidence >= THRESHOLD_CONFIRM:
-            return {
-                "classification": "needs_confirmation",
-                "action": "request_user_confirmation",
-                "message": "Possible medication intake detected. Please confirm.",
-                "confidence": confidence
-            }
-        else:
-            return {
-                "classification": "missed",
-                "action": "mark_missed",
-                "message": "Confidence below threshold — marked as missed",
-                "confidence": confidence
-            }
+        return self.event_policy.legacy_classification(confidence)
+
+    def _attach_event_record(self, result, evidence_frames=None):
+        from .core.contracts import EventContext, EventRecord
+        context = EventContext(
+            user_id=self.user_id,
+            timestamp=result.get("timestamp", ""),
+            medication_ids=list(self.medication_ids),
+        )
+        detection = self.event_plugin.from_pipeline_result(result, context, evidence_frames)
+        status = self.event_policy.status_for(detection.confidence)
+        result["event"] = EventRecord.from_detection(detection, context, status).to_dict()
+        return result
 
     def analyze_buffer(self):
         """
@@ -766,6 +817,7 @@ class MedicationDetectionPipeline:
         avg_blur = float(np.mean(blur_scores)) if blur_scores else 0.0
 
         result = {
+            "action_type": "medication_intake",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "final_confidence": confidence,
             "frames_analyzed": len(frames),
@@ -778,6 +830,7 @@ class MedicationDetectionPipeline:
             "keyframe_buffer": [kf["id"] for kf in buffer],
             **classification
         }
+        self._attach_event_record(result)
 
         # ── Medicine counter: track verified intakes ────────────────────
         # All 3 phases must pass for the counter to increment:
@@ -1032,15 +1085,18 @@ class MedicationDetectionPipeline:
                   f"hands={a['hands']} hand_y={a['hand_y']:.2f} motion={a['motion']:.2f} "
                   f"near_top={a['near_top']} pills_count={a['in_hand_count']}")
 
-        # ── PHASE 1 GATE: scan ALL frames for pill-in-hand ───────────
-        # If no frame in the entire buffer has a pill clearly in hand,
+        # ── PHASE 1 GATE: scan ALL frames for a pill ───────────
+        # If no frame in the entire buffer has a pill detected,
         # there is no medication event happening — abort immediately.
-        any_pill_in_hand = any(
-            a["pill_in_hand"] and a["best_pill"] >= 0.45 and a["hands"] > 0
+        # We NO LONGER strictly require MediaPipe to detect a hand here,
+        # because MediaPipe often fails on compressed RTSP streams.
+        # We will let the Gemini VLM verify if the pill is actually in a hand.
+        any_pill = any(
+            a["best_pill"] >= 0.45
             for a in analyzed
         )
-        if not any_pill_in_hand:
-            print(f"[BatchAnalysis] PHASE 1 GATE: No pill-in-hand detected in any frame — aborting")
+        if not any_pill:
+            print(f"[BatchAnalysis] PHASE 1 GATE: No pill detected in any frame — aborting")
             return []
 
         # ── Strict Sequential 3-Phase Detection ──────────────────────
@@ -1279,6 +1335,7 @@ class MedicationDetectionPipeline:
             result["_evidence_frames"] = evidence_frames
             result["_p1_kf_id"] = p1_kf_id
             result["_in_hand_count"] = p1_data["in_hand_count"]
+            self._attach_event_record(result, evidence_frames)
 
             seq_num = len(results) + 1
             print(f"\n{'='*50}")
@@ -1297,6 +1354,67 @@ class MedicationDetectionPipeline:
 
         if not results:
             print("[BatchAnalysis] No complete 3-phase sequence found")
+            
+            # --- FALLBACK MECHANISM ---
+            # If MediaPipe failed to detect hands (e.g. poor lighting, compressed stream),
+            # but YOLO successfully detected a pill, we manually construct a sequence
+            # from the best pill frames and let Gemini VLM verify it.
+            if any_pill and len(analyzed) >= 3:
+                print("[BatchAnalysis] FALLBACK: Pill detected but MediaPipe failed. Sending to Gemini VLM for verification.")
+                import uuid as _uuid
+                sorted_by_pill = sorted(analyzed, key=lambda x: x["best_pill"], reverse=True)
+                top_3 = sorted(sorted_by_pill[:3], key=lambda x: analyzed.index(x))
+                f1, f2, f3 = top_3[0], top_3[1], top_3[2]
+                
+                phase_details = {
+                    "phase1_medicine_visible": {
+                        "score": 0.50, "pass": True,
+                        "best_pill": round(f1["best_pill"], 3), "pill_in_hand": False,
+                        "in_hand_count": 0,
+                        "keyframe_id": f1["kf"].get("id"),
+                        "frame_index": analyzed.index(f1),
+                    },
+                    "phase2_grip_and_motion": {
+                        "score": 0.50, "pass": True,
+                        "motion": round(f2["motion"], 3),
+                        "hand_y": round(f2["hand_y"], 3),
+                        "keyframe_id": f2["kf"].get("id"),
+                        "frame_index": analyzed.index(f2),
+                    },
+                    "phase3_medicine_gone": {
+                        "score": 0.50, "pass": True,
+                        "pill_after": round(f3["best_pill"], 3),
+                        "pill_drop": 0.0,
+                        "keyframe_id": f3["kf"].get("id"),
+                        "frame_index": analyzed.index(f3),
+                        "_buffer_idx": analyzed.index(f3),
+                    },
+                    "phases_passed": 3,
+                    "min_phase_score": 0.50,
+                    "weighted_avg": 0.50,
+                }
+                
+                classification = self.classify_event(0.50)
+                result = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "final_confidence": 0.50,
+                    "frames_analyzed": len(analyzed),
+                    "phase_details": phase_details,
+                    **classification,
+                }
+                
+                evidence_frames = [
+                    {"id": f1["kf"].get("id") or str(_uuid.uuid4()), "frame": f1["frame"], "timestamp": f1.get("timestamp"), "phase_role": "phase1_pill_visible", "phase_order": 1, "frame_index": analyzed.index(f1)},
+                    {"id": f2["kf"].get("id") or str(_uuid.uuid4()), "frame": f2["frame"], "timestamp": f2.get("timestamp"), "phase_role": "phase2_grip_motion", "phase_order": 2, "frame_index": analyzed.index(f2)},
+                    {"id": f3["kf"].get("id") or str(_uuid.uuid4()), "frame": f3["frame"], "timestamp": f3.get("timestamp"), "phase_role": "phase3_pill_gone", "phase_order": 3, "frame_index": analyzed.index(f3)}
+                ]
+                
+                result["_evidence_frames"] = evidence_frames
+                result["_p1_kf_id"] = f1["kf"].get("id")
+                result["_in_hand_count"] = 1  # Assume 1 pill for fallback
+                self._attach_event_record(result, evidence_frames)
+                results.append(result)
+
             # Don't clear buffer — incomplete sequences need to stay
             # so Phase 2/3 can complete in the next batch run.
         else:
@@ -1356,7 +1474,9 @@ class MedicationDetectionPipeline:
                     # Stream dropped — always reconnect regardless of frame count
                     self.camera_online = False
                     if frame_count == 0:
-                        print(f"[Pipeline] ⚠ Could not read from {source}. Retrying in 5s...")
+                        if not getattr(self, '_offline_logged', False):
+                            print(f"[Pipeline] ⚠ Camera offline ({source}). Waiting for stream...")
+                            self._offline_logged = True
                     else:
                         print(f"[Pipeline] ⚠ Stream dropped after {frame_count} frames. Reconnecting in 5s...")
                     try:
@@ -1368,7 +1488,7 @@ class MedicationDetectionPipeline:
                         cap = VideoSource(source)
                         cap.open()
                     except Exception as e:
-                        print(f"[Pipeline] Reconnect failed: {e}. Will retry...")
+                        pass # Silently retry
                     continue
                 else:
                     self.camera_online = True
@@ -1380,14 +1500,15 @@ class MedicationDetectionPipeline:
                     print(f"[Pipeline] Heartbeat: {frame_count} frames, {fps:.1f} fps")
                     _fps_start = time.time()
 
-                # ── THROTTLE: process at most 5 frames per second ───────────
-                # At 1 FPS, there's only a tiny chance of capturing both hand
-                # and pill in the same frame. 5 FPS gives 5x more chances
-                # while keeping CPU load reasonable.
+                # ── ADAPTIVE THROTTLE ───────────
                 _now = time.time()
                 if not hasattr(self, '_last_process_time'):
                     self._last_process_time = 0
-                _min_interval = 0.2  # 5 FPS max
+                
+                # Fetch dynamically changing FPS from extractor
+                fps_limit = getattr(self.extractor, "current_fps", getattr(self, "max_processing_fps", 5.0))
+                _min_interval = 1.0 / max(1.0, float(fps_limit))
+                
                 if (_now - self._last_process_time) < _min_interval:
                     time.sleep(0.02)  # yield GIL
                     continue

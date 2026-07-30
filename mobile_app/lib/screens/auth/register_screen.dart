@@ -21,8 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
-    clientId: kIsWeb ? null : '454678423894-37c3svs59772gipj48k9qvfqbvfbas3u.apps.googleusercontent.com',
-    serverClientId: kIsWeb ? null : '454678423894-37c3svs59772gipj48k9qvfqbvfbas3u.apps.googleusercontent.com',
+    serverClientId: kIsWeb ? null : '244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com',
   );
 
   Future<void> _handleGoogleSignIn() async {
