@@ -5,6 +5,7 @@ LOCUS is an advanced, AI-powered health and medication monitoring ecosystem desi
 ## Key Features
 
 * **AI Medication Verification:** Uses computer vision and Google Gemini AI to analyze live camera feeds and automatically verify when an elderly user takes their scheduled medication.
+* **Elderly User Dashboard:** An accessible, easy-to-use interface for elderly individuals to view their daily medication schedules, receive reminders, and check their adherence history.
 * **Caregiver Dashboard:** A dedicated portal for caregivers to review medication adherence, view AI-captured evidence frames (Keyframe Audit), and monitor the well-being of their family members.
 * **Real-time Video Processing:** Integrates with MediaMTX to stream and process real-time video (RTSP/WebRTC) for continuous event detection.
 * **Cross-Platform Notifications:** Synchronized notification preferences across devices, supporting Push Notifications (via FCM), Email alerts, Missed Dose warnings, and Emergency alerts.
