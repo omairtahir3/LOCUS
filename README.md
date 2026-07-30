@@ -1,6 +1,6 @@
 # LOCUS
 
-LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to assist elderly individuals in living safely and independently, while providing absolute peace of mind to their caregivers. The platform combines real-time computer vision, continuous behavioral learning, and a multi-platform architecture to actively monitor, assist, and protect users.
+LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to assist individuals—from everyday users managing their routines to elderly individuals living independently—while providing absolute peace of mind to their caregivers. The platform combines real-time computer vision, continuous behavioral learning, and a multi-platform architecture to actively monitor, assist, and protect users.
 
 ## Project Scope & Modules
 
@@ -61,7 +61,7 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 * **Multi-Caregiver Support:** Role-based access control (RBAC) allowing multiple caregivers with individualized notification preferences.
 
 ### 10. Module 10: User Dashboard
-* **Elderly User Interface:** An accessible, daily summary of events, routine progress, and medication compliance.
+* **User Interface:** An accessible, daily summary of events, routine progress, and medication compliance for all users.
 * **Alert Management:** Clear list of active alerts with simple Confirm, Dismiss, and Snooze controls.
 * **Privacy Toggle:** Prominent one-tap access to activate Privacy Mode.
 * **Location & Item History:** Recent location history overlaid with "last-seen" markers for tracked items.
