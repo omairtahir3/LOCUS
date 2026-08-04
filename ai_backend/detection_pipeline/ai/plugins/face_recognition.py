@@ -195,7 +195,6 @@ class FaceRecognitionPlugin(DetectorPlugin):
                                         "type": "face_crop"
                                     })
                                     ru["best_score"] = new_score
-                                    ru["embedding"] = embedding
                                     print(f"[{self.model_name}] Upgraded unknown face image for {ru['keyframe_id']}")
                                 except Exception as e:
                                     import traceback
