@@ -62,7 +62,7 @@ async def get_keyframe_image(keyframe_id: str):
     if not os.path.exists(img_path):
         raise HTTPException(status_code=404, detail="Keyframe image not found")
 
-    return FileResponse(img_path, media_type="image/jpeg")
+    return FileResponse(img_path, media_type="image/jpeg", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @router.get("/sync")
@@ -125,4 +125,4 @@ async def get_medication_frame_image(evidence_id: str):
     if not os.path.exists(img_path):
         raise HTTPException(status_code=404, detail="Evidence frame not found")
 
-    return FileResponse(img_path, media_type="image/jpeg")
+    return FileResponse(img_path, media_type="image/jpeg", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

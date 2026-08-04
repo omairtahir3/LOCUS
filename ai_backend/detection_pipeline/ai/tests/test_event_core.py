@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from ai.core import (
+from ai_backend.detection_pipeline.ai.core import (
     ActionType,
     ConfidencePolicy,
     EventContext,
@@ -10,8 +10,8 @@ from ai.core import (
     ModelReference,
     PluginRegistry,
 )
-from ai.core.contracts import DetectionResult
-from ai.plugins import MODEL_PLUGIN_CATALOG, MedicationIntakePlugin
+from ai_backend.detection_pipeline.ai.core.contracts import DetectionResult
+from ai_backend.detection_pipeline.ai.plugins import MODEL_PLUGIN_CATALOG, MedicationIntakePlugin
 
 
 class EventCoreTests(unittest.TestCase):

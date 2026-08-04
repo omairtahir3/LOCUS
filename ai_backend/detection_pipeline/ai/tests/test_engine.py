@@ -1,10 +1,11 @@
 import unittest
 import time
-from ai_backend.medication_backend.ai.core.contracts import EventContext, FrameContext
-from ai_backend.medication_backend.ai.core.engine import CoreAnalysisEngine, EventState
-from ai_backend.medication_backend.ai.core.plugins import PluginRegistry
-from ai_backend.medication_backend.ai.core.policy import ConfidencePolicy
-from ai_backend.medication_backend.ai.core.privacy import PrivacyGate
+from ai_backend.detection_pipeline.ai.core.contracts import EventContext, FrameContext
+from ai_backend.detection_pipeline.ai.core.engine import CoreAnalysisEngine, EventState
+from ai_backend.detection_pipeline.ai.core.plugins import PluginRegistry
+from ai_backend.detection_pipeline.ai.core.policy import ConfidencePolicy
+from ai_backend.detection_pipeline.ai.core.privacy import PrivacyGate
+from ai_backend.detection_pipeline.ai.core.contracts import ActionType
 
 
 class MockEventRepository:
@@ -13,6 +14,8 @@ class MockEventRepository:
 
 
 class MockPlugin:
+    action_type = ActionType.MEDICATION_INTAKE
+    
     def __init__(self):
         self.model_name = "mock"
     
@@ -44,17 +47,21 @@ class TestCoreAnalysisEngine(unittest.TestCase):
     def test_idle_to_collecting(self):
         self.assertEqual(self.engine.state, EventState.IDLE)
         
-        context = FrameContext(user_id="user123")
+        context = FrameContext(user_id="user123", timestamp="2026-07-31T00:00:00Z")
         frame_data = {"id": "1", "motion_score": 10.0, "scene_changed": False}
         
-        # This frame has motion, so it should transition IDLE -> POSSIBLE_EVENT -> COLLECTING
+        # This frame has motion, so it should transition IDLE -> POSSIBLE_EVENT
+        self.engine.process_frame(frame_data, context)
+        self.assertEqual(self.engine.state, EventState.POSSIBLE_EVENT)
+        
+        # A second frame transitions it to COLLECTING
         self.engine.process_frame(frame_data, context)
         self.assertEqual(self.engine.state, EventState.COLLECTING)
 
     def test_privacy_gate_blocks_processing(self):
         self.privacy_gate = PrivacyGate()
         # Create a frame context with privacy_mode=True
-        context = FrameContext(user_id="user123", privacy_mode=True)
+        context = FrameContext(user_id="user123", timestamp="2026-07-31T00:00:00Z", privacy_mode=True)
         frame_data = {"id": "1", "motion_score": 10.0}
         
         events = self.engine.process_frame(frame_data, context)

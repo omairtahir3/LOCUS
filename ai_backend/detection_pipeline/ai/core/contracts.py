@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Any
 from uuid import uuid4
 
 
-class ActionType(StrEnum):
+class ActionType(str, Enum):
+    """Types of actions that can be detected in the event buffer."""
     MEDICATION_INTAKE = "medication_intake"
     ITEM_EXIT = "item_exit"
+    SOCIAL_INTERACTION = "social_interaction"
+    UNKNOWN_FACE = "unknown_face"
     FACE_INTERACTION = "face_interaction"
     ACTIVITY = "activity"
 

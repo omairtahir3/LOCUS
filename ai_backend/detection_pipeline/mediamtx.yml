@@ -11,5 +11,5 @@ paths:
   # Reading is open locally.
   all:
     # No auth needed for local reads
-    publishUser: ""
-    readUser: ""
+    # publishUser: ""
+    # readUser: ""

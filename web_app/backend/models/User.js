@@ -26,6 +26,22 @@ const UserSchema = new mongoose.Schema({
 
   phone:        { type: String, default: null },
   camera_stream_url: { type: String, default: null },  // RTSP/RTMP camera URL for this elderly user's AI pipeline
+  
+  // AI Confidence Thresholds Override
+  confidence_thresholds: {
+    medication_intake: {
+      auto_verify: { type: Number, default: 0.85 },
+      confirm: { type: Number, default: 0.70 },
+      analyzed_events_count: { type: Number, default: 0 },
+      last_adjusted_at: { type: Date, default: null }
+    },
+    unknown_face: {
+      auto_verify: { type: Number, default: 0.85 },
+      confirm: { type: Number, default: 0.70 },
+      analyzed_events_count: { type: Number, default: 0 },
+      last_adjusted_at: { type: Date, default: null }
+    }
+  },
   is_active:    { type: Boolean, default: true },
 }, { timestamps: true });
 

@@ -1,2 +1,2 @@
 # Keyframe Backend — frame capture, storage, and audit API
-# Separated from medication_backend for modularity
+# Separated from detection_pipeline for modularity

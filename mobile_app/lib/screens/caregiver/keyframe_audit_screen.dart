@@ -15,12 +15,13 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
   bool _loading = true;
   List<dynamic> _evidence = [];
   List<dynamic> _keyframes = [];
+  List<dynamic> _unknownFaces = [];
   String? _expandedEventId;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 3, vsync: this);
     _loadData();
   }
 
@@ -36,10 +37,12 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       final results = await Future.wait([
         ApiService.getMedicationFrames(limit: 100),
         ApiService.getKeyframes(limit: 50),
+        ApiService.getEventLogKeyframes(limit: 40, type: 'unknown_face'),
       ]);
       setState(() {
         _evidence = results[0];
         _keyframes = results[1];
+        _unknownFaces = results[2];
         _loading = false;
       });
     } catch (_) {
@@ -47,33 +50,26 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
     }
   }
 
-  /// Group evidence frames by detection event (same detected_at timestamp)
   List<Map<String, dynamic>> _groupedEvents() {
     final Map<String, List<Map<String, dynamic>>> groups = {};
-
     for (final ev in _evidence) {
       final ts = ev['detected_at'] ?? ev['saved_at'] ?? 'unknown';
       groups.putIfAbsent(ts, () => []);
       groups[ts]!.add(Map<String, dynamic>.from(ev));
     }
-
-    // Sort groups by timestamp (newest first) and convert to list
     final sorted = groups.entries.toList()
       ..sort((a, b) => b.key.compareTo(a.key));
 
     return sorted.map((entry) {
       final frames = entry.value;
-      // Sort phases: P1 -> P2 -> P3
       frames.sort((a, b) {
         const order = {
           'phase1_pill_visible': 0,
           'phase2_grip_motion': 1,
           'phase3_pill_gone': 2,
         };
-        return (order[a['phase_role']] ?? 9)
-            .compareTo(order[b['phase_role']] ?? 9);
+        return (order[a['phase_role']] ?? 9).compareTo(order[b['phase_role']] ?? 9);
       });
-
       return {
         'timestamp': entry.key,
         'frames': frames,
@@ -92,6 +88,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
         title: const Text('Keyframe Audit'),
         bottom: TabBar(
           controller: _tabCtrl,
+          isScrollable: true,
           tabs: [
             Tab(
               child: Row(
@@ -113,6 +110,16 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 ],
               ),
             ),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.person_outline, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Unknown Faces (${_unknownFaces.length})'),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -125,6 +132,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 children: [
                   _buildEvidenceTab(),
                   _buildKeyframesTab(),
+                  _buildUnknownFacesTab(),
                 ],
               ),
             ),
@@ -158,7 +166,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
     final status = event['status'] as String;
     final isExpanded = _expandedEventId == ts;
 
-    // Status color
     Color statusColor;
     String statusLabel;
     switch (status) {
@@ -197,7 +204,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       ),
       child: Column(
         children: [
-          // Header
           InkWell(
             onTap: () {
               setState(() {
@@ -209,7 +215,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  // Confidence circle
                   Container(
                     width: 48,
                     height: 48,
@@ -234,7 +239,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // Info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -257,7 +261,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                       ],
                     ),
                   ),
-                  // Status badge
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
@@ -276,17 +279,13 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                   ),
                   const SizedBox(width: 4),
                   Icon(
-                    isExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                    isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                     color: AppColors.textMuted,
                   ),
                 ],
               ),
             ),
           ),
-
-          // Phase thumbnails row (always visible)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             child: Row(
@@ -328,8 +327,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
               }).toList(),
             ),
           ),
-
-          // Expanded detail
           if (isExpanded) ...[
             const Divider(height: 1, color: AppColors.borderLight),
             ...frames.map((f) => _expandedPhaseCard(f)),
@@ -349,7 +346,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Phase header
           Row(
             children: [
               Container(
@@ -384,7 +380,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
             ],
           ),
           const SizedBox(height: 8),
-          // Full-size image
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.network(
@@ -511,9 +506,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                       ),
                       const SizedBox(width: 8),
                       Icon(
-                        isOpen
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
+                        isOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                         color: AppColors.textMuted,
                       ),
                     ],
@@ -575,6 +568,179 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       },
     );
   }
+
+  // ── Unknown Faces Tab ──────────────────────────────────────────────────
+
+  Widget _buildUnknownFacesTab() {
+    if (_unknownFaces.isEmpty) {
+      return _emptyState(
+        'No unknown faces',
+        'When the AI detects an unknown face, it will appear here for verification.',
+        Icons.person_search_outlined,
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _unknownFaces.length,
+      itemBuilder: (ctx, i) {
+        final ev = _unknownFaces[i];
+        final kfId = ev['keyframe_id'];
+        final status = ev['verification_status'];
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (kfId != null)
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                  child: Image.network(
+                    '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
+                    height: 200,
+                    fit: BoxFit.cover,
+                    errorBuilder: (c,e,s) => Container(height: 200, color: AppColors.borderLight, child: const Icon(Icons.broken_image)),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Unknown Face Detected', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Text(_formatTimestamp(ev['timestamp']), style: TextStyle(color: AppColors.textMuted)),
+                    const SizedBox(height: 12),
+                    
+                    if (status == 'pending') ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                              onPressed: () => _showNamePersonDialog(ev['_id']),
+                              child: const Text('Name Person'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => _dismissFace(ev['_id']),
+                              child: const Text('Dismiss'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(12)),
+                            child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                          if (ev['pending_notification'] == true && ApiService.userRole == 'caregiver')
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Text('Pending user acknowledgement', style: TextStyle(color: AppColors.warning, fontSize: 12)),
+                            ),
+                        ],
+                      ),
+                      if (ev['pending_notification'] == true && ApiService.userRole != 'caregiver') ...[
+                        const SizedBox(height: 8),
+                        ElevatedButton(
+                          onPressed: () => _acknowledgeAction(ev['_id']),
+                          child: const Text('Acknowledge Caregiver Action'),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showNamePersonDialog(String eventId) async {
+    final nameCtrl = TextEditingController();
+    final relCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Name this Person'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Name', hintText: 'e.g., John Doe'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: relCtrl,
+              decoration: const InputDecoration(labelText: 'Relationship (Optional)', hintText: 'e.g., Son'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameCtrl.text.isEmpty) return;
+              Navigator.pop(context);
+              try {
+                final res = await ApiService.confirmFace(eventId, nameCtrl.text, relCtrl.text);
+                if (res['statusCode'] == 200) {
+                  _loadData();
+                } else {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['data']['error'] ?? 'Error')));
+                }
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error confirming face')));
+              }
+            },
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _dismissFace(String eventId) async {
+    try {
+      final res = await ApiService.dismissFace(eventId);
+      if (res['statusCode'] == 200) {
+        _loadData();
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['data']['error'] ?? 'Error')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error dismissing face')));
+    }
+  }
+
+  Future<void> _acknowledgeAction(String eventId) async {
+    try {
+      await ApiService.acknowledgeAction(eventId);
+      _loadData();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error acknowledging action')));
+    }
+  }
+
 
   // ── Helpers ────────────────────────────────────────────────────────────
 

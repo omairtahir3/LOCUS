@@ -66,10 +66,12 @@ def _spawn_pipeline_for_user(user_id, camera_url):
     """
     global _pipelines, _pipeline_threads
     
-    # If already running for this user, skip
-    if user_id in _pipelines and _pipelines[user_id].is_running:
-        print(f"[Scheduler] Pipeline already running for user {user_id}")
-        return _pipelines[user_id]
+    # Guard: check if the thread is still alive (covers reconnect sleep windows
+    # where is_running is transiently False). Thread.is_alive() is the only
+    # reliable signal — it stays True during the 10s reconnect sleep.
+    existing_thread = _pipeline_threads.get(user_id)
+    if existing_thread and existing_thread.is_alive():
+        return _pipelines.get(user_id)
     
     pipeline = MedicationDetectionPipeline(
         api_base_url="http://localhost:8000",
@@ -471,9 +473,58 @@ async def _backfill_expired_slots():
                       f"(window ended at {window_end.strftime('%H:%M')})")
 
 
+async def _ensure_stream_pipelines():
+    """
+    Discover active camera streams on MediaMTX and spawn/stop pipelines
+    accordingly, independent of medication schedule.
+    """
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("http://127.0.0.1:9997/v3/paths/list", timeout=3)
+        items = resp.json().get("items", [])
+    except Exception:
+        return  # mediamtx API not reachable — skip this tick
+
+    # Extract user IDs from active stream paths (pattern: live/{user_id})
+    streaming_user_ids = set()
+    for path_info in items:
+        name = path_info.get("name", "")
+        if name.startswith("live/"):
+            uid = name.split("live/", 1)[1]
+            if uid:
+                streaming_user_ids.add(uid)
+
+    # Spawn pipelines for newly-streaming users
+    for uid in streaming_user_ids:
+        existing_thread = _pipeline_threads.get(uid)
+        if existing_thread and existing_thread.is_alive():
+            # Reset grace timer — stream is still active
+            pipeline = _pipelines.get(uid)
+            if pipeline and hasattr(pipeline, '_stream_gone_since'):
+                pipeline._stream_gone_since = None
+            continue
+        camera_url = f"rtsp://127.0.0.1:8554/live/{uid}"
+        _spawn_pipeline_for_user(uid, camera_url)
+        print(f"[Scheduler] Stream detected for {uid[:8]}… — pipeline started")
+
+    # Stop pipelines whose stream has been gone for >30s
+    for uid in list(_pipelines.keys()):
+        if uid not in streaming_user_ids:
+            pipeline = _pipelines[uid]
+            if not hasattr(pipeline, '_stream_gone_since') or pipeline._stream_gone_since is None:
+                pipeline._stream_gone_since = datetime.now()
+            elif (datetime.now() - pipeline._stream_gone_since).total_seconds() > 30:
+                _stop_pipeline_for_user(uid)
+                print(f"[Scheduler] Stream gone for {uid[:8]}… >30s — pipeline stopped")
+
+
 async def _check_schedules():
     """Main scheduler tick — check if any medication is due now (all users)."""
     global _active_sessions
+
+    # Ensure pipelines are running for all active camera streams
+    await _ensure_stream_pipelines()
 
     db = get_db()
     if db is None:
@@ -531,13 +582,18 @@ async def _check_schedules():
             await _log_session_result(session)
             expired_users.append(user_id)
 
-    # Remove expired/completed sessions and stop their pipelines
+    # Remove expired/completed sessions — clear medication context but keep
+    # pipeline alive for face recognition / scene capture / future plugins.
+    # Pipeline teardown is now handled by _ensure_stream_pipelines() when
+    # the camera stream disappears.
     for uid in expired_users:
         del _active_sessions[uid]
-        # Check if user has any OTHER upcoming sessions before stopping pipeline
-        # If not, stop the pipeline to free resources
-        if uid not in _active_sessions:
-            _stop_pipeline_for_user(uid)
+        pipeline = _get_pipeline_for_user(uid)
+        if pipeline:
+            pipeline.scheduled_time = ""
+            pipeline.medication_ids = []
+            pipeline.expected_medicine_count = 0
+            pipeline.medicines_taken_count = 0
 
     # ── Check for new medications due now (ALL users) ──────────────────
     # No USER_ID filter — discover all active medications in the system

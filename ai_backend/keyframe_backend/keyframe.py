@@ -224,105 +224,106 @@ class KeyframeStorage:
 
 
 
+
     def cleanup_expired(self):
-
         now_utc = datetime.now(timezone.utc)
-
         cutoff = now_utc - timedelta(hours=self.ttl_hours)
-
         deleted = 0
 
+        expired_kids = []
+        meta_paths_map = {}
 
-
-        def _clean_json(meta_path):
-
-            nonlocal deleted
-
+        def _gather_expired(meta_path):
             try:
-
+                import json, os
                 with open(meta_path, "r") as f: meta = json.load(f)
-
                 saved_at = meta.get("saved_at", "")
-
                 if not saved_at: return
-
                 frame_time = datetime.fromisoformat(saved_at)
-
                 if frame_time.tzinfo is None: frame_time = frame_time.astimezone(timezone.utc)
-
                 else: frame_time = frame_time.astimezone(timezone.utc)
-
+                
                 if frame_time < cutoff:
-
                     kid = os.path.basename(meta_path).replace(".json", "")
-
-                    img_path = os.path.join(os.path.dirname(meta_path), f"{kid}.jpg")
-
-                    if os.path.exists(img_path): os.remove(img_path)
-
-                    os.remove(meta_path)
-
-                    deleted += 1
-
-            except (json.JSONDecodeError, IOError, ValueError):
-
+                    expired_kids.append(kid)
+                    meta_paths_map[kid] = meta_path
+            except Exception:
                 pass
 
-
-
-        # Clean partitioned files
-
+        # Gather
         for u_dir in glob.glob(os.path.join(self.storage_dir, "*")):
-
             if not os.path.isdir(u_dir): continue
-
             for d_dir in glob.glob(os.path.join(u_dir, "*")):
-
                 if not os.path.isdir(d_dir): continue
-
-                # Bulk delete old date folders safely
-
-                try:
-
-                    folder_date = datetime.strptime(os.path.basename(d_dir), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-                    if folder_date < cutoff - timedelta(days=2):
-
-                        import shutil
-
-                        shutil.rmtree(d_dir)
-
-                        continue
-
-                except ValueError:
-
-                    pass
-
-
-
                 for meta_path in glob.glob(os.path.join(d_dir, "*.json")):
-
-                    _clean_json(meta_path)
-
+                    _gather_expired(meta_path)
                     
-
-                if not os.listdir(d_dir): os.rmdir(d_dir)
-
-
-
-        # Clean legacy flat files
-
         for meta_path in glob.glob(os.path.join(self.storage_dir, "*.json")):
+            _gather_expired(meta_path)
 
-            _clean_json(meta_path)
+        if not expired_kids:
+            return 0
 
+        # Batch retention check
+        retained_kids = set()
+        try:
+            from pymongo import MongoClient
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            
+            # Check event logs (keyframe_ref or keyframe_id might be used, check both)
+            events = db.eventlogs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})
+            for e in events:
+                if e.get("keyframe_id"): retained_kids.add(e.get("keyframe_id"))
 
+            events_ref = db.eventlogs.find({"keyframe_ref": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_ref": 1})
+            for e in events_ref:
+                if e.get("keyframe_ref"): retained_kids.add(e.get("keyframe_ref"))
+                
+            # Check medication logs
+            med_logs = db.medication_logs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})
+            for m in med_logs:
+                if m.get("keyframe_id"): retained_kids.add(m.get("keyframe_id"))
+                
+            # Check relationship representative images
+            rels = db.relationships.find({"representative_keyframe_id": {"$in": expired_kids}}, {"representative_keyframe_id": 1})
+            for r in rels:
+                if r.get("representative_keyframe_id"): retained_kids.add(r.get("representative_keyframe_id"))
+                
+            client.close()
+        except Exception as e:
+            print(f"[Storage] DB Error during cleanup retention check: {e}")
+
+        # Delete non-retained
+        for kid in expired_kids:
+            if kid in retained_kids:
+                continue
+            meta_path = meta_paths_map[kid]
+            img_path = os.path.join(os.path.dirname(meta_path), f"{kid}.jpg")
+            try:
+                if os.path.exists(img_path): os.remove(img_path)
+                if os.path.exists(meta_path): os.remove(meta_path)
+                deleted += 1
+            except Exception:
+                pass
+
+        # Cleanup empty dirs safely
+        for u_dir in glob.glob(os.path.join(self.storage_dir, "*")):
+            if not os.path.isdir(u_dir): continue
+            for d_dir in glob.glob(os.path.join(u_dir, "*")):
+                if not os.path.isdir(d_dir): continue
+                if not os.listdir(d_dir): 
+                    try:
+                        folder_date = datetime.strptime(os.path.basename(d_dir), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        if folder_date < cutoff - timedelta(days=2):
+                            os.rmdir(d_dir)
+                    except Exception:
+                        pass
 
         if deleted > 0:
-
-            print(f"[KeyframeStorage] Cleaned up {deleted} expired keyframe(s)")
-
+            print(f"[{self.__class__.__name__}] Cleaned up {deleted} expired frame(s)")
         return deleted
+
 
 
 
@@ -542,93 +543,106 @@ class MedicationEvidenceStorage:
 
 
 
+
     def cleanup_expired(self):
-
         now_utc = datetime.now(timezone.utc)
-
         cutoff = now_utc - timedelta(hours=self.ttl_hours)
-
         deleted = 0
 
+        expired_kids = []
+        meta_paths_map = {}
 
-
-        def _clean_json(meta_path):
-
-            nonlocal deleted
-
+        def _gather_expired(meta_path):
             try:
-
+                import json, os
                 with open(meta_path, "r") as f: meta = json.load(f)
-
                 saved_at = meta.get("saved_at", "")
-
                 if not saved_at: return
-
                 frame_time = datetime.fromisoformat(saved_at)
-
-                if frame_time.tzinfo is None: frame_time = frame_time.replace(tzinfo=timezone.utc)
-
+                if frame_time.tzinfo is None: frame_time = frame_time.astimezone(timezone.utc)
+                else: frame_time = frame_time.astimezone(timezone.utc)
+                
                 if frame_time < cutoff:
-
-                    eid = os.path.basename(meta_path).replace(".json", "")
-
-                    img_path = os.path.join(os.path.dirname(meta_path), f"{eid}.jpg")
-
-                    if os.path.exists(img_path): os.remove(img_path)
-
-                    os.remove(meta_path)
-
-                    deleted += 1
-
-            except (json.JSONDecodeError, IOError, ValueError):
-
+                    kid = os.path.basename(meta_path).replace(".json", "")
+                    expired_kids.append(kid)
+                    meta_paths_map[kid] = meta_path
+            except Exception:
                 pass
 
-
-
+        # Gather
         for u_dir in glob.glob(os.path.join(self.storage_dir, "*")):
-
             if not os.path.isdir(u_dir): continue
-
             for d_dir in glob.glob(os.path.join(u_dir, "*")):
-
                 if not os.path.isdir(d_dir): continue
-
-                try:
-
-                    folder_date = datetime.strptime(os.path.basename(d_dir), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-                    if folder_date < cutoff - timedelta(days=2):
-
-                        import shutil
-
-                        shutil.rmtree(d_dir)
-
-                        continue
-
-                except ValueError:
-
-                    pass
-
-
-
                 for meta_path in glob.glob(os.path.join(d_dir, "*.json")):
-
-                    _clean_json(meta_path)
-
-                if not os.listdir(d_dir): os.rmdir(d_dir)
-
-
-
+                    _gather_expired(meta_path)
+                    
         for meta_path in glob.glob(os.path.join(self.storage_dir, "*.json")):
+            _gather_expired(meta_path)
 
-            _clean_json(meta_path)
+        if not expired_kids:
+            return 0
 
+        # Batch retention check
+        retained_kids = set()
+        try:
+            from pymongo import MongoClient
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            
+            # Check event logs (keyframe_ref or keyframe_id might be used, check both)
+            events = db.eventlogs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})
+            for e in events:
+                if e.get("keyframe_id"): retained_kids.add(e.get("keyframe_id"))
 
+            events_ref = db.eventlogs.find({"keyframe_ref": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_ref": 1})
+            for e in events_ref:
+                if e.get("keyframe_ref"): retained_kids.add(e.get("keyframe_ref"))
+                
+            # Check medication logs
+            med_logs = db.medication_logs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})
+            for m in med_logs:
+                if m.get("keyframe_id"): retained_kids.add(m.get("keyframe_id"))
+                
+            # Check relationship representative images
+            rels = db.relationships.find({"representative_keyframe_id": {"$in": expired_kids}}, {"representative_keyframe_id": 1})
+            for r in rels:
+                if r.get("representative_keyframe_id"): retained_kids.add(r.get("representative_keyframe_id"))
+                
+            client.close()
+        except Exception as e:
+            print(f"[Storage] DB Error during cleanup retention check: {e}")
 
-        if deleted > 0: print(f"[EvidenceStorage] Cleaned up {deleted} expired evidence frame(s)")
+        # Delete non-retained
+        for kid in expired_kids:
+            if kid in retained_kids:
+                continue
+            meta_path = meta_paths_map[kid]
+            img_path = os.path.join(os.path.dirname(meta_path), f"{kid}.jpg")
+            try:
+                if os.path.exists(img_path): os.remove(img_path)
+                if os.path.exists(meta_path): os.remove(meta_path)
+                deleted += 1
+            except Exception:
+                pass
 
+        # Cleanup empty dirs safely
+        for u_dir in glob.glob(os.path.join(self.storage_dir, "*")):
+            if not os.path.isdir(u_dir): continue
+            for d_dir in glob.glob(os.path.join(u_dir, "*")):
+                if not os.path.isdir(d_dir): continue
+                if not os.listdir(d_dir): 
+                    try:
+                        folder_date = datetime.strptime(os.path.basename(d_dir), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        if folder_date < cutoff - timedelta(days=2):
+                            os.rmdir(d_dir)
+                    except Exception:
+                        pass
+
+        if deleted > 0:
+            print(f"[{self.__class__.__name__}] Cleaned up {deleted} expired frame(s)")
         return deleted
+
 
 
 
@@ -969,12 +983,20 @@ class KeyframeExtractor:
             motion_score = 0
 
         else:
-
             diff = cv2.absdiff(self.prev_frame, gray_small)
-
             motion_score = float(np.mean(diff))
-
             self.prev_frame = gray_small
+            
+        import time as _t
+        now_fps = _t.time()
+        if not hasattr(self, '_fps_log_time'):
+            self._fps_log_time = now_fps
+            self._fps_frames = 0
+        self._fps_frames += 1
+        if now_fps - self._fps_log_time >= 1.0:
+            print(f"[DEBUG-FPS] Captured {self._fps_frames} frames in the last second. Current motion: {motion_score:.2f}")
+            self._fps_log_time = now_fps
+            self._fps_frames = 0
 
 
 
@@ -1034,31 +1056,22 @@ class KeyframeExtractor:
 
 
 
-        # 2. AI buffer: ALL frames go in for analysis
+        # 2. AI buffer: Only append frames that pass the adaptive capture check
+        if not self.should_capture(motion_score):
+            return None
 
         keyframe = {
-
             "id": keyframe_id,
-
             "timestamp": timestamp,
-
             "motion_score": round(float(motion_score), 2),
-
             "blur_score": round(blur_score, 2),
-
             "raw_frame": frame,
-
             "width": frame.shape[1],
-
             "height": frame.shape[0],
-
         }
 
         with self._lock:
-
             self.buffer.append(keyframe)
-
-
 
         return keyframe
 

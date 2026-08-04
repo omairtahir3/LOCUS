@@ -114,3 +114,15 @@ export const userAPI = {
 
 export default api;
 
+// ── Event Logs ───────────────────────────────────────────────────────────────
+export const eventLogsAPI = {
+  getMemorySearch: (params) => api.get('/event-logs/memory-search', { params }),
+  getKeyframes: (params) => api.get('/event-logs/keyframes', { params })
+};
+
+// ── Relationships ────────────────────────────────────────────────────────────
+export const relationshipsAPI = {
+  confirmFace: (data) => api.post('/relationships/confirm', data),
+  dismissFace: (data) => api.post('/relationships/dismiss', data),
+  acknowledgeAction: (data) => api.post('/relationships/acknowledge', data)
+};

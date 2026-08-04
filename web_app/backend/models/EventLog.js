@@ -8,7 +8,7 @@ const eventLogSchema = new mongoose.Schema({
   },
   event_type: {
     type: String,
-    enum: ['medication', 'activity', 'social', 'object'],
+    enum: ['medication', 'activity', 'social', 'object', 'social_interaction', 'unknown_face'],
     required: true
   },
   timestamp: {
@@ -40,6 +40,20 @@ const eventLogSchema = new mongoose.Schema({
     default: null
   },
   is_flagged: {
+    type: Boolean,
+    default: false
+  },
+  person_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Relationship',
+    default: null
+  },
+  verification_status: {
+    type: String,
+    enum: ['pending', 'confirmed', 'rejected'],
+    default: 'pending'
+  },
+  pending_notification: {
     type: Boolean,
     default: false
   }

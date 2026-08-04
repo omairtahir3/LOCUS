@@ -11,10 +11,12 @@ const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
 
 const autoStartPipeline = async (userId, medicationId, scheduledTime) => {
   try {
+    const user = await User.findById(userId);
     const payload = {
       user_id: userId.toString(),
       medication_id: medicationId.toString(),
-      scheduled_time: scheduledTime.toISOString()
+      scheduled_time: scheduledTime.toISOString(),
+      confidence_thresholds: user?.confidence_thresholds || {}
     };
     await axios.post(`${AI_BACKEND}/api/detection/start`, payload, { timeout: 10000 });
     console.log(`[Scheduler] Auto-started AI detection pipeline for user ${userId}`);

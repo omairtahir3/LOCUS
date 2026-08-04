@@ -5,6 +5,7 @@ const {
   generateAIMissedDoseAlert, 
   generateAIUserMissedDoseAlert 
 } = require('./geminiAgent');
+const { analyzeUserThresholds } = require('./thresholdAnalyzer');
 
 const runNightlyBatchSync = async () => {
   console.log('[NightlySync] Starting Batch-and-Store AI Generation...');
@@ -64,6 +65,10 @@ const runNightlyBatchSync = async () => {
         }
       }
     }
+
+    // Step 2: Analyze and adjust confidence thresholds based on user behavior
+    await analyzeUserThresholds();
+    
   } catch (err) {
     console.error('[NightlySync] Error during batch sync:', err.message);
   }

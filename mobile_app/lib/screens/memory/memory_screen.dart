@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../services/api_service.dart';
 
 class MemoryScreen extends StatefulWidget {
   const MemoryScreen({super.key});
@@ -11,10 +12,92 @@ class MemoryScreen extends StatefulWidget {
 class _MemoryScreenState extends State<MemoryScreen> {
   final _searchCtrl = TextEditingController();
   String _activeFilter = 'All';
-  final _filters = ['All', 'People', 'Places', 'Objects', 'Events'];
+  final _filters = ['All', 'Medicine', 'People'];
+  
+  List<dynamic> _events = [];
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEvents();
+  }
+
+  Future<void> _loadEvents() async {
+    setState(() => _isLoading = true);
+    try {
+      final res = await ApiService.getMemorySearchEvents(limit: 50);
+      setState(() => _events = res);
+    } catch (e) {
+      debugPrint('Error loading memories: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  List<_MemoryItem> _getFormattedMemories() {
+    return _events.map((ev) {
+      final dt = DateTime.parse(ev['timestamp']);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      
+      String timeLabel = '-';
+      String groupLabel = 'Earlier';
+      
+      if (diff.inDays == 0) {
+        timeLabel = diff.inHours < 1 ? 'Just now' : '${diff.inHours} hours ago';
+        groupLabel = 'Today';
+      } else if (diff.inDays == 1) {
+        timeLabel = 'Yesterday';
+        groupLabel = 'Yesterday';
+      } else {
+        timeLabel = '${diff.inDays} days ago';
+        groupLabel = '${diff.inDays} Days Ago';
+      }
+
+      if (ev['event_type'] == 'medication_intake' || ev['event_type'] == 'medication') {
+        return _MemoryItem(
+          id: ev['_id'],
+          title: 'Took ${ev['details']?['medication_name'] ?? 'medication'}',
+          time: timeLabel,
+          icon: Icons.medication,
+          color: AppColors.success,
+          group: groupLabel,
+          category: 'Medicine',
+          imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
+        );
+      } else if (ev['event_type'] == 'social_interaction') {
+        final personName = ev['person_id']?['person_name'] ?? ev['details']?['person'] ?? 'Unknown Person';
+        return _MemoryItem(
+          id: ev['_id'],
+          title: 'Saw $personName',
+          time: timeLabel,
+          icon: Icons.person,
+          color: AppColors.primary,
+          group: groupLabel,
+          category: 'People',
+          imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
+        );
+      }
+      return null;
+    }).where((item) => item != null).cast<_MemoryItem>().toList();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final allMemories = _getFormattedMemories();
+    
+    // Apply filter
+    final filtered = _activeFilter == 'All' 
+        ? allMemories 
+        : allMemories.where((m) => m.category == _activeFilter).toList();
+        
+    // Apply search
+    final query = _searchCtrl.text.toLowerCase();
+    final searched = query.isNotEmpty 
+        ? filtered.where((m) => m.title.toLowerCase().contains(query)).toList()
+        : filtered;
+
     return Column(
       children: [
         // Search bar
@@ -28,21 +111,6 @@ class _MemoryScreenState extends State<MemoryScreen> {
                   const Expanded(
                     child: Text('Memory Search', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [AppColors.accent, AppColors.primary]),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.rocket_launch, size: 10, color: Colors.white),
-                        SizedBox(width: 4),
-                        Text('Coming Soon', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -51,6 +119,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                   Expanded(
                     child: TextField(
                       controller: _searchCtrl,
+                      onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'Search your memories...',
                         prefixIcon: const Icon(Icons.search, size: 20),
@@ -78,11 +147,12 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 height: 34,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  children: _filters.map((f) =>
-                    Padding(
+                  children: _filters.map((f) {
+                    final count = f == 'All' ? allMemories.length : allMemories.where((m) => m.category == f).length;
+                    return Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: ChoiceChip(
-                        label: Text(f, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                        label: Text('$f ($count)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
                           color: _activeFilter == f ? Colors.white : AppColors.textSecondary)),
                         selected: _activeFilter == f,
                         onSelected: (_) => setState(() => _activeFilter = f),
@@ -92,8 +162,8 @@ class _MemoryScreenState extends State<MemoryScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         visualDensity: VisualDensity.compact,
                       ),
-                    ),
-                  ).toList(),
+                    );
+                  }).toList(),
                 ),
               ),
             ],
@@ -102,41 +172,31 @@ class _MemoryScreenState extends State<MemoryScreen> {
 
         // Results
         Expanded(
-          child: _searchCtrl.text.isNotEmpty
-              ? _buildSearchResults()
-              : _buildRecentMemories(),
+          child: _isLoading 
+            ? const Center(child: CircularProgressIndicator())
+            : searched.isEmpty 
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.search_off, size: 56, color: AppColors.textMuted),
+                      const SizedBox(height: 12),
+                      Text(query.isNotEmpty ? 'No results found' : 'No memories yet', 
+                           style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('When the AI camera detects events, they will appear here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                    ],
+                  ),
+                )
+              : _buildMemoriesList(searched),
         ),
       ],
     );
   }
 
-  Widget _buildSearchResults() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off, size: 56, color: AppColors.textMuted),
-          const SizedBox(height: 12),
-          Text('Search coming soon', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text('Multi-modal memory search will be\navailable with the AI backend',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecentMemories() {
-    final memories = [
-      _MemoryItem('Morning walk in the park', '2 hours ago', Icons.directions_walk, AppColors.info, 'Today'),
-      _MemoryItem('Met Sarah at the cafe', '4 hours ago', Icons.person, AppColors.accent, 'Today'),
-      _MemoryItem('Took morning medication', '6 hours ago', Icons.medication, AppColors.success, 'Today'),
-      _MemoryItem('Doctor appointment', 'Yesterday', Icons.local_hospital, AppColors.danger, 'Yesterday'),
-      _MemoryItem('Grocery shopping', 'Yesterday', Icons.shopping_cart, AppColors.warning, 'Yesterday'),
-      _MemoryItem('Video call with family', '2 days ago', Icons.video_call, AppColors.primary, '2 Days Ago'),
-    ];
-
+  Widget _buildMemoriesList(List<_MemoryItem> memories) {
     String? lastGroup;
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -158,13 +218,18 @@ class _MemoryScreenState extends State<MemoryScreen> {
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 leading: Container(
-                  padding: const EdgeInsets.all(10),
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(color: m.color.withAlpha(25), borderRadius: BorderRadius.circular(10)),
-                  child: Icon(m.icon, color: m.color, size: 20),
+                  child: m.imageUrl != null 
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(m.imageUrl!, fit: BoxFit.cover, errorBuilder: (c,e,s) => Icon(m.icon, color: m.color, size: 20)),
+                      )
+                    : Icon(m.icon, color: m.color, size: 20),
                 ),
                 title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 subtitle: Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 18),
               ),
             ),
           ],
@@ -175,8 +240,14 @@ class _MemoryScreenState extends State<MemoryScreen> {
 }
 
 class _MemoryItem {
-  final String title, time, group;
+  final String id, title, time, group, category;
   final IconData icon;
   final Color color;
-  _MemoryItem(this.title, this.time, this.icon, this.color, this.group);
+  final String? imageUrl;
+  
+  _MemoryItem({
+    required this.id, required this.title, required this.time, 
+    required this.icon, required this.color, required this.group,
+    required this.category, this.imageUrl
+  });
 }

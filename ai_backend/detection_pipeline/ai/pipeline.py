@@ -52,7 +52,7 @@ class MedicationDetectionPipeline:
     early and disappearing late is a positive indicator.
     """
 
-    def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id=""):
+    def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id="", confidence_thresholds=None):
         self.detector  = PillDetector(model_path="ai/best_model.onnx")
         self.gesture   = GestureDetector()
         self.extractor = KeyframeExtractor(target_fps=3, buffer_seconds=5, user_id=user_id, save_locally=True,
@@ -60,8 +60,13 @@ class MedicationDetectionPipeline:
         self.extractor.on_scene_saved = self._log_scene_to_db
         from .core.policy import ConfidencePolicy
         from .plugins.medication import MedicationIntakePlugin
-        self.event_policy = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
+        from .plugins.face_recognition import FaceRecognitionPlugin
+        med_thresholds = (confidence_thresholds or {}).get("medication_intake", {})
+        auto_v = med_thresholds.get("auto_verify", 0.85)
+        conf = med_thresholds.get("confirm", 0.70)
+        self.event_policy = ConfidencePolicy(auto_verify_threshold=auto_v, confirmation_threshold=conf)
         self.event_plugin = MedicationIntakePlugin()
+        self.face_plugin = FaceRecognitionPlugin(similarity_threshold=0.65)
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -106,6 +111,51 @@ class MedicationDetectionPipeline:
             print(f"[Pipeline] [DB-Log] Logged scene_change activity event for {self.user_id}")
         except Exception as e:
             print(f"[Pipeline] [DB-Log] Error logging scene change: {e}")
+
+    def _log_face_result_to_db(self, face_result):
+        """
+        Write a SOCIAL_INTERACTION or UNKNOWN_FACE event to the EventLog collection.
+        """
+        if not self.user_id:
+            return
+            
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            ts_now = datetime.utcnow()
+            
+            # Confidence gating for upload. If >= 70%, we use the keyframe. 
+            # Otherwise we don't store it for long term (or we still log the ID but the TTL cleans it).
+            confidence = face_result.confidence
+            kf_id = face_result.evidence_keyframe_ids[0] if face_result.evidence_keyframe_ids else None
+            person_id = face_result.attributes.get("person_id")
+            event_type = face_result.action_type.value
+            
+            # Ensure person_id is an ObjectId if present
+            try:
+                person_id_obj = ObjectId(str(person_id)) if person_id else None
+            except:
+                person_id_obj = None
+            
+            doc = {
+                "user_id": ObjectId(str(self.user_id)),
+                "event_type": event_type,
+                "timestamp": ts_now,
+                "confidence": confidence,
+                "person_id": person_id_obj,
+                "details": face_result.attributes,
+                "keyframe_id": kf_id,
+                "createdAt": ts_now,
+                "updatedAt": ts_now
+            }
+            db.eventlogs.insert_one(doc)
+            print(f"[Pipeline] [DB-Log] Logged face event: {event_type} for {self.user_id} with conf {confidence:.2f}")
+        except Exception as e:
+            import traceback
+            print(f"[Pipeline] [DB-Log] Error logging face event: {e}")
+            traceback.print_exc()
 
     def _log_detection_to_db(self, status, confidence, keyframe_id=None):
         """
@@ -254,7 +304,7 @@ class MedicationDetectionPipeline:
         except ImportError:
             try:
                 import sys
-                # pipeline.py is at ai_backend/medication_backend/ai/pipeline.py
+                # pipeline.py is at ai_backend/detection_pipeline/ai/pipeline.py
                 # Need to add LOCUS/ (3 levels up) so 'ai_backend.keyframe_backend' resolves
                 locus_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
                 if locus_root not in sys.path:
@@ -1514,14 +1564,11 @@ class MedicationDetectionPipeline:
                     continue
                 self._last_process_time = _now
 
-                # Step 1: Schedule check — OUTSIDE the 3-hour window, just
-                # keep the stream alive but do NO processing at all.
-                # EXCEPTION: force_active is set by rewatch — always process.
-                if not getattr(self, 'force_active', False):
-                    active_schedule = [self.scheduled_time] if getattr(self, 'scheduled_time', '') else scheduled_times
-                    if active_schedule and not self.is_within_schedule_window(active_schedule):
-                        time.sleep(2)  # idle: sleep 2s, keep connection alive
-                        continue
+                # Step 1: Always process frames — keyframe capture, face
+                # recognition, and scene saving run continuously whenever
+                # the stream is active. Medication-specific batch analysis
+                # has its own guard (has_active_medication) inside the
+                # batch block below.
 
                 # Step 2: Buffer the frame for AI analysis
                 keyframe = self.extractor.process_frame(frame)
@@ -1570,7 +1617,7 @@ class MedicationDetectionPipeline:
                                 p1_kf_id = result.get("_p1_kf_id")
                                 phases_passed = result.get("phase_details", {}).get("phases_passed", 0)
 
-                                if phases_passed == 3 and confidence >= THRESHOLD_AUTO_VERIFY:
+                                if phases_passed == 3 and confidence >= self.event_policy.auto_verify_threshold:
                                     # When pills are held together, body-cam YOLO often
                                     # merges them into one detection.  A complete 3-phase
                                     # sequence (pill-in-hand → motion → hand-back-empty)
@@ -1598,7 +1645,7 @@ class MedicationDetectionPipeline:
                                     )
                                     self._tag_detection_keyframes(result, confidence, "taken", frames=evidence)
 
-                                elif phases_passed == 3 and confidence >= THRESHOLD_CONFIRM:
+                                elif phases_passed == 3 and confidence >= self.event_policy.confirmation_threshold:
                                     # 3-phase with moderate confidence → needs_verification
                                     # Log for ALL remaining medicines so they all appear
                                     remaining_nv = max(1, self.expected_medicine_count - self.medicines_taken_count)
@@ -1640,6 +1687,26 @@ class MedicationDetectionPipeline:
                             self._batch_busy = False
 
                     threading.Thread(target=_run_batch, daemon=True).start()
+
+                # Run Face Recognition Plugin independently of medication results
+                if not getattr(self, '_face_busy', False):
+                    def _run_face_batch():
+                        self._face_busy = True
+                        try:
+                            face_buffer = list(self.extractor.buffer)
+                            if face_buffer:
+                                from .core.contracts import EventContext
+                                ctx = EventContext(user_id=self.user_id, medication_ids=self.medication_ids)
+                                face_result = self.face_plugin.analyze(face_buffer, ctx)
+                                if face_result:
+                                    self._log_face_result_to_db(face_result)
+                        except Exception as e:
+                            import traceback
+                            print('[Face Recognition Error] ' + traceback.format_exc())
+                        finally:
+                            self._face_busy = False
+                    
+                    threading.Thread(target=_run_face_batch, daemon=True).start()
 
                 # Display annotated frame if debugging
                 if display:

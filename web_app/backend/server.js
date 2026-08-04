@@ -10,6 +10,8 @@ const medicationRoutes   = require('./routes/medication');
 const caregiverRoutes    = require('./routes/caregiver');
 const notificationRoutes = require('./routes/notifications');
 const detectionRoutes    = require('./routes/detection');
+const eventLogRoutes     = require('./routes/eventLogs');
+const relationshipRoutes = require('./routes/relationships');
 
 const app = express();
 
@@ -31,6 +33,8 @@ app.use('/api/medications',   medicationRoutes);
 app.use('/api/caregiver',     caregiverRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/detection',     detectionRoutes);
+app.use('/api/event-logs',    eventLogRoutes);
+app.use('/api/relationships', relationshipRoutes);
 
 // Health check
 app.get('/', (req, res) => res.json({

@@ -30,6 +30,7 @@ class DetectionStartRequest(BaseModel):
     expected_medicine_count: int = 0  # how many medicines expected at this time
     scheduled_times: list = []  # ["08:00", "20:00"] — only scan near these times
     test_mode: bool = False     # if True, creates dummy medication for stream testing
+    confidence_thresholds: dict = {}  # User-specific threshold overrides
 
 
 class DetectionAnalyzeRequest(BaseModel):
@@ -151,7 +152,8 @@ async def start_detection(req: DetectionStartRequest, db=Depends(get_db)):
         medication_ids=medication_ids,
         scheduled_time=scheduled_time_used,
         token=token,
-        user_id=user_id
+        user_id=user_id,
+        confidence_thresholds=req.confidence_thresholds
     )
     
     # For testing: force active to bypass schedule window checking

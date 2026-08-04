@@ -537,4 +537,63 @@ class ApiService {
   }
 
   static String medicationFrameImageUrl(String frameId) => '$baseUrl/detection/medication_frames/$frameId/image';
+
+  // ── Event Logs / Memory Search ──────────────────────────────────────────────
+
+  static Future<List<dynamic>> getMemorySearchEvents({int limit = 50}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/event-logs/memory-search?limit=$limit'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
+  }
+
+  static Future<List<dynamic>> getEventLogKeyframes({int limit = 50, String type = ''}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/event-logs/keyframes?limit=$limit&type=$type'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    }
+    return [];
+  }
+
+  // ── Relationships ────────────────────────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> confirmFace(String eventId, String personName, String relationshipType) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/relationships/confirm'),
+      headers: _headers,
+      body: jsonEncode({
+        'eventId': eventId,
+        'personName': personName,
+        'relationshipType': relationshipType,
+      }),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> dismissFace(String eventId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/relationships/dismiss'),
+      headers: _headers,
+      body: jsonEncode({'eventId': eventId}),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> acknowledgeAction(String eventId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/relationships/acknowledge'),
+      headers: _headers,
+      body: jsonEncode({'eventId': eventId}),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
 }

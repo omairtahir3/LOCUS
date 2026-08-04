@@ -41,6 +41,7 @@ const MedicationLogSchema = new mongoose.Schema({
   pre_generated_reminder_message: { type: String, default: null },
   pre_generated_missed_title:     { type: String, default: null },
   pre_generated_missed_message:   { type: String, default: null },
+  is_flagged:                     { type: Boolean, default: false },
 
 }, { timestamps: true });
 

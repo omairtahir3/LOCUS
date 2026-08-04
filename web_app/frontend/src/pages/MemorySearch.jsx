@@ -1,65 +1,32 @@
 import { useState, useEffect } from 'react';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera } from 'lucide-react';
-import { detectionAPI } from '../services/api';
-// Local IDB import removed
+import { eventLogsAPI, detectionAPI } from '../services/api';
 
-const FILTERS = ['All', 'People', 'Places', 'Objects', 'Events', 'Medicine'];
-
-const RECENT_MEMORIES = [
-  { id: 1, title: 'Morning walk in the park', time: '2 hours ago', icon: Footprints, color: 'var(--info)', group: 'Today', category: 'Events' },
-  { id: 2, title: 'Met Sarah at the cafe', time: '4 hours ago', icon: User, color: 'var(--accent)', group: 'Today', category: 'People' },
-  { id: 4, title: 'Doctor appointment', time: 'Yesterday', icon: Hospital, color: 'var(--danger)', group: 'Yesterday', category: 'Events' },
-  { id: 5, title: 'Grocery shopping', time: 'Yesterday', icon: ShoppingCart, color: 'var(--warning)', group: 'Yesterday', category: 'Events' },
-  { id: 6, title: 'Video call with family', time: '2 days ago', icon: Video, color: 'var(--primary)', group: '2 Days Ago', category: 'People' },
-];
+const FILTERS = ['All', 'Medicine', 'People'];
 
 export default function MemorySearch() {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
-  const [medKeyframes, setMedKeyframes] = useState([]);
-  const [loadingMeds, setLoadingMeds] = useState(false);
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  // Load medication keyframes and evidence on mount
   useEffect(() => {
-    const fetchMedKeyframes = async () => {
-      setLoadingMeds(true);
+    const fetchEvents = async () => {
+      setLoading(true);
       try {
-        // Load from backend directly
-        const [kfRes, evRes] = await Promise.all([
-          detectionAPI.getKeyframes({ medication_only: true, limit: 30 }),
-          detectionAPI.getMedicationFrames({ limit: 30 }).catch(() => ({ data: [] }))
-        ]);
-        
-        let allMeds = kfRes.data || [];
-        const evData = evRes.data || [];
-        
-        // Merge evidence frames
-        const existingIds = new Set(allMeds.map(k => k.keyframe_id));
-        evData.forEach(ev => {
-          if (!existingIds.has(ev.id || ev.keyframe_id)) {
-             // normalize evidence to look like a keyframe
-             allMeds.push({
-               ...ev,
-               keyframe_id: ev.id || ev.keyframe_id,
-               medication_detected: true
-             });
-          }
-        });
-        
-        setMedKeyframes(allMeds);
+        const res = await eventLogsAPI.getMemorySearch({ limit: 50 });
+        setEvents(res.data || []);
       } catch (e) {
-        console.error('Failed to load medication keyframes:', e);
+        console.error('Failed to load events:', e);
       } finally {
-        setLoadingMeds(false);
+        setLoading(false);
       }
     };
-    fetchMedKeyframes();
+    fetchEvents();
   }, []);
 
-  // Build medicine memory items from real keyframe data
-  const takenKeyframes = medKeyframes.filter(kf => kf.medication_detected || kf.phase_role);
-  const medMemories = takenKeyframes.map((kf, i) => {
-    const dt = kf.detected_at ? new Date(kf.detected_at) : kf.saved_at ? new Date(kf.saved_at) : null;
+  const formattedEvents = events.map((ev, i) => {
+    const dt = new Date(ev.timestamp);
     const now = new Date();
     let timeLabel = '-';
     let groupLabel = 'Earlier';
@@ -81,50 +48,50 @@ export default function MemorySearch() {
       }
     }
 
-    const conf = kf.detection_confidence ? `${(kf.detection_confidence * 100).toFixed(0)}%` : '';
-    const statusLabel = kf.detection_status === 'taken' ? '✓ Verified' : '⏳ Pending';
+    if (ev.event_type === 'medication_intake' || ev.event_type === 'medication') {
+      const conf = ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '';
+      return {
+        id: ev._id,
+        keyframe_id: ev.keyframe_id,
+        title: `Took ${ev.details?.medication_name || 'medication'}`,
+        time: timeLabel,
+        icon: Pill,
+        color: 'var(--success)',
+        group: groupLabel,
+        category: 'Medicine',
+        confidence: conf,
+        status: '✓ Verified',
+        hasImage: !!ev.keyframe_id,
+        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null
+      };
+    } else if (ev.event_type === 'social_interaction') {
+      const personName = ev.person_id?.person_name || ev.details?.person || 'Unknown Person';
+      return {
+        id: ev._id,
+        keyframe_id: ev.keyframe_id,
+        title: `Saw ${personName}`,
+        time: timeLabel,
+        icon: User,
+        color: 'var(--primary)',
+        group: groupLabel,
+        category: 'People',
+        confidence: '',
+        status: ev.verification_status === 'confirmed' ? '✓ Confirmed' : '',
+        hasImage: !!ev.keyframe_id,
+        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null
+      };
+    }
+    return null;
+  }).filter(Boolean);
 
-    // Phase role labels
-    const phaseLabels = {
-      phase1_pill_visible: 'Pill Visible',
-      phase2_grip_motion: 'Grip & Motion',
-      phase3_pill_gone: 'Pill Gone',
-    };
-    const phaseLabel = phaseLabels[kf.phase_role] || '';
-
-    return {
-      id: `med-${kf.keyframe_id || i}`,
-      keyframe_id: kf.keyframe_id,
-      base64_image: kf.base64_image,
-      title: `Took ${kf.medication_name || 'medication'}`,
-      time: timeLabel,
-      icon: Pill,
-      color: kf.detection_status === 'taken' ? 'var(--success)' : 'var(--warning)',
-      group: groupLabel,
-      category: 'Medicine',
-      confidence: conf,
-      status: statusLabel,
-      detection_status: kf.detection_status,
-      phase_role: kf.phase_role,
-      phase_label: phaseLabel,
-      hasImage: true,
-    };
-  });
-
-  // Merge real medicine data with static placeholder memories
-  const allMemories = [...RECENT_MEMORIES, ...medMemories];
-
-  // Apply filter
   const filteredMemories = activeFilter === 'All'
-    ? allMemories
-    : allMemories.filter(m => m.category === activeFilter);
+    ? formattedEvents
+    : formattedEvents.filter(m => m.category === activeFilter);
 
-  // Apply search
   const searchedMemories = query.length > 0
     ? filteredMemories.filter(m => m.title.toLowerCase().includes(query.toLowerCase()))
     : filteredMemories;
 
-  // Group by time
   const groupedMemories = searchedMemories.reduce((acc, curr) => {
     if (!acc[curr.group]) acc[curr.group] = [];
     acc[curr.group].push(curr);
@@ -174,24 +141,24 @@ export default function MemorySearch() {
                 color: activeFilter === f ? '#fff' : 'var(--text-secondary)'
               }}
             >
-              {f === 'Medicine' ? `${f} (${takenKeyframes.length})` : f}
+              {f === 'All' ? `All (${formattedEvents.length})` : `${f} (${formattedEvents.filter(m => m.category === f).length})`}
             </button>
           ))}
         </div>
       </div>
 
-      {!hasResults ? (
+      {!hasResults && !loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
           <SearchX size={56} style={{ opacity: 0.5, marginBottom: 12 }} />
           <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
             {query.length > 0 ? 'No results found' : 'No memories yet'}
           </div>
           <div style={{ fontSize: '0.85rem', textAlign: 'center' }}>
-            {activeFilter === 'Medicine'
-              ? 'When the AI camera detects you taking medicine, snapshots will appear here.'
-              : 'Try searching for a memory or selecting a different category.'}
+            When the AI camera detects events, they will appear here.
           </div>
         </div>
+      ) : loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading...</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {Object.entries(groupedMemories).map(([group, items]) => (
@@ -205,17 +172,16 @@ export default function MemorySearch() {
                   return (
                     <div key={m.id} className="card" style={{
                       padding: 0, overflow: 'hidden',
-                      borderLeft: m.category === 'Medicine' ? `4px solid ${m.color}` : 'none',
+                      borderLeft: `4px solid ${m.color}`,
                     }}>
-                      {/* Medicine items with image */}
-                      {m.hasImage && m.keyframe_id ? (
+                      {m.hasImage && m.image_url ? (
                         <div style={{ display: 'flex' }}>
                           <div style={{
                             width: 100, minHeight: 80, flexShrink: 0,
                             background: '#111', position: 'relative',
                           }}>
                             <img
-                              src={m.phase_role ? detectionAPI.getMedicationFrameImage(m.keyframe_id) : detectionAPI.getKeyframeImage(m.keyframe_id)}
+                              src={m.image_url}
                               alt=""
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               onError={(e) => { e.target.style.display = 'none'; }}
@@ -232,30 +198,25 @@ export default function MemorySearch() {
                               <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{m.title}</div>
                               <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.time}</span>
-                                {m.phase_label && (
-                                  <span style={{
-                                    fontSize: '0.65rem', fontWeight: 700, color: '#6366f1',
-                                    background: 'rgba(99,102,241,0.12)', padding: '2px 8px', borderRadius: 12,
-                                  }}>{m.phase_label}</span>
-                                )}
                                 {m.confidence && (
                                   <span style={{
                                     fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)',
                                     background: 'var(--primary-light)', padding: '2px 8px', borderRadius: 12,
                                   }}>{m.confidence}</span>
                                 )}
-                                <span style={{
-                                  fontSize: '0.7rem', fontWeight: 700,
-                                  color: m.detection_status === 'taken' ? 'var(--success)' : 'var(--warning)',
-                                  background: m.detection_status === 'taken' ? 'rgba(34,197,94,0.15)' : 'rgba(234,179,8,0.15)',
-                                  padding: '2px 8px', borderRadius: 12,
-                                }}>{m.status}</span>
+                                {m.status && (
+                                  <span style={{
+                                    fontSize: '0.7rem', fontWeight: 700,
+                                    color: 'var(--success)',
+                                    background: 'rgba(34,197,94,0.15)',
+                                    padding: '2px 8px', borderRadius: 12,
+                                  }}>{m.status}</span>
+                                )}
                               </div>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        /* Regular memory items */
                         <div style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14 }}>
                           <div style={{
                             width: 44, height: 44, borderRadius: 12, background: `${m.color}20`,

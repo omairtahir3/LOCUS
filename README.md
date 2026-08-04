@@ -76,6 +76,6 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 
 1. **Web Backend:** `cd web_app/backend && npm i && npm run dev`
 2. **Web Frontend:** `cd web_app/frontend && npm i && npm run dev`
-3. **MediaMTX:** `cd ai_backend/medication_backend/mediamtx && ./mediamtx.exe`
-4. **AI Backend:** `cd ai_backend/medication_backend && pip install -r requirements.txt && uvicorn main:app --reload`
+3. **MediaMTX:** `cd ai_backend/detection_pipeline/mediamtx && ./mediamtx.exe`
+4. **AI Backend:** `cd ai_backend/detection_pipeline && pip install -r requirements.txt && uvicorn main:app --reload`
 5. **Mobile App:** `cd mobile_app && flutter run`

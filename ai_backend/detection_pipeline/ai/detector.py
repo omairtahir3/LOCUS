@@ -28,7 +28,7 @@ class PillDetector:
                 f"Pill detection model not found at: {model_path}\n"
                 f"Download best_model.onnx from:\n"
                 f"https://github.com/seblful/pills-detection/blob/main/best_model.onnx\n"
-                f"and place it in LOCUS/ai_backend/medication_backend/ai/"
+                f"and place it in LOCUS/ai_backend/detection_pipeline/ai/"
             )
 
         print(f"Loading pill detection model: {model_path}")

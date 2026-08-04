@@ -4,7 +4,7 @@
   "pythonVersion": "3.12",
   "pythonPlatform": "Windows",
   "extraPaths": [
-    "medication_backend",
+    "detection_pipeline",
     ".venv/Lib/site-packages"
   ]
 }
