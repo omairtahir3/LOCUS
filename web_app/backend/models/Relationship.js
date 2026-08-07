@@ -24,7 +24,7 @@ const relationshipSchema = new mongoose.Schema({
   },
   confirmed_by: {
     type: String,
-    enum: ['elderly_user', 'caregiver', 'normal_user'],
+    enum: ['user', 'elderly', 'caregiver'],
     required: true
   },
   pending_notification: {

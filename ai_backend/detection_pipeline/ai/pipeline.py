@@ -53,6 +53,9 @@ class MedicationDetectionPipeline:
     """
 
     def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id="", confidence_thresholds=None):
+        import time
+        t0 = time.time()
+        print(f"[Profiling] Pipeline init start at {t0}")
         self.detector  = PillDetector(model_path="ai/best_model.onnx")
         self.gesture   = GestureDetector()
         self.extractor = KeyframeExtractor(target_fps=3, buffer_seconds=5, user_id=user_id, save_locally=True,

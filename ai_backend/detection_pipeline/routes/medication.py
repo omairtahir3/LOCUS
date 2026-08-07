@@ -80,7 +80,7 @@ async def get_medication(
     """Get a single medication by ID."""
     med = await db.medications.find_one({
         "_id": ObjectId(medication_id),
-        "user_id": current_user["id"]
+        "user_id": ObjectId(current_user["id"])
     })
     if not med:
         raise HTTPException(status_code=404, detail="Medication not found")
@@ -99,7 +99,7 @@ async def update_medication(
     update_data["updated_at"] = datetime.utcnow()
 
     result = await db.medications.update_one(
-        {"_id": ObjectId(medication_id), "user_id": current_user["id"]},
+        {"_id": ObjectId(medication_id), "user_id": ObjectId(current_user["id"])},
         {"$set": update_data}
     )
     if result.matched_count == 0:
@@ -117,7 +117,7 @@ async def delete_medication(
 ):
     """Soft delete — marks medication as inactive instead of removing it."""
     result = await db.medications.update_one(
-        {"_id": ObjectId(medication_id), "user_id": current_user["id"]},
+        {"_id": ObjectId(medication_id), "user_id": ObjectId(current_user["id"])},
         {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
     )
     if result.matched_count == 0:
@@ -150,7 +150,8 @@ async def get_todays_schedule(
     day_of_week = today.weekday()  # 0=Monday, 6=Sunday
 
     # Fetch all active medications for the target user
-    meds_cursor = db.medications.find({"user_id": target_id, "is_active": True})
+    user_oid = ObjectId(target_id) if isinstance(target_id, str) else target_id
+    meds_cursor = db.medications.find({"user_id": user_oid, "is_active": True})
     meds = await meds_cursor.to_list(length=100)
 
     # Fetch today's logs
@@ -213,7 +214,7 @@ async def create_log(
     # Verify medication belongs to user
     med = await db.medications.find_one({
         "_id": ObjectId(data.medication_id),
-        "user_id": current_user["id"]
+        "user_id": ObjectId(current_user["id"])
     })
     if not med:
         raise HTTPException(status_code=404, detail="Medication not found")
@@ -434,7 +435,7 @@ async def record_dose(
     """Quick dose recording from Flutter app — creates a log for today."""
     med = await db.medications.find_one({
         "_id": ObjectId(data.medication_id),
-        "user_id": current_user["id"]
+        "user_id": ObjectId(current_user["id"])
     })
     if not med:
         raise HTTPException(status_code=404, detail="Medication not found")

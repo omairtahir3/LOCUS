@@ -59,6 +59,7 @@ router.get('/keyframes', auth, async (req, res) => {
     const query = {
       user_id: userId,
       event_type: { $in: ['medication_intake', 'unknown_face'] },
+      verification_status: { $ne: 'rejected' }
     };
 
     if (type && query.event_type.$in.includes(type)) {

@@ -51,3 +51,6 @@ dist/
 dist-ssr/
 *.local
 keyframe_storage/
+# Storage directories
+ai_backend/keyframe_backend/social_storage/
+ai_backend/keyframe_backend/keyframe_storage/

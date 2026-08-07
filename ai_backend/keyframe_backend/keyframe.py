@@ -341,7 +341,24 @@ class KeyframeStorage:
 
 
 
-# Evidence storage lives inside keyframe_backend/evidence_storage/
+# Evidence storage lives inside keyframe_backend/
+SOCIAL_STORAGE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "social_storage"
+)
+
+class SocialInteractionStorage(KeyframeStorage):
+    """
+    Persists social interaction frames to disk.
+    Storage layout:
+        social_storage/
+            <user_id>/
+                <YYYY-MM-DD>/
+                    <uuid>.jpg
+                    <uuid>.json
+    """
+    def __init__(self, storage_dir=SOCIAL_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
+        super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
 
 MEDICATION_EVIDENCE_STORAGE_DIR = os.path.join(
 
@@ -858,6 +875,25 @@ class KeyframeExtractor:
 
 
 
+    def flush_remaining(self):
+        """Flushes any pending scene captures to disk when stopping."""
+        if getattr(self, '_pending_scene_capture', False) and hasattr(self, '_scene_capture_frames') and self._scene_capture_frames:
+            import threading, time
+            best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
+            metadata = {
+                "id": best['keyframe_id'],
+                "timestamp": time.time(),
+                "blur_score": best['blur_score'],
+                "motion_score": best['motion_score'],
+                "type": "scene_capture",
+                "user_id": self.user_id
+            }
+            print(f"[KeyframeExtractor] Flushing remaining scene capture: {best['keyframe_id']}")
+            t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
+            t.start()
+            self._pending_scene_capture = False
+            self._scene_capture_frames = []
+
     def get_buffer(self):
 
         """Return current temporal buffer as list (thread-safe)."""
@@ -1000,17 +1036,9 @@ class KeyframeExtractor:
 
 
 
-        # Blur score: only compute every 3rd frame (Laplacian is expensive)
-
-        if self.frame_count % 3 == 0:
-
-            blur_score = self.compute_blur_score(frame)
-
-            self._last_blur_score = blur_score
-
-        else:
-
-            blur_score = getattr(self, '_last_blur_score', 100.0)
+        # Blur score: compute for every frame to avoid stale scores during fast motion
+        blur_score = self.compute_blur_score(frame)
+        self._last_blur_score = blur_score
 
 
 
@@ -1038,21 +1066,27 @@ class KeyframeExtractor:
                 # Wait 15 frames (~0.5s) for motion to settle, then pick sharpest
                 if len(self._scene_capture_frames) >= 15:
                     best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
-                    self._last_scene_save_time = now
-                    metadata = {
-                        "id": best['keyframe_id'],
-                        "timestamp": best['timestamp'],
-                        "motion_score": round(float(best['motion_score']), 2),
-                        "blur_score": round(float(best['blur_score']), 2),
-                        "width": best['frame'].shape[1],
-                        "height": best['frame'].shape[0],
-                        "user_id": getattr(self, "user_id", ""),
-                        "event_type": "scene_change"
-                    }
-                    t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
-                    t.start()
-                    self._pending_scene_capture = False
-                    self._scene_capture_frames = []
+                    
+                    if best['blur_score'] < self.blur_threshold:
+                        print(f"[KeyframeExtractor] Scene capture rejected due to blur: {best['blur_score']} < {self.blur_threshold}")
+                        self._scene_capture_frames = []
+                        self._pending_scene_capture = False
+                    else:
+                        self._last_scene_save_time = now
+                        metadata = {
+                            "id": best['keyframe_id'],
+                            "timestamp": best['timestamp'],
+                            "motion_score": round(float(best['motion_score']), 2),
+                            "blur_score": round(float(best['blur_score']), 2),
+                            "width": best['frame'].shape[1],
+                            "height": best['frame'].shape[0],
+                            "user_id": getattr(self, "user_id", ""),
+                            "event_type": "scene_change"
+                        }
+                        t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
+                        t.start()
+                        self._pending_scene_capture = False
+                        self._scene_capture_frames = []
 
 
 
@@ -1103,6 +1137,7 @@ class VideoSource:
 
         """source=0 for webcam, path/to/video.mp4 for file, rtmp://... for live stream"""
 
+        print(f"[Profiling] VideoSource init started for {source} at {time.time()}")
         self.source = source
 
         self.cap = None
@@ -1184,22 +1219,22 @@ class VideoSource:
             # Retry for RTSP/RTMP streams â€” the publisher (GoPro) may not be live yet
 
             if not self.cap.isOpened() and self._is_live:
-
-                max_retries = 12  # 1 minute of retrying (12 * 5s)
-
-                for attempt in range(1, max_retries + 1):
-
-                    if attempt == 1 or attempt % 12 == 0:
-                        print(f"[VideoSource] Stream not available, retrying... ({attempt}/{max_retries})")
-
-                    time.sleep(5)
-
+                # Retry for ~35 seconds total
+                # First 20 attempts at 0.5s intervals (10s)
+                # Next 10 attempts at 2.5s intervals (25s)
+                attempts = 0
+                while not self.cap.isOpened() and attempts < 30:
+                    attempts += 1
+                    sleep_time = 0.5 if attempts <= 20 else 2.5
+                    
+                    if attempts == 1 or attempts == 21 or attempts == 30:
+                        print(f"[VideoSource] Stream not available, retrying... (attempt {attempts}/30, sleep {sleep_time}s)")
+                        
+                    time.sleep(sleep_time)
                     self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
-
+                    
                     if self.cap.isOpened():
-
-                        print(f"[VideoSource] OK Stream connected on attempt {attempt}")
-
+                        print(f"[VideoSource] OK Stream connected on attempt {attempts}")
                         break
 
             
@@ -1258,6 +1293,8 @@ class VideoSource:
 
         
 
+        print(f"[Profiling] VideoSource RTMP connected to {self.source} at {time.time()}")
+
         while self._running:
 
             if not self.cap:
@@ -1275,6 +1312,9 @@ class VideoSource:
                 
 
                 if ret and frame is not None:
+                    if getattr(self, '_first_frame_read', False) is False:
+                        self._first_frame_read = True
+                        print(f"[Profiling] VideoSource first frame read from {self.source} at {time.time()}")
 
                     # Successfully read a frame — cache it
 
