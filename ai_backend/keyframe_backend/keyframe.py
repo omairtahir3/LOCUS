@@ -735,7 +735,9 @@ class KeyframeExtractor:
 
         self.frame_count = 0
 
-
+        # Capture state overrides
+        self.active_event = False
+        self.person_present = False
 
         self.blur_threshold = blur_threshold
 
@@ -794,23 +796,26 @@ class KeyframeExtractor:
 
 
     def should_capture(self, motion_score):
-
         """
-
-        Adaptive capture decision:
-
-        - High motion â†’ always capture
-
-        - Low motion â†’ capture every N frames to save storage
-
+        Priority-ordered capture decision:
+          1. Active event -> ALWAYS capture (regardless of motion)
+          2. Motion detected -> capture (bootstraps detection)
+          3. Person present -> capture every 3 frames (idle but face in view)
+          4. Idle -> throttle to 1-in-6
         """
-
-        if motion_score > self.motion_threshold:
-
+        # Priority 1: Active event forces full rate, motion is irrelevant
+        if getattr(self, 'active_event', False):
             return True
 
-        # Capture 1 frame per ~6 frames during low motion (saves CPU)
+        # Priority 2: Motion bootstraps detection
+        if motion_score > self.motion_threshold:
+            return True
 
+        # Priority 3: Person present but idle (no motion, but face detected recently)
+        if getattr(self, 'person_present', False):
+            return self.frame_count % 3 == 0
+
+        # Priority 4: Idle - minimal capture rate
         return self.frame_count % 6 == 0
 
 
@@ -1066,6 +1071,13 @@ class KeyframeExtractor:
                 # Wait 15 frames (~0.5s) for motion to settle, then pick sharpest
                 if len(self._scene_capture_frames) >= 15:
                     best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
+                    
+                    # LOGGING 15 SCORES
+                    print("\n[KeyframeExtractor] --- BURST CAPTURE (15 frames) ---")
+                    for i, f in enumerate(self._scene_capture_frames):
+                        is_best = " <--- SELECTED" if f['keyframe_id'] == best['keyframe_id'] else ""
+                        print(f"  Frame {i+1}: blur_score = {f['blur_score']:.2f}{is_best}")
+                    print(f"[KeyframeExtractor] Best Score: {best['blur_score']:.2f} (Threshold: {self.blur_threshold})")
                     
                     if best['blur_score'] < self.blur_threshold:
                         print(f"[KeyframeExtractor] Scene capture rejected due to blur: {best['blur_score']} < {self.blur_threshold}")
