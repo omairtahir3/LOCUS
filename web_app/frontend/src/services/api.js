@@ -117,7 +117,8 @@ export default api;
 // ── Event Logs ───────────────────────────────────────────────────────────────
 export const eventLogsAPI = {
   getMemorySearch: (params) => api.get('/event-logs/memory-search', { params }),
-  getKeyframes: (params) => api.get('/event-logs/keyframes', { params })
+  getKeyframes: (params) => api.get('/event-logs/keyframes', { params }),
+  toggleFlag: (id, is_flagged) => api.patch(`/event-logs/${id}/flag`, { is_flagged })
 };
 
 // ── Relationships ────────────────────────────────────────────────────────────

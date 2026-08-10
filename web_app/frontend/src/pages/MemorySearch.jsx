@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera } from 'lucide-react';
+import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
 const FILTERS = ['All', 'Medicine', 'People'];
@@ -10,20 +10,32 @@ export default function MemorySearch() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const fetchEvents = async () => {
+    setLoading(true);
+    try {
+      const res = await eventLogsAPI.getMemorySearch({ limit: 50 });
+      setEvents(res.data || []);
+    } catch (e) {
+      console.error('Failed to load events:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchEvents = async () => {
-      setLoading(true);
-      try {
-        const res = await eventLogsAPI.getMemorySearch({ limit: 50 });
-        setEvents(res.data || []);
-      } catch (e) {
-        console.error('Failed to load events:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchEvents();
   }, []);
+
+  const handleToggleFlag = async (eventId, currentFlag) => {
+    if (!eventId) return;
+    try {
+      await eventLogsAPI.toggleFlag(eventId, !currentFlag);
+      fetchEvents();
+    } catch (e) {
+      console.error(e);
+      alert('Error toggling flag');
+    }
+  };
 
   const formattedEvents = events.map((ev, i) => {
     const dt = new Date(ev.timestamp);
@@ -37,7 +49,12 @@ export default function MemorySearch() {
       const diffDays = Math.floor(diffHrs / 24);
 
       if (diffDays === 0) {
-        timeLabel = diffHrs < 1 ? 'Just now' : `${Math.floor(diffHrs)} hours ago`;
+        if (diffHrs < 1) {
+          const diffMins = Math.floor(diffMs / (1000 * 60));
+          timeLabel = diffMins <= 1 ? 'Just now' : `${diffMins} mins ago`;
+        } else {
+          timeLabel = `${Math.floor(diffHrs)} hours ago`;
+        }
         groupLabel = 'Today';
       } else if (diffDays === 1) {
         timeLabel = 'Yesterday';
@@ -62,7 +79,8 @@ export default function MemorySearch() {
         confidence: conf,
         status: '✓ Verified',
         hasImage: !!ev.keyframe_id,
-        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null
+        is_flagged: !!ev.is_flagged,
+        image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null
       };
     } else if (ev.event_type === 'social_interaction') {
       const personName = ev.person_id?.person_name || ev.details?.person || 'Unknown Person';
@@ -78,6 +96,7 @@ export default function MemorySearch() {
         confidence: '',
         status: ev.verification_status === 'confirmed' ? '✓ Confirmed' : '',
         hasImage: !!ev.keyframe_id,
+        is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null
       };
     }
@@ -173,7 +192,21 @@ export default function MemorySearch() {
                     <div key={m.id} className="card" style={{
                       padding: 0, overflow: 'hidden',
                       borderLeft: `4px solid ${m.color}`,
+                      border: m.is_flagged ? `2px solid var(--primary)` : undefined,
+                      boxShadow: m.is_flagged ? '0 0 0 2px var(--primary-light)' : 'none',
+                      position: 'relative'
                     }}>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleToggleFlag(m.id, m.is_flagged); }}
+                        style={{ 
+                          position: 'absolute', top: 12, right: 12, zIndex: 10,
+                          background: 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', 
+                          color: m.is_flagged ? 'var(--primary)' : 'var(--text-muted)', padding: 6, borderRadius: '50%'
+                        }}
+                        title={m.is_flagged ? "Unflag Event" : "Flag Event"}
+                      >
+                        <Pin size={16} fill={m.is_flagged ? 'currentColor' : 'none'} />
+                      </button>
                       {m.hasImage && m.image_url ? (
                         <div style={{ display: 'flex' }}>
                           <div style={{

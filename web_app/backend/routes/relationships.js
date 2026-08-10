@@ -8,7 +8,9 @@ const { protect: auth } = require('../middleware/auth');
 // POST /api/relationships/confirm
 router.post('/confirm', auth, async (req, res) => {
   try {
-    const { eventId, personName, relationshipType } = req.body;
+    let { eventId, personName, relationshipType } = req.body;
+    personName = personName ? personName.trim() : '';
+    relationshipType = relationshipType ? relationshipType.trim() : '';
     const event = await EventLog.findById(eventId);
 
     if (!event || event.event_type !== 'unknown_face') {

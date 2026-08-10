@@ -242,11 +242,21 @@ class FaceRecognitionPlugin(DetectorPlugin):
                 try:
                     from keyframe_backend.keyframe import SocialInteractionStorage, KeyframeStorage
                     
+                    person_name = match.get('person_name', 'Unknown')
+                    if isinstance(person_name, str):
+                        person_name = person_name.strip()
+                    
                     metadata = {
                         "user_id": str(context.user_id), 
                         "source_frame": best_frame.get("id"),
-                        "type": "face_crop"
+                        "type": "face_crop",
+                        "person_name": person_name
                     }
+                    if match.get('relationship_type'):
+                        rel_type = match['relationship_type']
+                        if isinstance(rel_type, str):
+                            rel_type = rel_type.strip()
+                        metadata["relationship_type"] = rel_type
                     
                     # Store in social_storage
                     storage_soc = SocialInteractionStorage()
@@ -326,10 +336,6 @@ class FaceRecognitionPlugin(DetectorPlugin):
                             "source_frame": best_frame.get("id"),
                             "type": "face_crop"
                         }
-                        
-                        # Store in social_storage
-                        storage_soc = SocialInteractionStorage()
-                        storage_soc.save(face_keyframe_id, cropped_face, metadata)
                         
                         # Store in keyframe_storage (Keyframe Audit)
                         storage_gen = KeyframeStorage()

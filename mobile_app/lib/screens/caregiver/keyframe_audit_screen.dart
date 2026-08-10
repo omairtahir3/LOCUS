@@ -36,19 +36,23 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
     try {
       final results = await Future.wait([
         ApiService.getMedicationFrames(limit: 100),
-        ApiService.getKeyframes(limit: 50),
-        ApiService.getEventLogKeyframes(limit: 40, type: 'unknown_face'),
+        ApiService.getKeyframes(limit: 100),
+        ApiService.getEventLogKeyframes(type: 'unknown_face', limit: 40),
       ]);
-      setState(() {
-        _evidence = results[0];
-        _keyframes = results[1];
-        _unknownFaces = results[2];
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _evidence = results[0];
+          _keyframes = results[1];
+          _unknownFaces = results[2];
+          _loading = false;
+        });
+      }
     } catch (_) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
+
+
 
   List<Map<String, dynamic>> _groupedEvents() {
     final Map<String, List<Map<String, dynamic>>> groups = {};
@@ -593,75 +597,72 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (kfId != null)
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-                  child: Image.network(
-                    '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
-                    height: 200,
-                    fit: BoxFit.cover,
-                    errorBuilder: (c,e,s) => Container(height: 200, color: AppColors.borderLight, child: const Icon(Icons.broken_image)),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Unknown Face Detected', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const SizedBox(height: 4),
-                    Text(_formatTimestamp(ev['timestamp']), style: TextStyle(color: AppColors.textMuted)),
-                    const SizedBox(height: 12),
-                    
-                    if (status == 'pending') ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                              onPressed: () => _showNamePersonDialog(ev['_id']),
-                              child: const Text('Name Person'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => _dismissFace(ev['_id']),
-                              child: const Text('Dismiss'),
-                            ),
-                          ),
-                        ],
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                      child: Image.network(
+                        '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
+                        height: 200,
+                        fit: BoxFit.cover,
+                        errorBuilder: (c,e,s) => Container(height: 200, color: AppColors.borderLight, child: const Icon(Icons.broken_image)),
                       ),
-                    ] else ...[
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(12)),
-                            child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Unknown Face Detected', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        const SizedBox(height: 4),
+                        Text(_formatTimestamp(ev['timestamp'] ?? ''), style: TextStyle(color: AppColors.textMuted)),
+                        const SizedBox(height: 12),
+                        
+                        if (status == 'pending') ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                                  onPressed: () => _showNamePersonDialog(ev['_id']),
+                                  child: const Text('Name Person', style: TextStyle(color: Colors.white)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => _dismissFace(ev['_id']),
+                                  child: const Text('Dismiss'),
+                                ),
+                              ),
+                            ],
                           ),
-                          if (ev['pending_notification'] == true && ApiService.userRole == 'caregiver')
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Text('Pending user acknowledgement', style: TextStyle(color: AppColors.warning, fontSize: 12)),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(12)),
+                                child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              ),
+                              if (ev['pending_notification'] == true && ApiService.userRole == 'caregiver')
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Text('Pending user acknowledgement', style: TextStyle(color: AppColors.warning, fontSize: 12)),
+                                ),
+                            ],
+                          ),
+                          if (ev['pending_notification'] == true && ApiService.userRole != 'caregiver') ...[
+                            const SizedBox(height: 8),
+                            ElevatedButton(
+                              onPressed: () => _acknowledgeAction(ev['_id']),
+                              child: const Text('Acknowledge Caregiver Action'),
                             ),
+                          ],
                         ],
-                      ),
-                      if (ev['pending_notification'] == true && ApiService.userRole != 'caregiver') ...[
-                        const SizedBox(height: 8),
-                        ElevatedButton(
-                          onPressed: () => _acknowledgeAction(ev['_id']),
-                          child: const Text('Acknowledge Caregiver Action'),
-                        ),
                       ],
-                    ],
-                  ],
-                ),
+                    ),
+                  ),
+                ],
+              ),
+                ],
               ),
             ],
           ),

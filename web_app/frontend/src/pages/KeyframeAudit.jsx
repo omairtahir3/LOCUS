@@ -337,15 +337,19 @@ export default function KeyframeAudit() {
                     borderRadius: 'var(--radius-md)',
                     overflow: 'hidden',
                     background: 'var(--surface)',
+                    position: 'relative'
                   }}>
-                    <img
-                      loading="lazy"
-                      src={detectionAPI.getMedicationFrameImage(evId)}
-                      alt={phaseInfo.label}
-                      style={{ width: '100%', height: 180, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44`, cursor: 'pointer' }}
-                      onClick={() => toggleExpand(evId)}
-                      onError={(e) => { e.target.style.display = 'none'; }}
-                    />
+                    {/* Expand/Collapse Header */}
+                    <div 
+                      onClick={() => setExpanded(prev => ({ ...prev, [evId]: !prev[evId] }))}
+                      style={{ padding: '10px 12px', display: 'flex', gap: 12, cursor: 'pointer', background: 'var(--surface-hover)', alignItems: 'center' }}
+                    >
+                      <img 
+                        src={detectionAPI.getMedicationFrameImage(evId)}
+                        alt={phaseInfo.label}
+                        style={{ width: '100%', height: 180, objectFit: 'cover', borderBottom: `2px solid ${phaseInfo.color}44` }}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
                     <div style={{ padding: '10px 12px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                         <span className="badge" style={{
@@ -369,6 +373,7 @@ export default function KeyframeAudit() {
                       </div>
                       <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
                         {(ev.saved_at || ev.detected_at) ? new Date(ev.saved_at || ev.detected_at).toLocaleString() : ''}
+                      </div>
                       </div>
                     </div>
                     {/* Expanded: full-size image */}
@@ -409,10 +414,11 @@ export default function KeyframeAudit() {
                 const kfId = ev.keyframe_id;
                 return (
                   <div key={evId} style={{
-                    border: '1px solid var(--border)',
+                    border: `1px solid var(--border)`,
                     borderRadius: 'var(--radius-md)',
                     overflow: 'hidden',
                     background: 'var(--surface)',
+                    position: 'relative'
                   }}>
                     {kfId && (
                       <img

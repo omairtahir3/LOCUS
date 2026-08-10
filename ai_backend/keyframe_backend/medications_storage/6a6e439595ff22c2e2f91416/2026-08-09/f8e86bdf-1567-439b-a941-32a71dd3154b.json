@@ -1,0 +1,16 @@
+{
+  "id": "f8e86bdf-1567-439b-a941-32a71dd3154b",
+  "phase_role": "phase1_pill_visible",
+  "phase_order": 1,
+  "frame_index": 24,
+  "phase_score": 0.9,
+  "detection_confidence": 0.78,
+  "detection_status": "needs_verification",
+  "medication_name": "Panadol",
+  "medication_id": "6a7882ac67083022252cf266",
+  "medicine_taken": true,
+  "user_id": "6a6e439595ff22c2e2f91416",
+  "detected_at": "2026-08-09T14:16:31.926972+00:00",
+  "file": "f8e86bdf-1567-439b-a941-32a71dd3154b.jpg",
+  "saved_at": "2026-08-09T19:16:31.970534+05:00"
+}

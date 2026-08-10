@@ -51,14 +51,6 @@ def _parse_timestamp(ts):
 async def list_keyframes(limit: int = 200, user_id: str = "", medication_only: bool = False):
     """
     List stored keyframes with metadata.
-
-    Query params:
-        user_id:         Filter by user (empty = all users)
-        medication_only: If true, only return frames with medication_detected=True
-        limit:           Max results (default 200)
-
-    Caregiver dashboard: medication_only=false (see all frames)
-    Elderly user:        medication_only=true  (see only verified intake frames)
     """
     storage = _get_storage()
     keyframes = storage.list_keyframes(
@@ -66,6 +58,37 @@ async def list_keyframes(limit: int = 200, user_id: str = "", medication_only: b
         medication_only=medication_only,
         limit=limit,
     )
+    
+    if keyframes:
+        try:
+            from pymongo import MongoClient
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            k_ids = [k.get("keyframe_id") for k in keyframes if k.get("keyframe_id")]
+            # Fetch ALL matching eventlogs to get _id and is_flagged
+            events = db.eventlogs.find({"keyframe_id": {"$in": k_ids}}, {"keyframe_id": 1, "_id": 1, "is_flagged": 1})
+            
+            event_map = {}
+            for ev in events:
+                if ev.get("keyframe_id"):
+                    event_map[ev.get("keyframe_id")] = {
+                        "_id": str(ev.get("_id")),
+                        "is_flagged": ev.get("is_flagged", False)
+                    }
+                    
+            for k in keyframes:
+                kid = k.get("keyframe_id")
+                if kid in event_map:
+                    k["is_flagged"] = event_map[kid]["is_flagged"]
+                    k["_id"] = event_map[kid]["_id"]
+                else:
+                    k["is_flagged"] = False
+                
+        except Exception as e:
+            print(f"Error fetching flags for keyframes: {e}")
+            for k in keyframes:
+                if "is_flagged" not in k: k["is_flagged"] = False
+                
     return keyframes
 
 
@@ -145,7 +168,39 @@ async def list_medication_frames(limit: int = 100, user_id: str = ""):
     Sorted newest-first. Auto-cleaned after 72 hours.
     """
     storage = _get_evidence_storage()
-    return storage.list_evidence(user_id=user_id or None, limit=limit)
+    evidence = storage.list_evidence(user_id=user_id or None, limit=limit)
+    
+    if evidence:
+        try:
+            from pymongo import MongoClient
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            # ID is sometimes stored as 'evidence_id' or 'id' in the json, or 'keyframe_id' in eventlogs
+            e_ids = [e.get("evidence_id") for e in evidence if e.get("evidence_id")]
+            events = db.eventlogs.find({"keyframe_id": {"$in": e_ids}}, {"keyframe_id": 1, "_id": 1, "is_flagged": 1})
+            
+            event_map = {}
+            for ev in events:
+                if ev.get("keyframe_id"):
+                    event_map[ev.get("keyframe_id")] = {
+                        "_id": str(ev.get("_id")),
+                        "is_flagged": ev.get("is_flagged", False)
+                    }
+                    
+            for e in evidence:
+                eid = e.get("evidence_id")
+                if eid in event_map:
+                    e["is_flagged"] = event_map[eid]["is_flagged"]
+                    e["_id"] = event_map[eid]["_id"]
+                else:
+                    e["is_flagged"] = False
+                
+        except Exception as ex:
+            print(f"Error fetching flags for evidence: {ex}")
+            for e in evidence:
+                if "is_flagged" not in e: e["is_flagged"] = False
+                
+    return evidence
 
 
 @router.get("/medication_frames/{evidence_id}/image")

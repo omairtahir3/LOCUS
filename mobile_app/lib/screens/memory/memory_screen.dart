@@ -35,6 +35,19 @@ class _MemoryScreenState extends State<MemoryScreen> {
     }
   }
 
+  Future<void> _toggleFlag(String eventId, bool currentFlag) async {
+    final success = await ApiService.toggleEventFlag(eventId, !currentFlag);
+    if (success) {
+      _loadEvents();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to toggle flag')),
+        );
+      }
+    }
+  }
+
   List<_MemoryItem> _getFormattedMemories() {
     return _events.map((ev) {
       final dt = DateTime.parse(ev['timestamp']);
@@ -65,6 +78,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
           group: groupLabel,
           category: 'Medicine',
           imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
+          isFlagged: ev['is_flagged'] == true,
         );
       } else if (ev['event_type'] == 'social_interaction') {
         final personName = ev['person_id']?['person_name'] ?? ev['details']?['person'] ?? 'Unknown Person';
@@ -77,6 +91,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
           group: groupLabel,
           category: 'People',
           imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
+          isFlagged: ev['is_flagged'] == true,
         );
       }
       return null;
@@ -216,6 +231,13 @@ class _MemoryScreenState extends State<MemoryScreen> {
             ),
             Card(
               margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: m.isFlagged ? AppColors.primary : Colors.transparent,
+                  width: m.isFlagged ? 2 : 0,
+                ),
+              ),
               child: ListTile(
                 leading: Container(
                   width: 44,
@@ -230,6 +252,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 ),
                 title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 subtitle: Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                trailing: IconButton(
+                  icon: Icon(Icons.push_pin, size: 20, color: m.isFlagged ? AppColors.primary : AppColors.border),
+                  onPressed: () => _toggleFlag(m.id, m.isFlagged),
+                ),
               ),
             ),
           ],
@@ -244,10 +270,11 @@ class _MemoryItem {
   final IconData icon;
   final Color color;
   final String? imageUrl;
+  final bool isFlagged;
   
   _MemoryItem({
     required this.id, required this.title, required this.time, 
     required this.icon, required this.color, required this.group,
-    required this.category, this.imageUrl
+    required this.category, this.imageUrl, this.isFlagged = false,
   });
 }

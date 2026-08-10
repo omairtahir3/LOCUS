@@ -564,6 +564,19 @@ class ApiService {
     return [];
   }
 
+  static Future<bool> toggleEventFlag(String eventId, bool isFlagged) async {
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/event-logs/$eventId/flag'),
+        headers: _headers,
+        body: jsonEncode({'is_flagged': isFlagged}),
+      );
+      return res.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ── Relationships ────────────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> confirmFace(String eventId, String personName, String relationshipType) async {

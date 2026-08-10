@@ -76,5 +76,44 @@ router.get('/keyframes', auth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// PATCH /api/event-logs/:id/flag
+// Universal endpoint to toggle the is_flagged state of any event (e.g. medication or social)
+router.patch('/:id/flag', auth, async (req, res) => {
+  try {
+    const { is_flagged } = req.body;
+    
+    if (typeof is_flagged !== 'boolean') {
+      return res.status(400).json({ error: 'is_flagged boolean is required' });
+    }
+
+    const eventId = req.params.id;
+    const event = await EventLog.findById(eventId);
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Role check: caregiver can only flag events for their connected user
+    if (req.user.role === 'caregiver') {
+      const User = require('../models/User');
+      const caregiver = await User.findById(req.user.id);
+      if (String(event.user_id) !== String(caregiver.connected_elderly_user)) {
+        return res.status(403).json({ error: 'Unauthorized to flag this event' });
+      }
+    } else {
+      if (String(event.user_id) !== String(req.user.id)) {
+        return res.status(403).json({ error: 'Unauthorized to flag this event' });
+      }
+    }
+
+    event.is_flagged = is_flagged;
+    await event.save();
+
+    res.json(event);
+  } catch (error) {
+    console.error('Error toggling flag:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 module.exports = router;
