@@ -117,6 +117,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 20),
 
+          if (role == 'caregiver' || role == 'user') ...[
+            Container(
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+              child: ListTile(
+                leading: const Icon(Icons.people, color: AppColors.primary),
+                title: const Text('Manage Relationships', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Merge duplicates or review faces', style: TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.pushNamed(context, '/relationships-manage');
+                },
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
           // App info
           Container(
             padding: const EdgeInsets.all(20),

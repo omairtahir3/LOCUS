@@ -82,6 +82,8 @@ class _MemoryScreenState extends State<MemoryScreen> {
         );
       } else if (ev['event_type'] == 'social_interaction') {
         final personName = ev['person_id']?['person_name'] ?? ev['details']?['person'] ?? 'Unknown Person';
+        final personId = ev['person_id']?['_id'];
+        
         return _MemoryItem(
           id: ev['_id'],
           title: 'Saw $personName',
@@ -92,6 +94,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
           category: 'People',
           imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
           isFlagged: ev['is_flagged'] == true,
+          personId: personId,
         );
       }
       return null;
@@ -239,6 +242,11 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 ),
               ),
               child: ListTile(
+                onTap: () {
+                  if (m.personId != null) {
+                    Navigator.pushNamed(context, '/past-interactions', arguments: m.personId);
+                  }
+                },
                 leading: Container(
                   width: 44,
                   height: 44,
@@ -250,7 +258,15 @@ class _MemoryScreenState extends State<MemoryScreen> {
                       )
                     : Icon(m.icon, color: m.color, size: 20),
                 ),
-                title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                title: Text(
+                  m.title, 
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600, 
+                    fontSize: 14,
+                    color: m.personId != null ? AppColors.primary : AppColors.textPrimary,
+                    decoration: m.personId != null ? TextDecoration.underline : TextDecoration.none,
+                  ),
+                ),
                 subtitle: Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                 trailing: IconButton(
                   icon: Icon(Icons.push_pin, size: 20, color: m.isFlagged ? AppColors.primary : AppColors.border),
@@ -271,10 +287,12 @@ class _MemoryItem {
   final Color color;
   final String? imageUrl;
   final bool isFlagged;
+  final String? personId;
   
   _MemoryItem({
     required this.id, required this.title, required this.time, 
     required this.icon, required this.color, required this.group,
     required this.category, this.imageUrl, this.isFlagged = false,
+    this.personId,
   });
 }

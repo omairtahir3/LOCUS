@@ -701,19 +701,91 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           ElevatedButton(
             onPressed: () async {
               if (nameCtrl.text.isEmpty) return;
-              Navigator.pop(context);
-              try {
-                final res = await ApiService.confirmFace(eventId, nameCtrl.text, relCtrl.text);
-                if (res['statusCode'] == 200) {
-                  _loadData();
-                } else {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['data']['error'] ?? 'Error')));
-                }
-              } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error confirming face')));
-              }
+              Navigator.pop(context); // Close name dialog
+              await _submitFaceConfirm(eventId, nameCtrl.text, relCtrl.text, false, null);
             },
             child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submitFaceConfirm(String eventId, String personName, String relationshipType, bool forceNew, String? mergeInto) async {
+    try {
+      final res = await ApiService.confirmFace(eventId, personName, relationshipType, forceNew: forceNew, mergeInto: mergeInto);
+      
+      if (res['statusCode'] == 200) {
+        _loadData();
+      } else if (res['statusCode'] == 409 && res['data']['duplicates'] != null) {
+        final duplicates = res['data']['duplicates'] as List<dynamic>;
+        if (mounted) _showDuplicateResolutionDialog(eventId, personName, relationshipType, duplicates);
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['data']['error'] ?? 'Error')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error confirming face')));
+    }
+  }
+
+  Future<void> _showDuplicateResolutionDialog(String eventId, String personName, String relationshipType, List<dynamic> duplicates) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Duplicate Name Detected', style: TextStyle(fontSize: 18))),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You already have ${duplicates.length} record(s) for "$personName". '
+                'Are you confirming the same person from a different angle, or is this a new person who shares the same name?',
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: duplicates.length,
+                  itemBuilder: (ctx, i) {
+                    final dup = duplicates[i];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        title: Text('Merge into ${dup['name']}'),
+                        subtitle: Text('${dup['relationship_type'] ?? 'No relation'} | Added ${DateTime.parse(dup['createdAt']).toLocal().month}/${DateTime.parse(dup['createdAt']).toLocal().day}'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _submitFaceConfirm(eventId, personName, relationshipType, false, dup['id']);
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, side: const BorderSide(color: Colors.grey)),
+            onPressed: () {
+              Navigator.pop(context);
+              _submitFaceConfirm(eventId, personName, relationshipType, true, null);
+            },
+            child: const Text('Keep Separate (New Person)'),
           ),
         ],
       ),

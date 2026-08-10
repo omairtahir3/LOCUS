@@ -579,7 +579,13 @@ class ApiService {
 
   // ── Relationships ────────────────────────────────────────────────────────────
 
-  static Future<Map<String, dynamic>> confirmFace(String eventId, String personName, String relationshipType) async {
+  static Future<Map<String, dynamic>> confirmFace(
+    String eventId, 
+    String personName, 
+    String relationshipType, {
+    bool forceNew = false,
+    String? mergeInto,
+  }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/relationships/confirm'),
       headers: _headers,
@@ -587,9 +593,39 @@ class ApiService {
         'eventId': eventId,
         'personName': personName,
         'relationshipType': relationshipType,
+        'force_new': forceNew,
+        if (mergeInto != null) 'merge_into': mergeInto,
       }),
     );
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> getAllRelationships() async {
+    final res = await http.get(Uri.parse('$baseUrl/relationships'), headers: _headers);
+    if (res.statusCode == 200) {
+      return {'statusCode': 200, 'data': jsonDecode(res.body)};
+    }
+    return {'statusCode': res.statusCode, 'data': []};
+  }
+
+  static Future<Map<String, dynamic>> mergeRelationships({required String sourceId, required String targetId}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/relationships/merge'),
+      headers: _headers,
+      body: jsonEncode({
+        'sourceId': sourceId,
+        'targetId': targetId,
+      }),
+    );
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<Map<String, dynamic>> getInteractions(String id) async {
+    final res = await http.get(Uri.parse('$baseUrl/relationships/$id/interactions'), headers: _headers);
+    if (res.statusCode == 200) {
+      return {'statusCode': 200, 'data': jsonDecode(res.body)};
+    }
+    return {'statusCode': res.statusCode, 'data': {}};
   }
 
   static Future<Map<String, dynamic>> dismissFace(String eventId) async {

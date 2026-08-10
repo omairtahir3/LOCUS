@@ -18,6 +18,10 @@ const relationshipSchema = new mongoose.Schema({
     type: [Number],
     required: true
   },
+  face_embeddings: {
+    type: [[Number]],
+    default: []
+  },
   representative_keyframe_id: {
     type: String,
     default: null

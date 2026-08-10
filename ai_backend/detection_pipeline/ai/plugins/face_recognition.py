@@ -70,16 +70,25 @@ class FaceRecognitionPlugin(DetectorPlugin):
             
             candidates_count = 0
             for rel in cursor:
-                if 'face_embedding' not in rel:
-                    continue
-                candidates_count += 1
-                known_embed = np.array(rel['face_embedding'], dtype=np.float32)
-                sim = self._cosine_similarity(embedding, known_embed)
-                print(f"[DEBUG-FACE] Compared against {rel.get('person_name')}: similarity = {sim:.4f}")
+                embeddings_to_check = []
+                if 'face_embeddings' in rel and rel['face_embeddings']:
+                    embeddings_to_check.extend(rel['face_embeddings'])
+                if 'face_embedding' in rel and rel['face_embedding']:
+                    embeddings_to_check.append(rel['face_embedding'])
                 
-                if sim > highest_sim:
-                    highest_sim = sim
-                    best_match = rel
+                if not embeddings_to_check:
+                    continue
+                    
+                candidates_count += 1
+                
+                for known_emb_list in embeddings_to_check:
+                    known_embed = np.array(known_emb_list, dtype=np.float32)
+                    sim = self._cosine_similarity(embedding, known_embed)
+                    print(f"[DEBUG-FACE] Compared against {rel.get('person_name')}: similarity = {sim:.4f}")
+                    
+                    if sim > highest_sim:
+                        highest_sim = sim
+                        best_match = rel
                     
             print(f"[DEBUG-FACE] _match_face: best similarity = {highest_sim:.4f} (threshold={self.similarity_threshold})")
             if highest_sim >= self.similarity_threshold:

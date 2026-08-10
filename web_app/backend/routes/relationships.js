@@ -5,10 +5,26 @@ const Relationship = require('../models/Relationship');
 const User = require('../models/User');
 const { protect: auth } = require('../middleware/auth');
 
+// GET /api/relationships
+router.get('/', auth, async (req, res) => {
+  try {
+    let userId = req.user.id;
+    if (req.user.role === 'caregiver') {
+      const caregiver = await User.findById(req.user.id);
+      userId = caregiver.connected_elderly_user;
+    }
+    const relationships = await Relationship.find({ user_id: userId }).sort({ createdAt: -1 });
+    res.json(relationships);
+  } catch (error) {
+    console.error('Error fetching relationships:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /api/relationships/confirm
 router.post('/confirm', auth, async (req, res) => {
   try {
-    let { eventId, personName, relationshipType } = req.body;
+    let { eventId, personName, relationshipType, force_new, merge_into } = req.body;
     personName = personName ? personName.trim() : '';
     relationshipType = relationshipType ? relationshipType.trim() : '';
     const event = await EventLog.findById(eventId);
@@ -39,12 +55,46 @@ router.post('/confirm', auth, async (req, res) => {
       userId = caregiver.connected_elderly_user;
     }
 
+    if (merge_into) {
+      const rel = await Relationship.findById(merge_into);
+      if (rel) {
+        rel.face_embeddings.push(faceEmbedding);
+        await rel.save();
+
+        event.event_type = 'social_interaction';
+        event.verification_status = 'confirmed';
+        event.person_id = rel._id;
+        await event.save();
+
+        return res.json({ message: 'Merged with existing face', relationship: rel, event });
+      }
+    } else if (!force_new) {
+      const duplicates = await Relationship.find({
+        user_id: userId,
+        person_name: { $regex: new RegExp(`^${personName}$`, 'i') }
+      });
+      
+      if (duplicates.length > 0) {
+        return res.status(409).json({
+          error: 'Duplicate name found',
+          duplicates: duplicates.map(d => ({
+            id: d._id,
+            name: d.person_name,
+            relationship_type: d.relationship_type,
+            confirmed_by: d.confirmed_by,
+            createdAt: d.createdAt
+          }))
+        });
+      }
+    }
+
     // Create Relationship
     const relationship = new Relationship({
       user_id: userId,
       person_name: personName,
       relationship_type: relationshipType || '',
       face_embedding: faceEmbedding,
+      face_embeddings: [],
       confirmed_by: req.user.role,
       pending_notification: req.user.role === 'caregiver' // Alert elderly user that caregiver acted
     });
@@ -118,6 +168,62 @@ router.post('/acknowledge', auth, async (req, res) => {
     res.json({ message: 'Acknowledged' });
   } catch (error) {
     console.error('Error acknowledging action:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/relationships/:id/interactions
+router.get('/:id/interactions', auth, async (req, res) => {
+  try {
+    const interactions = await EventLog.find({ 
+      person_id: req.params.id,
+      event_type: 'social_interaction'
+    }).sort({ timestamp: -1 });
+
+    const relationship = await Relationship.findById(req.params.id);
+
+    res.json({ relationship, interactions });
+  } catch (error) {
+    console.error('Error fetching interactions:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/relationships/merge
+router.post('/merge', auth, async (req, res) => {
+  try {
+    const { sourceId, targetId } = req.body;
+    
+    const source = await Relationship.findById(sourceId);
+    const target = await Relationship.findById(targetId);
+
+    if (!source || !target) {
+      return res.status(404).json({ error: 'One or both relationships not found' });
+    }
+
+    // Move source base embedding into target's face_embeddings
+    if (source.face_embedding && source.face_embedding.length > 0) {
+      target.face_embeddings.push(source.face_embedding);
+    }
+    // Move any additional embeddings from source to target
+    if (source.face_embeddings && source.face_embeddings.length > 0) {
+      target.face_embeddings.push(...source.face_embeddings);
+    }
+
+    await target.save();
+
+    // Reassign all EventLogs
+    await EventLog.updateMany(
+      { person_id: sourceId },
+      { $set: { person_id: targetId } }
+    );
+
+    // Delete the source relationship
+    await Relationship.findByIdAndDelete(sourceId);
+
+    res.json({ message: 'Relationships merged successfully', relationship: target });
+  } catch (error) {
+    console.error('Error merging relationships:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

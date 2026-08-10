@@ -12,6 +12,7 @@ import Medications from './pages/Medications';
 import Notifications from './pages/Notifications';
 import LocationMap from './pages/LocationMap';
 import ActivityFeed from './pages/ActivityFeed';
+import PastInteractions from './pages/PastInteractions';
 
 import SettingsPage from './pages/Settings';
 import KeyframeAudit from './pages/KeyframeAudit';
@@ -19,6 +20,7 @@ import UserDashboard from './pages/UserDashboard';
 import UserMedications from './pages/UserMedications';
 import UserHistory from './pages/UserHistory';
 import MemorySearch from './pages/MemorySearch';
+import RelationshipsManage from './pages/RelationshipsManage';
 
 function App() {
   return (
@@ -41,6 +43,8 @@ function App() {
             <Route path="notifications" element={<Notifications />} />
             <Route path="location" element={<LocationMap />} />
             <Route path="activity" element={<ActivityFeed />} />
+            <Route path="interactions/:id" element={<PastInteractions />} />
+            <Route path="relationships" element={<RelationshipsManage />} />
 
             <Route path="keyframes" element={<KeyframeAudit />} />
             <Route path="settings" element={<SettingsPage />} />

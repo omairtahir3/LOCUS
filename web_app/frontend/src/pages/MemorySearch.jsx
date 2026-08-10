@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
@@ -87,7 +88,9 @@ export default function MemorySearch() {
       return {
         id: ev._id,
         keyframe_id: ev.keyframe_id,
-        title: `Saw ${personName}`,
+        person_id: ev.person_id?._id || ev.person_id,
+        person_name: personName,
+        title: `Saw `,
         time: timeLabel,
         icon: User,
         color: 'var(--primary)',
@@ -228,7 +231,15 @@ export default function MemorySearch() {
                               <Icon size={18} style={{ color: m.color }} />
                             </div>
                             <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{m.title}</div>
+                              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                                {m.person_id ? (
+                                  <>
+                                    Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
+                                  </>
+                                ) : (
+                                  m.title
+                                )}
+                              </div>
                               <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.time}</span>
                                 {m.confidence && (

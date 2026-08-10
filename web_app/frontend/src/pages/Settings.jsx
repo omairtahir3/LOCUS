@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { User, Bell, Shield, Save, Link as LinkIcon } from 'lucide-react';
+import { User, Bell, Shield, Save, Link as LinkIcon, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
 export default function SettingsPage() {
@@ -98,6 +99,25 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Relationships */}
+      {(user?.role === 'caregiver' || user?.role === 'user' || user?.role === 'normal_user') && (
+        <div className="card mb-4">
+          <div className="card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Users size={18} />
+              <div className="card-title">Manage Relationships</div>
+            </div>
+          </div>
+          <p className="text-sm text-muted mb-4">
+            View recognized faces, resolve duplicates, and merge incorrectly separated records for your family members.
+          </p>
+          <Link to="/relationships" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+            <Users size={16} />
+            Manage Face Data
+          </Link>
+        </div>
+      )}
 
       {/* Notification Preferences */}
       <div className="card mb-4">

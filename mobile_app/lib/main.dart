@@ -22,6 +22,8 @@ import 'screens/caregiver/location_screen.dart';
 import 'screens/caregiver/activity_feed_screen.dart';
 
 import 'screens/caregiver/keyframe_audit_screen.dart';
+import 'screens/memory/past_interactions_screen.dart';
+import 'screens/settings/relationships_manage_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +72,16 @@ class LocusApp extends StatelessWidget {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const RegisterScreen(),
         '/home': (_) => const MainShell(),
+        '/relationships-manage': (_) => const RelationshipsManageScreen(),
+      },
+      onGenerateRoute: (settings) {
+        if (settings.name == '/past-interactions') {
+          final relationshipId = settings.arguments as String;
+          return MaterialPageRoute(
+            builder: (context) => PastInteractionsScreen(relationshipId: relationshipId),
+          );
+        }
+        return null;
       },
     );
   }

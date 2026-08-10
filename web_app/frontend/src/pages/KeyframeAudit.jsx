@@ -18,6 +18,9 @@ export default function KeyframeAudit() {
   const [namingEvent, setNamingEvent] = useState(null);
   const [personName, setPersonName] = useState('');
   const [relationshipType, setRelationshipType] = useState('');
+  
+  // Duplicate resolution state
+  const [duplicateConflicts, setDuplicateConflicts] = useState(null);
   const [userMap, setUserMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
@@ -108,20 +111,27 @@ export default function KeyframeAudit() {
   // Evidence frames from dedicated evidence storage
   const medicineTakenFrames = evidenceFrames;
   
-  const handleConfirmFace = async () => {
+  const handleConfirmFace = async (force_new = false, merge_into = null) => {
     if (!personName) return;
     try {
       await relationshipsAPI.confirmFace({
         eventId: namingEvent._id,
         personName,
-        relationshipType
+        relationshipType,
+        force_new,
+        merge_into
       });
       setNamingEvent(null);
       setPersonName('');
       setRelationshipType('');
+      setDuplicateConflicts(null);
       loadData();
     } catch (e) {
-      alert(e.response?.data?.error || 'Error confirming face');
+      if (e.response?.status === 409 && e.response.data.duplicates) {
+        setDuplicateConflicts(e.response.data.duplicates);
+      } else {
+        alert(e.response?.data?.error || 'Error confirming face');
+      }
     }
   };
 
@@ -624,8 +634,54 @@ export default function KeyframeAudit() {
               <input type="text" className="form-input" value={relationshipType} onChange={e => setRelationshipType(e.target.value)} placeholder="e.g., Son, Caregiver" />
             </div>
             <div style={{ display: 'flex', gap: 12, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={() => { setNamingEvent(null); setPersonName(''); setRelationshipType(''); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleConfirmFace} disabled={!personName}>Confirm</button>
+              <button className="btn btn-secondary" onClick={() => { setNamingEvent(null); setPersonName(''); setRelationshipType(''); setDuplicateConflicts(null); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => handleConfirmFace(false, null)} disabled={!personName}>Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Resolution Modal */}
+      {duplicateConflicts && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 500 }}>
+            <h3 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--warning-dark)' }}>
+              <AlertTriangle size={20} />
+              Duplicate Name Detected
+            </h3>
+            <p style={{ marginBottom: 16, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              You already have {duplicateConflicts.length} record(s) for "{personName}". 
+              Are you confirming the same person from a different angle, or is this a new person who shares the same name?
+            </p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 300, overflowY: 'auto', marginBottom: 20 }}>
+              {duplicateConflicts.map(dup => (
+                <button 
+                  key={dup.id}
+                  onClick={() => handleConfirmFace(false, dup.id)}
+                  style={{ 
+                    padding: 12, borderRadius: 8, border: '1px solid var(--border-light)', 
+                    background: '#fff', textAlign: 'left', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  className="hover:border-primary hover:bg-primary-50"
+                >
+                  <div style={{ fontWeight: 600 }}>Merge into {dup.name}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    {dup.relationship_type ? `Relation: ${dup.relationship_type}` : 'No relation set'} | Added {new Date(dup.createdAt).toLocaleDateString()}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', borderTop: '1px solid var(--border-light)', paddingTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setDuplicateConflicts(null)}>Back</button>
+              <button className="btn btn-outline-primary" onClick={() => handleConfirmFace(true, null)}>
+                Keep Separate (New Person)
+              </button>
             </div>
           </div>
         </div>

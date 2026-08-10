@@ -123,6 +123,9 @@ export const eventLogsAPI = {
 
 // ── Relationships ────────────────────────────────────────────────────────────
 export const relationshipsAPI = {
+  getAll: () => api.get('/relationships'),
+  getInteractions: (id) => api.get(`/relationships/${id}/interactions`),
+  merge: (data) => api.post('/relationships/merge', data),
   confirmFace: (data) => api.post('/relationships/confirm', data),
   dismissFace: (data) => api.post('/relationships/dismiss', data),
   acknowledgeAction: (data) => api.post('/relationships/acknowledge', data)
