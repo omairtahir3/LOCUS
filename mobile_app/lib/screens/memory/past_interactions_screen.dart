@@ -110,10 +110,10 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(name, style: AppTheme.headingMedium),
+                        Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                         if (type.isNotEmpty) ...[
                           const SizedBox(height: 4),
-                          Text('Relation: $type', style: AppTheme.bodyMedium.copyWith(color: AppColors.textSecondary)),
+                          Text('Relation: $type', style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
                         ],
                       ],
                     ),
@@ -127,7 +127,7 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                 children: [
                   const Icon(Icons.calendar_today, color: AppColors.primary, size: 20),
                   const SizedBox(width: 8),
-                  Text('Interaction Timeline', style: AppTheme.headingSmall),
+                  Text('Interaction Timeline', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                 ],
               ),
               const SizedBox(height: 16),
@@ -137,7 +137,7 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
                   decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppColors.border),
                   ),
@@ -145,11 +145,11 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                     children: [
                       Icon(Icons.person_outline, size: 48, color: AppColors.textSecondary.withOpacity(0.5)),
                       const SizedBox(height: 16),
-                      Text('No past interactions found.', style: AppTheme.bodyLarge),
+                      Text('No past interactions found.', style: const TextStyle(fontSize: 16, color: AppColors.textPrimary)),
                       const SizedBox(height: 8),
                       Text(
                         'When the AI spots $name again, it will appear here.',
-                        style: AppTheme.bodyMedium.copyWith(color: AppColors.textSecondary),
+                        style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -203,17 +203,17 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                               child: Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: AppColors.cardBackground,
+                                  color: AppColors.surface,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
-                                  boxShadow: AppTheme.shadowSmall,
+                                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('Social Interaction', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                                     const SizedBox(height: 4),
-                                    Text(_formatDate(interaction['timestamp']), style: AppTheme.bodySmall),
+                                    Text(_formatDate(interaction['timestamp']), style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                                     
                                     if (interaction['keyframe_id'] != null) ...[
                                       const SizedBox(height: 12),
@@ -225,19 +225,8 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                                           width: double.infinity,
                                           fit: BoxFit.cover,
                                           errorBuilder: (context, error, stackTrace) {
-                                            return Container(
-                                              height: 120,
-                                              width: double.infinity,
-                                              color: Colors.grey[200],
-                                              child: Column(
-                                                mainAxisAlignment: MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(Icons.broken_image, color: Colors.grey[500], size: 32),
-                                                  const SizedBox(height: 8),
-                                                  Text('Image no longer available', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                                                ],
-                                              ),
-                                            );
+                                            // Image no longer available — show nothing
+                                            return const SizedBox.shrink();
                                           },
                                         ),
                                       ),

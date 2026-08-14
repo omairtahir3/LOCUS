@@ -212,15 +212,23 @@ export default function MemorySearch() {
                       </button>
                       {m.hasImage && m.image_url ? (
                         <div style={{ display: 'flex' }}>
-                          <div style={{
-                            width: 100, minHeight: 80, flexShrink: 0,
-                            background: '#111', position: 'relative',
-                          }}>
+                          <div
+                            className="memory-thumb"
+                            style={{
+                              width: 100, minHeight: 80, flexShrink: 0,
+                              overflow: 'hidden', position: 'relative',
+                            }}
+                          >
                             <img
                               src={m.image_url}
                               alt=""
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={(e) => { e.target.style.display = 'none'; }}
+                              onError={(e) => {
+                                // Hide the entire thumbnail container when the image is gone
+                                e.target.onerror = null;
+                                const thumbDiv = e.target.closest('.memory-thumb');
+                                if (thumbDiv) thumbDiv.style.display = 'none';
+                              }}
                             />
                           </div>
                           <div style={{ padding: 14, flex: 1, display: 'flex', alignItems: 'center', gap: 14 }}>

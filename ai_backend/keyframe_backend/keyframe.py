@@ -328,14 +328,11 @@ class KeyframeStorage:
 
 
     def _cleanup_loop(self):
-
+        # Run cleanup immediately on startup, then every 30 minutes
         while True:
-
-            time.sleep(30 * 60)
-
             try: self.cleanup_expired()
-
             except Exception as e: print(f"[KeyframeStorage] Cleanup error: {e}")
+            time.sleep(30 * 60)
 
 
 
@@ -664,14 +661,11 @@ class MedicationEvidenceStorage:
 
 
     def _cleanup_loop(self):
-
+        # Run cleanup immediately on startup, then every 30 minutes
         while True:
-
-            time.sleep(30 * 60)
-
             try: self.cleanup_expired()
-
             except Exception as e: print(f"[EvidenceStorage] Cleanup error: {e}")
+            time.sleep(30 * 60)
 
 
 

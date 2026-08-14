@@ -107,6 +107,19 @@ router.patch('/:id/flag', auth, async (req, res) => {
     }
 
     event.is_flagged = is_flagged;
+
+    if (!is_flagged) {
+      // If unflagging, and the frame is past 72 hours, remove it from the event
+      // so the UI hides it immediately, and the Python backend deletes the orphaned file.
+      const eventAgeHours = (Date.now() - new Date(event.timestamp).getTime()) / (1000 * 60 * 60);
+      if (eventAgeHours > 72) {
+        event.keyframe_id = null;
+        if (event.keyframe_ref) {
+          event.keyframe_ref = null;
+        }
+      }
+    }
+
     await event.save();
 
     res.json(event);
