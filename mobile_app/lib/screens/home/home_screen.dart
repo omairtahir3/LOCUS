@@ -58,6 +58,8 @@ class HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final greeting = now.hour < 12 ? 'Good Morning' : now.hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    final firstName = (ApiService.user?['name'] ?? '').toString().split(' ').first;
+    final greetingText = firstName.isNotEmpty ? '$greeting $firstName' : greeting;
 
     return RefreshIndicator(
       onRefresh: _loadData,
@@ -68,7 +70,7 @@ class HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Greeting
-            Text(greeting, style: TextStyle(fontSize: 14, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
+            Text(greetingText, style: TextStyle(fontSize: 14, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
             const SizedBox(height: 2),
             Text('Dashboard', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
             const SizedBox(height: 24),
