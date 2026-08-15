@@ -41,13 +41,15 @@ class HomeScreenState extends State<HomeScreen> {
         ApiService.getAdherenceSummary(),
         ApiService.getSchedule(),
       ]);
-      setState(() {
-        _summary = results[0] as Map<String, dynamic>;
-        _schedule = results[1] as List<dynamic>;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _summary = results[0] as Map<String, dynamic>;
+          _schedule = results[1] as List<dynamic>;
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
