@@ -106,9 +106,17 @@ class _MemoryScreenState extends State<MemoryScreen> {
           );
         }
         return null;
-      } catch (e) {
-        debugPrint('Error parsing memory event: $e');
-        return null;
+      } catch (e, st) {
+        debugPrint('Error parsing memory event: $e\n$st');
+        return _MemoryItem(
+          id: ev['_id']?.toString() ?? 'error',
+          title: 'Parse Error: $e',
+          time: '-',
+          icon: Icons.error,
+          color: Colors.red,
+          group: 'Errors',
+          category: 'All',
+        );
       }
     }).where((item) => item != null).cast<_MemoryItem>().toList();
   }
@@ -218,6 +226,11 @@ class _MemoryScreenState extends State<MemoryScreen> {
                       Text('When the AI camera detects events, they will appear here.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                      const SizedBox(height: 20),
+                      Text('DEBUG INFO:', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                      Text('Total events from API: ${_events.length}', style: TextStyle(color: Colors.red)),
+                      Text('Mapped memories: ${allMemories.length}', style: TextStyle(color: Colors.red)),
+                      Text('Has Token: ${ApiService.token != null}', style: TextStyle(color: Colors.red)),
                     ],
                   ),
                 )
