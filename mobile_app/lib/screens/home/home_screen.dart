@@ -54,17 +54,6 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _openLiveCamera() async {
-    final baseUrl = ApiService.baseUrl;
-    final cameraUrl = baseUrl.replaceAll('5000/api', '8889/cam/');
-    final uri = Uri.parse(cameraUrl);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not launch camera')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -85,7 +74,7 @@ class HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 24),
 
             // AI Camera Banner
-            _buildCameraBanner(),
+            _buildRtmpBanner(),
             const SizedBox(height: 20),
 
             // Stats cards
