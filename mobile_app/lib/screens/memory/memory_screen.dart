@@ -50,56 +50,69 @@ class _MemoryScreenState extends State<MemoryScreen> {
 
   List<_MemoryItem> _getFormattedMemories() {
     return _events.map((ev) {
-      final dt = DateTime.parse(ev['timestamp']);
-      final now = DateTime.now();
-      final diff = now.difference(dt);
-      
-      String timeLabel = '-';
-      String groupLabel = 'Earlier';
-      
-      if (diff.inDays == 0) {
-        timeLabel = diff.inHours < 1 ? 'Just now' : '${diff.inHours} hours ago';
-        groupLabel = 'Today';
-      } else if (diff.inDays == 1) {
-        timeLabel = 'Yesterday';
-        groupLabel = 'Yesterday';
-      } else {
-        timeLabel = '${diff.inDays} days ago';
-        groupLabel = '${diff.inDays} Days Ago';
-      }
-
-      if (ev['event_type'] == 'medication_intake' || ev['event_type'] == 'medication') {
-        return _MemoryItem(
-          id: ev['_id'],
-          title: 'Took ${ev['details']?['medication_name'] ?? 'medication'}',
-          time: timeLabel,
-          icon: Icons.medication,
-          color: AppColors.success,
-          group: groupLabel,
-          category: 'Medicine',
-          imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
-          isFlagged: ev['is_flagged'] == true,
-        );
-      } else if (ev['event_type'] == 'social_interaction') {
-        final personName = ev['person_id']?['person_name'] ?? ev['details']?['person'] ?? 'Unknown Person';
-        final personId = ev['person_id']?['_id'];
+      try {
+        final dt = DateTime.parse(ev['timestamp']);
+        final now = DateTime.now();
+        final diff = now.difference(dt);
         
-        return _MemoryItem(
-          id: ev['_id'],
-          title: 'Saw $personName',
-          time: timeLabel,
-          icon: Icons.person,
-          color: AppColors.primary,
-          group: groupLabel,
-          category: 'People',
-          imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
-          isFlagged: ev['is_flagged'] == true,
-          personId: personId,
-        );
+        String timeLabel = '-';
+        String groupLabel = 'Earlier';
+        
+        if (diff.inDays == 0) {
+          timeLabel = diff.inHours < 1 ? 'Just now' : '${diff.inHours} hours ago';
+          groupLabel = 'Today';
+        } else if (diff.inDays == 1) {
+          timeLabel = 'Yesterday';
+          groupLabel = 'Yesterday';
+        } else {
+          timeLabel = '${diff.inDays} days ago';
+          groupLabel = '${diff.inDays} Days Ago';
+        }
+
+        if (ev['event_type'] == 'medication_intake' || ev['event_type'] == 'medication') {
+          final details = ev['details'];
+          return _MemoryItem(
+            id: ev['_id'],
+            title: 'Took ${(details is Map ? details['medication_name'] : null) ?? 'medication'}',
+            time: timeLabel,
+            icon: Icons.medication,
+            color: AppColors.success,
+            group: groupLabel,
+            category: 'Medicine',
+            imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
+            isFlagged: ev['is_flagged'] == true,
+          );
+        } else if (ev['event_type'] == 'social_interaction') {
+          final pIdData = ev['person_id'];
+          final details = ev['details'];
+          
+          final personName = (pIdData is Map ? pIdData['person_name'] : null) 
+              ?? (details is Map ? details['person'] : null) 
+              ?? 'Unknown Person';
+              
+          final personId = pIdData is Map ? pIdData['_id'] : (pIdData is String ? pIdData : null);
+          
+          return _MemoryItem(
+            id: ev['_id'],
+            title: 'Saw $personName',
+            time: timeLabel,
+            icon: Icons.person,
+            color: AppColors.primary,
+            group: groupLabel,
+            category: 'People',
+            imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
+            isFlagged: ev['is_flagged'] == true,
+            personId: personId,
+          );
+        }
+        return null;
+      } catch (e) {
+        debugPrint('Error parsing memory event: $e');
+        return null;
       }
-      return null;
     }).where((item) => item != null).cast<_MemoryItem>().toList();
   }
+
 
   @override
   Widget build(BuildContext context) {
