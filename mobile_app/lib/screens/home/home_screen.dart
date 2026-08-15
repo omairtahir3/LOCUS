@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
@@ -50,6 +51,17 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openLiveCamera() async {
+    final baseUrl = ApiService.baseUrl;
+    final cameraUrl = baseUrl.replaceAll('5000/api', '8889/cam/');
+    final uri = Uri.parse(cameraUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not launch camera')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -69,6 +81,10 @@ class HomeScreenState extends State<HomeScreen> {
             Text('Dashboard', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
             const SizedBox(height: 24),
 
+            // AI Camera Banner
+            _buildCameraBanner(),
+            const SizedBox(height: 20),
+
             // Stats cards
             _buildStatCards(),
             const SizedBox(height: 20),
@@ -79,6 +95,43 @@ class HomeScreenState extends State<HomeScreen> {
 
             // Today's schedule
             _buildScheduleSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCameraBanner() {
+    return GestureDetector(
+      onTap: _openLiveCamera,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+              child: const Icon(Icons.videocam_outlined, color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Live AI Camera', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text('Tap to view real-time monitoring', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
           ],
         ),
       ),
