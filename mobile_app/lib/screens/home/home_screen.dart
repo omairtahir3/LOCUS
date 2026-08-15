@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
@@ -103,39 +104,61 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildCameraBanner() {
-    return GestureDetector(
-      onTap: _openLiveCamera,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.primary,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-              child: const Icon(Icons.videocam_outlined, color: Colors.white, size: 28),
-            ),
-            const SizedBox(width: 16),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Live AI Camera', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                  SizedBox(height: 4),
-                  Text('Tap to view real-time monitoring', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
+  Widget _buildRtmpBanner() {
+    final host = Uri.parse(ApiService.baseUrl).host;
+    final userId = ApiService.user?['_id'] ?? 'unknown';
+    final rtmpUrl = 'rtmp://$host/live/$userId';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+                child: const Icon(Icons.videocam_outlined, color: Colors.white, size: 24),
               ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('AI Camera RTMP Link', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text('Configure your camera (e.g. OBS/GoPro) to stream to:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(8),
             ),
-            const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
-          ],
-        ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(rtmpUrl, style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace')),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: rtmpUrl));
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('RTMP Link Copied')));
+                  },
+                  child: const Icon(Icons.copy, color: Colors.white, size: 18),
+                )
+              ],
+            ),
+          )
+        ],
       ),
     );
   }
