@@ -274,14 +274,14 @@ class _MoreScreen extends StatelessWidget {
           _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationScreen()),
           _moreTile(context, Icons.timeline_outlined, 'Activity Feed', 'Behavioral monitoring & analysis', AppColors.accent, const ActivityFeedScreen()),
 
-          _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen()),
+          _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen(), wrapInScaffold: false),
           _moreTile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
         ],
       ),
     );
   }
 
-  Widget _moreTile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen) {
+  Widget _moreTile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen, {bool wrapInScaffold = true}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -296,7 +296,7 @@ class _MoreScreen extends StatelessWidget {
         subtitle: Text(desc, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
         trailing: Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: screen))),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => wrapInScaffold ? Scaffold(appBar: AppBar(title: Text(title)), body: screen) : screen)),
       ),
     );
   }
@@ -317,14 +317,14 @@ class _NormalUserMoreScreen extends StatelessWidget {
           const SizedBox(height: 4),
           Text('Monitoring & settings', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const SizedBox(height: 20),
-          _tile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Medicine evidence & AI frames', AppColors.accent, const KeyframeAuditScreen()),
+          _tile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Medicine evidence & AI frames', AppColors.accent, const KeyframeAuditScreen(), wrapInScaffold: false),
           _tile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
         ],
       ),
     );
   }
 
-  Widget _tile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen) {
+  Widget _tile(BuildContext context, IconData icon, String title, String desc, Color color, Widget screen, {bool wrapInScaffold = true}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -339,7 +339,7 @@ class _NormalUserMoreScreen extends StatelessWidget {
         subtitle: Text(desc, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
         trailing: Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: screen))),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => wrapInScaffold ? Scaffold(appBar: AppBar(title: Text(title)), body: screen) : screen)),
       ),
     );
   }

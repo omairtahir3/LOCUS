@@ -18,7 +18,7 @@ class ApiService {
     // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
     // and the laptop's actual IP for physical Android devices via Wi-Fi/USB.
     if (kIsWeb) return 'http://localhost:5000/api';
-    return 'http://192.168.1.9:5000/api';
+    return 'http://192.168.1.13:5000/api';
   }
 
   static late SharedPreferences _prefs;
