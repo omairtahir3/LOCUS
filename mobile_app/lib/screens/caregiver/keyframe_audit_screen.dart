@@ -92,37 +92,22 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
         title: const Text('Keyframe Audit'),
         bottom: TabBar(
           controller: _tabCtrl,
-          isScrollable: true,
+          indicatorColor: AppColors.primary,
+          labelColor: AppColors.primary,
+          unselectedLabelColor: AppColors.textSecondary,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
           tabs: [
             Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.shield_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Evidence (${_evidence.isEmpty ? 0 : _groupedEvents().length})'),
-                ],
-              ),
+              icon: const Icon(Icons.shield_outlined, size: 22),
+              text: 'Evidence (${_evidence.isEmpty ? 0 : _groupedEvents().length})',
             ),
             Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.image_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Keyframes (${_keyframes.length})'),
-                ],
-              ),
+              icon: const Icon(Icons.image_outlined, size: 22),
+              text: 'Keyframes (${_keyframes.length})',
             ),
             Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.person_outline, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Unknown Faces (${_unknownFaces.length})'),
-                ],
-              ),
+              icon: const Icon(Icons.person_outline, size: 22),
+              text: 'Unknown Faces (${_unknownFaces.length})',
             ),
           ],
         ),
