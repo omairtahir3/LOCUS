@@ -90,7 +90,7 @@ export default function MemorySearch() {
         keyframe_id: ev.keyframe_id,
         person_id: ev.person_id?._id || ev.person_id,
         person_name: personName,
-        title: `Saw `,
+        title: `Saw ${personName}`,
         time: timeLabel,
         icon: User,
         color: 'var(--primary)',
@@ -277,7 +277,15 @@ export default function MemorySearch() {
                             <Icon size={20} style={{ color: m.color }} />
                           </div>
                           <div>
-                            <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{m.title}</div>
+                            <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                              {m.person_id ? (
+                                <>
+                                  Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
+                                </>
+                              ) : (
+                                m.title
+                              )}
+                            </div>
                             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>{m.time}</div>
                           </div>
                         </div>
