@@ -84,11 +84,11 @@ export default function PastInteractions() {
                   </div>
                   
                   {interaction.keyframe_id && (
-                    <div className="interaction-thumb" style={{ marginTop: 12, overflow: 'hidden', borderRadius: 6, border: '1px solid var(--border-light)', maxWidth: 400 }}>
+                    <div className="interaction-thumb" style={{ marginTop: 12, overflow: 'hidden', borderRadius: 6, border: '1px solid var(--border-light)', maxWidth: 400, backgroundColor: '#000' }}>
                       <img 
                         src={detectionAPI.getKeyframeImage(interaction.keyframe_id)} 
                         alt="Interaction"
-                        style={{ width: '100%', height: 192, objectFit: 'cover' }}
+                        style={{ width: '100%', height: 192, objectFit: 'contain' }}
                         onError={(e) => {
                           e.target.onerror = null;
                           const container = e.target.closest('.interaction-thumb');

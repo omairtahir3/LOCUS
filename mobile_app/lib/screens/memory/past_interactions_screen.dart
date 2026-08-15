@@ -223,7 +223,7 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                                           '${ApiService.baseUrl}/detection/keyframes/${interaction['keyframe_id']}/image',
                                           height: 180,
                                           width: double.infinity,
-                                          fit: BoxFit.cover,
+                                          fit: BoxFit.contain,
                                           errorBuilder: (context, error, stackTrace) {
                                             // Image no longer available — show nothing
                                             return const SizedBox.shrink();
