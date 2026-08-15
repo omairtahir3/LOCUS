@@ -12,8 +12,8 @@ router.get('/memory-search', auth, async (req, res) => {
     if (req.user.role === 'caregiver') {
       const User = require('../models/User');
       const caregiver = await User.findById(req.user.id);
-      if (caregiver.connected_elderly_user) {
-        userId = caregiver.connected_elderly_user;
+      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
+        userId = caregiver.monitoring_users[0];
       }
     }
 
@@ -49,8 +49,8 @@ router.get('/keyframes', auth, async (req, res) => {
     if (req.user.role === 'caregiver') {
       const User = require('../models/User');
       const caregiver = await User.findById(req.user.id);
-      if (caregiver.connected_elderly_user) {
-        userId = caregiver.connected_elderly_user;
+      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
+        userId = caregiver.monitoring_users[0];
       }
     }
 
@@ -97,7 +97,7 @@ router.patch('/:id/flag', auth, async (req, res) => {
     if (req.user.role === 'caregiver') {
       const User = require('../models/User');
       const caregiver = await User.findById(req.user.id);
-      if (String(event.user_id) !== String(caregiver.connected_elderly_user)) {
+      if (!caregiver.monitoring_users || !caregiver.monitoring_users.map(id => String(id)).includes(String(event.user_id))) {
         return res.status(403).json({ error: 'Unauthorized to flag this event' });
       }
     } else {

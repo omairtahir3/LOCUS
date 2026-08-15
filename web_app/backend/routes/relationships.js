@@ -11,7 +11,9 @@ router.get('/', auth, async (req, res) => {
     let userId = req.user.id;
     if (req.user.role === 'caregiver') {
       const caregiver = await User.findById(req.user.id);
-      userId = caregiver.connected_elderly_user;
+      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
+        userId = caregiver.monitoring_users[0];
+      }
     }
     const relationships = await Relationship.find({ user_id: userId }).sort({ createdAt: -1 });
     res.json(relationships);
@@ -52,7 +54,9 @@ router.post('/confirm', auth, async (req, res) => {
     let userId = req.user.id;
     if (req.user.role === 'caregiver') {
       const caregiver = await User.findById(req.user.id);
-      userId = caregiver.connected_elderly_user;
+      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
+        userId = caregiver.monitoring_users[0];
+      }
     }
 
     if (merge_into) {
