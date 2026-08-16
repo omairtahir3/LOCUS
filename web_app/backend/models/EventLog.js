@@ -8,7 +8,7 @@ const eventLogSchema = new mongoose.Schema({
   },
   event_type: {
     type: String,
-    enum: ['medication', 'activity', 'social', 'object', 'social_interaction', 'unknown_face'],
+    enum: ['medication', 'medication_intake', 'activity', 'social', 'object', 'social_interaction', 'unknown_face'],
     required: true
   },
   timestamp: {

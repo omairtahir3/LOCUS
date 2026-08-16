@@ -207,6 +207,26 @@ router.post('/logs', async (req, res) => {
           await notifyCaregiversTakenDose(patient, med, existing._id);
           await notifyUserTakenDose(patient, med, existing._id);
         }
+        
+        // Write to centralized EventLog MongoDB collection
+        const EventLog = require('../models/EventLog');
+        await EventLog.findOneAndUpdate(
+          { 
+            user_id: targetUserId, 
+            event_type: 'medication_intake', 
+            'details.medication_id': med._id 
+          },
+          {
+            $setOnInsert: {
+              timestamp: new Date(),
+              confidence: confidence_score || 1.0,
+              details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
+              keyframe_id: keyframe_id || null,
+              verification_status: 'confirmed'
+            }
+          },
+          { upsert: true, new: true }
+        );
       }
 
       return res.status(200).json({ ...existing.toObject(), medication_name: med.name, dosage: med.dosage });
@@ -354,21 +374,25 @@ router.patch('/logs/:logId', async (req, res) => {
           await notifyCaregiversTakenDose(patient, med, log._id);
           await notifyUserTakenDose(patient, med, log._id);
         }
-        
-        // Ensure EventLog exists for Memory Search
+        // Write to centralized EventLog MongoDB collection
         const EventLog = require('../models/EventLog');
-        const existingEvent = await EventLog.findOne({ keyframe_id: log.keyframe_id, event_type: 'medication_intake' });
-        if (!existingEvent && log.keyframe_id) {
-          await EventLog.create({
-            user_id: log.user_id,
-            event_type: 'medication_intake',
-            timestamp: log.taken_at || new Date(),
-            confidence: log.confidence_score || 1.0,
-            details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
-            keyframe_id: log.keyframe_id,
-            verification_status: 'confirmed'
-          });
-        }
+        await EventLog.findOneAndUpdate(
+          { 
+            user_id: log.user_id, 
+            event_type: 'medication_intake', 
+            'details.medication_id': med._id 
+          },
+          {
+            $setOnInsert: {
+              timestamp: new Date(),
+              confidence: log.confidence_score || 1.0,
+              details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
+              keyframe_id: log.keyframe_id || null,
+              verification_status: 'confirmed'
+            }
+          },
+          { upsert: true, new: true }
+        );
       }
     }
 

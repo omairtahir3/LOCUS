@@ -45,24 +45,19 @@ export default function MemorySearch() {
     let groupLabel = 'Earlier';
 
     if (dt) {
-      const diffMs = now - dt;
-      const diffHrs = diffMs / (1000 * 60 * 60);
-      const diffDays = Math.floor(diffHrs / 24);
-
-      if (diffDays === 0) {
-        if (diffHrs < 1) {
-          const diffMins = Math.floor(diffMs / (1000 * 60));
-          timeLabel = diffMins <= 1 ? 'Just now' : `${diffMins} mins ago`;
-        } else {
-          timeLabel = `${Math.floor(diffHrs)} hours ago`;
-        }
+      timeLabel = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      
+      const isToday = now.toDateString() === dt.toDateString();
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const isYesterday = yesterday.toDateString() === dt.toDateString();
+      
+      if (isToday) {
         groupLabel = 'Today';
-      } else if (diffDays === 1) {
-        timeLabel = 'Yesterday';
+      } else if (isYesterday) {
         groupLabel = 'Yesterday';
       } else {
-        timeLabel = `${diffDays} days ago`;
-        groupLabel = `${diffDays} Days Ago`;
+        groupLabel = dt.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
       }
     }
 

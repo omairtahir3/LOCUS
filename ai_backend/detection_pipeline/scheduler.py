@@ -645,20 +645,40 @@ async def _check_schedules():
     for (uid, time_slot), due_meds in sorted(user_slots.items(), key=lambda x: x[0][1]):
         if uid in _active_sessions:
             existing = _active_sessions[uid]
-            # If existing session is at the same time slot, merge new medicines into it
-            if existing.time_slot == time_slot:
-                existing_ids = {str(m["_id"]) for m in existing.medications}
-                new_meds = [m for m in due_meds if str(m["_id"]) not in existing_ids]
-                if new_meds:
-                    existing.medications.extend(new_meds)
-                    existing.expected_count += len(new_meds)
-                    print(f"[Scheduler] Merged {len(new_meds)} new medicine(s) into {time_slot} session "
-                          f"(now {existing.expected_count} expected)")
-                    # Update pipeline with merged session
-                    pipeline = _get_pipeline_for_user(uid)
-                    if pipeline and pipeline.is_running:
-                        await _start_pipeline_for_session(existing, uid)
-            # Don't create duplicate sessions for the same user
+            # Instead of ignoring different time slots, we add them to the session's monitoring
+            existing_ids = {str(m["_id"]) for m in existing.medications}
+            
+            # Update existing medications in case they changed
+            for i, m in enumerate(existing.medications):
+                for due_m in due_meds:
+                    if str(m["_id"]) == str(due_m["_id"]):
+                        existing.medications[i] = due_m
+            
+            # Add any new medications
+            new_meds = [m for m in due_meds if str(m["_id"]) not in existing_ids]
+            if new_meds:
+                existing.medications.extend(new_meds)
+                existing.expected_count += len(new_meds)
+                
+            # If this is a new time slot, append it so the pipeline watches it
+            if time_slot not in existing.time_slot.split(","):
+                # if existing was just "05:00" and due is "03:50", make it "05:00,03:50"
+                # If they changed the only med from 05:00 to 03:50, we just append it for safety
+                existing.time_slot += f",{time_slot}"
+                
+                # Extend the session deadline if this time slot ends later
+                sh, sm = map(int, time_slot.split(":"))
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                new_dt = today.replace(hour=sh, minute=sm) + timedelta(minutes=existing.window_minutes)
+                if new_dt > existing.window_deadline:
+                    existing.window_deadline = new_dt
+                    
+            # Always sync pipeline to make sure any time/med changes take effect immediately
+            print(f"[Scheduler] Syncing session for {uid}: times [{existing.time_slot}], meds: {existing.expected_count}")
+            pipeline = _get_pipeline_for_user(uid)
+            if pipeline and pipeline.is_running:
+                await _start_pipeline_for_session(existing, uid)
+                
             continue
 
         expected_count = len(due_meds)

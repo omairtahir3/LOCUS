@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
@@ -43,20 +44,14 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
   String _formatDate(String timestamp) {
     final dt = DateTime.parse(timestamp).toLocal();
     final now = DateTime.now();
-    final diff = now.difference(dt);
-
-    if (diff.inDays == 0) {
-      if (diff.inHours == 0) {
-        if (diff.inMinutes == 0) return 'Just now';
-        return '${diff.inMinutes}m ago';
-      }
-      return '${diff.inHours}h ago';
-    } else if (diff.inDays == 1) {
-      return 'Yesterday';
-    } else if (diff.inDays < 7) {
-      return '${diff.inDays} days ago';
+    final timeStr = DateFormat('h:mm a').format(dt);
+    
+    if (now.year == dt.year && now.month == dt.month && now.day == dt.day) {
+      return timeStr;
+    } else if (now.year == dt.year && now.month == dt.month && now.day - 1 == dt.day) {
+      return 'Yesterday, $timeStr';
     } else {
-      return '${dt.month}/${dt.day}/${dt.year}';
+      return '${DateFormat('MMM d').format(dt)}, $timeStr';
     }
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
@@ -21,6 +22,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
   void initState() {
     super.initState();
     _loadEvents();
+  }
+
+  void reload() {
+    if (mounted) _loadEvents();
   }
 
   Future<void> _loadEvents() async {
@@ -52,21 +57,18 @@ class _MemoryScreenState extends State<MemoryScreen> {
     return _events.map((ev) {
       try {
         final dt = DateTime.parse(ev['timestamp']);
+        final localDt = dt.toLocal();
+        final timeLabel = DateFormat('h:mm a').format(localDt);
         final now = DateTime.now();
-        final diff = now.difference(dt);
         
-        String timeLabel = '-';
         String groupLabel = 'Earlier';
         
-        if (diff.inDays == 0) {
-          timeLabel = diff.inHours < 1 ? 'Just now' : '${diff.inHours} hours ago';
+        if (now.year == localDt.year && now.month == localDt.month && now.day == localDt.day) {
           groupLabel = 'Today';
-        } else if (diff.inDays == 1) {
-          timeLabel = 'Yesterday';
+        } else if (now.year == localDt.year && now.month == localDt.month && now.day - 1 == localDt.day) {
           groupLabel = 'Yesterday';
         } else {
-          timeLabel = '${diff.inDays} days ago';
-          groupLabel = '${diff.inDays} Days Ago';
+          groupLabel = DateFormat('MMM d, yyyy').format(localDt);
         }
 
         if (ev['event_type'] == 'medication_intake' || ev['event_type'] == 'medication') {
@@ -213,28 +215,31 @@ class _MemoryScreenState extends State<MemoryScreen> {
         Expanded(
           child: _isLoading 
             ? const Center(child: CircularProgressIndicator())
-            : searched.isEmpty 
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.search_off, size: 56, color: AppColors.textMuted),
-                      const SizedBox(height: 12),
-                      Text(query.isNotEmpty ? 'No results found' : 'No memories yet', 
-                           style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      Text('When the AI camera detects events, they will appear here.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                      const SizedBox(height: 20),
-                      Text('DEBUG INFO:', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                      Text('Total events from API: ${_events.length}', style: TextStyle(color: Colors.red)),
-                      Text('Mapped memories: ${allMemories.length}', style: TextStyle(color: Colors.red)),
-                      Text('Has Token: ${ApiService.token != null}', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                )
-              : _buildMemoriesList(searched),
+            : RefreshIndicator(
+                onRefresh: _loadEvents,
+                child: searched.isEmpty 
+                  ? SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Container(
+                        height: MediaQuery.of(context).size.height * 0.5,
+                        alignment: Alignment.center,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.search_off, size: 56, color: AppColors.textMuted),
+                            const SizedBox(height: 12),
+                            Text(query.isNotEmpty ? 'No results found' : 'No memories yet', 
+                                 style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            Text('When the AI camera detects events, they will appear here.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _buildMemoriesList(searched),
+              ),
         ),
       ],
     );
@@ -243,6 +248,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
   Widget _buildMemoriesList(List<_MemoryItem> memories) {
     String? lastGroup;
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       itemCount: memories.length,
       itemBuilder: (ctx, i) {
