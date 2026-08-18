@@ -12,6 +12,7 @@ const notificationRoutes = require('./routes/notifications');
 const detectionRoutes    = require('./routes/detection');
 const eventLogRoutes     = require('./routes/eventLogs');
 const relationshipRoutes = require('./routes/relationships');
+const locationRoutes     = require('./routes/location');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/detection',     detectionRoutes);
 app.use('/api/event-logs',    eventLogRoutes);
 app.use('/api/relationships', relationshipRoutes);
+app.use('/api/location',      locationRoutes);
 
 // Health check
 app.get('/', (req, res) => res.json({

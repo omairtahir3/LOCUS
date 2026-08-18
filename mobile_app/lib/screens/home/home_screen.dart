@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/location_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,6 +25,13 @@ class HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+    
+    // Start tracking location if elderly
+    if (ApiService.userRole == 'elderly') {
+      LocationService().startTracking().catchError((e) {
+        print("Failed to start location tracking: $e");
+      });
+    }
   }
 
   bool get _isElderly => ApiService.userRole == 'elderly';
