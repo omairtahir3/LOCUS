@@ -25,8 +25,11 @@ import 'screens/caregiver/keyframe_audit_screen.dart';
 import 'screens/memory/past_interactions_screen.dart';
 import 'screens/settings/relationships_manage_screen.dart';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   
   if (!kIsWeb) {
     try {

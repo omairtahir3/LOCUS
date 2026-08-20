@@ -22,6 +22,13 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    val envFile = file("../../.env")
+    val env = java.util.Properties()
+    if (envFile.exists()) {
+        env.load(java.io.FileInputStream(envFile))
+    }
+    val mapsApiKey = env.getProperty("GOOGLE_MAPS_API_KEY") ?: ""
+
     defaultConfig {
         applicationId = "com.locus.locus_mobile"
         minSdk = flutter.minSdkVersion
@@ -29,6 +36,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+        manifestPlaceholders += mapOf("googleMapsApiKey" to mapsApiKey)
     }
 
     buildTypes {

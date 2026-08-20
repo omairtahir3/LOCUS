@@ -56,6 +56,10 @@ const eventLogSchema = new mongoose.Schema({
   pending_notification: {
     type: Boolean,
     default: false
+  },
+  location: {
+    lat: { type: Number, required: false },
+    lng: { type: Number, required: false }
   }
 }, { timestamps: true });
 

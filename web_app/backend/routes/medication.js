@@ -262,6 +262,20 @@ router.post('/logs', async (req, res) => {
         await notifyCaregiversTakenDose(patient, med, log._id);
         await notifyUserTakenDose(patient, med, log._id);
       }
+      // Fetch latest location
+      const LocationLog = require('../models/LocationLog');
+      const latestLoc = await LocationLog.findOne({ user_id: targetUserId }).sort({ timestamp: -1 });
+      let locationData = undefined;
+      
+      if (latestLoc && latestLoc.timestamp) {
+        const stalenessMin = (new Date() - new Date(latestLoc.timestamp)) / 1000 / 60;
+        if (stalenessMin <= 30) {
+          locationData = { lat: latestLoc.lat, lng: latestLoc.lng };
+        } else {
+          console.log(`[EventLog] Skipped GPS attach: Location stale by ${stalenessMin.toFixed(1)} mins`);
+        }
+      }
+
       // Write to centralized EventLog MongoDB collection
       const EventLog = require('../models/EventLog');
       await EventLog.create({
@@ -271,7 +285,8 @@ router.post('/logs', async (req, res) => {
         confidence: confidence_score || 1.0,
         details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
         keyframe_id: keyframe_id || null,
-        verification_status: 'confirmed'
+        verification_status: 'confirmed',
+        location: locationData
       });
     }
 

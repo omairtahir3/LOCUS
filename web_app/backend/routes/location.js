@@ -6,7 +6,7 @@ const User = require('../models/User');
 
 // POST /api/location
 // Receives GPS coordinates from the mobile app
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.protect, async (req, res) => {
   try {
     const { lat, lng, accuracy, speed, timestamp } = req.body;
     
@@ -46,7 +46,7 @@ router.post('/', auth, async (req, res) => {
 
 // GET /api/location/latest
 // Returns the most recent location for the authenticated user, or a monitored user
-router.get('/latest', auth, async (req, res) => {
+router.get('/latest', auth.protect, async (req, res) => {
   try {
     const targetUserId = req.query.user_id || req.user.id;
     

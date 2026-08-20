@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/location_service.dart';
+import '../caregiver/location_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -87,6 +88,11 @@ class HomeScreenState extends State<HomeScreen> {
             _buildRtmpBanner(),
             const SizedBox(height: 20),
 
+            if (!_isElderly)
+              _buildCaregiverLocationCard(),
+            if (!_isElderly)
+              const SizedBox(height: 20),
+
             // Stats cards
             _buildStatCards(),
             const SizedBox(height: 20),
@@ -97,6 +103,42 @@ class HomeScreenState extends State<HomeScreen> {
 
             // Today's schedule
             _buildScheduleSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCaregiverLocationCard() {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withAlpha(50)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.primary.withAlpha(25), borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.map, color: AppColors.primary, size: 28),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Live Location Map', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  Text('Track family member location', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
           ],
         ),
       ),

@@ -1,6 +1,37 @@
+import React, { useState, useEffect } from 'react';
 import { MapPin, Navigation, AlertTriangle, Shield } from 'lucide-react';
+import LocationMapComponent from '../components/LocationMap';
+import api from '../utils/api';
 
 export default function LocationMap() {
+  const [locationData, setLocationData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchLocation = async () => {
+      try {
+        // Fetch latest location
+        const res = await api.get('/location/latest');
+        setLocationData(res.data);
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          setError("No location data found yet.");
+        } else {
+          setError("Failed to fetch location data.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchLocation();
+    
+    // Auto refresh every 30 seconds
+    const interval = setInterval(fetchLocation, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div>
       <div className="page-header">
@@ -8,39 +39,25 @@ export default function LocationMap() {
           <h2 className="page-title">Location Map</h2>
           <p className="page-description">Real-time family member location tracking</p>
         </div>
-        <span className="coming-soon-badge"><Shield size={12} /> Coming Soon</span>
       </div>
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
-        {/* Mock map */}
-        <div style={{
-          height: 500, background: 'linear-gradient(135deg, #E0F2FE 0%, #CCFBF1 50%, #F0FDF4 100%)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16,
-          position: 'relative',
-        }}>
-          {/* Grid lines to simulate map */}
-          <div style={{
-            position: 'absolute', inset: 0, opacity: 0.15,
-            backgroundImage: 'linear-gradient(var(--text-muted) 1px, transparent 1px), linear-gradient(90deg, var(--text-muted) 1px, transparent 1px)',
-            backgroundSize: '60px 60px',
-          }} />
-          
-          {/* Mock location pin */}
-          <div style={{
-            background: 'var(--primary)', width: 56, height: 56, borderRadius: '50% 50% 50% 0',
-            transform: 'rotate(-45deg)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 20px rgba(13, 148, 136, 0.3)', animation: 'pulse 2s infinite',
-          }}>
-            <MapPin size={24} style={{ transform: 'rotate(45deg)', color: 'white' }} />
+      <div className="card" style={{ padding: 16, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
+        {loading ? (
+          <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <p>Loading GPS Data...</p>
           </div>
-          
-          <div style={{ textAlign: 'center', zIndex: 1 }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Location Tracking</h3>
-            <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
-              Real-time GPS tracking, geofence alerts, and "I'm Lost" emergency mode will be available when the location backend is connected.
-            </p>
+        ) : error ? (
+          <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'var(--danger)' }}>
+            <MapPin size={48} style={{ opacity: 0.5, marginBottom: 16 }} />
+            <p>{error}</p>
           </div>
-        </div>
+        ) : locationData ? (
+          <LocationMapComponent 
+            lat={locationData.lat} 
+            lng={locationData.lng} 
+            timestamp={locationData.timestamp} 
+          />
+        ) : null}
       </div>
 
       {/* Feature preview cards */}

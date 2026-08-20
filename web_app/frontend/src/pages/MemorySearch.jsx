@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin } from 'lucide-react';
+import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
 const FILTERS = ['All', 'Medicine', 'People'];
@@ -76,7 +76,8 @@ export default function MemorySearch() {
         status: '✓ Verified',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
-        image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null
+        image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null,
+        location: ev.location
       };
     } else if (ev.event_type === 'social_interaction') {
       const personName = ev.person_id?.person_name || ev.details?.person || 'Unknown Person';
@@ -95,7 +96,8 @@ export default function MemorySearch() {
         status: ev.verification_status === 'confirmed' ? '✓ Confirmed' : '',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
-        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null
+        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        location: ev.location
       };
     }
     return null;
@@ -259,6 +261,18 @@ export default function MemorySearch() {
                                     padding: '2px 8px', borderRadius: 12,
                                   }}>{m.status}</span>
                                 )}
+                                {m.location && (
+                                  <span style={{
+                                    fontSize: '0.7rem', fontWeight: 700,
+                                    color: '#4F46E5',
+                                    background: 'rgba(79, 70, 229, 0.15)',
+                                    padding: '2px 8px', borderRadius: 12,
+                                    display: 'flex', alignItems: 'center', gap: 4
+                                  }}>
+                                    <MapPin size={10} />
+                                    Location Logged
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -281,7 +295,35 @@ export default function MemorySearch() {
                                 m.title
                               )}
                             </div>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>{m.time}</div>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.time}</span>
+                              {m.confidence && (
+                                <span style={{
+                                  fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)',
+                                  background: 'var(--primary-light)', padding: '2px 8px', borderRadius: 12,
+                                }}>{m.confidence}</span>
+                              )}
+                              {m.status && (
+                                <span style={{
+                                  fontSize: '0.7rem', fontWeight: 700,
+                                  color: 'var(--success)',
+                                  background: 'rgba(34,197,94,0.15)',
+                                  padding: '2px 8px', borderRadius: 12,
+                                }}>{m.status}</span>
+                              )}
+                              {m.location && (
+                                <span style={{
+                                  fontSize: '0.7rem', fontWeight: 700,
+                                  color: '#4F46E5',
+                                  background: 'rgba(79, 70, 229, 0.15)',
+                                  padding: '2px 8px', borderRadius: 12,
+                                  display: 'flex', alignItems: 'center', gap: 4
+                                }}>
+                                  <MapPin size={10} />
+                                  Location Logged
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -295,4 +337,4 @@ export default function MemorySearch() {
       )}
     </div>
   );
-}
+};

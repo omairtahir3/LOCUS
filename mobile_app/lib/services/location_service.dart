@@ -68,7 +68,7 @@ class LocationService {
 
   Future<void> _sendLocationToBackend(Position position) async {
     try {
-      final token = await ApiService.getToken();
+      final token = ApiService.token;
       if (token == null) return;
 
       final url = Uri.parse('${ApiService.baseUrl}/location');
@@ -76,7 +76,7 @@ class LocationService {
         url,
         headers: {
           'Content-Type': 'application/json',
-          'x-auth-token': token,
+          'Authorization': 'Bearer $token',
         },
         body: json.encode({
           'lat': position.latitude,

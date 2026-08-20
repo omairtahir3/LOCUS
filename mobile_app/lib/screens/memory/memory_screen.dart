@@ -83,6 +83,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             category: 'Medicine',
             imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
             isFlagged: ev['is_flagged'] == true,
+            hasLocation: ev['location'] != null,
           );
         } else if (ev['event_type'] == 'social_interaction') {
           final pIdData = ev['person_id'];
@@ -105,6 +106,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
             isFlagged: ev['is_flagged'] == true,
             personId: personId,
+            hasLocation: ev['location'] != null,
           );
         }
         return null;
@@ -299,7 +301,15 @@ class _MemoryScreenState extends State<MemoryScreen> {
                     decoration: m.personId != null ? TextDecoration.underline : TextDecoration.none,
                   ),
                 ),
-                subtitle: Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                subtitle: Row(
+                  children: [
+                    Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    if (m.hasLocation) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.location_on, size: 12, color: Colors.indigo),
+                    ],
+                  ],
+                ),
                 trailing: IconButton(
                   icon: Icon(Icons.push_pin, size: 20, color: m.isFlagged ? AppColors.primary : AppColors.border),
                   onPressed: () => _toggleFlag(m.id, m.isFlagged),
@@ -320,11 +330,12 @@ class _MemoryItem {
   final String? imageUrl;
   final bool isFlagged;
   final String? personId;
+  final bool hasLocation;
   
   _MemoryItem({
     required this.id, required this.title, required this.time, 
     required this.icon, required this.color, required this.group,
     required this.category, this.imageUrl, this.isFlagged = false,
-    this.personId,
+    this.personId, this.hasLocation = false,
   });
 }

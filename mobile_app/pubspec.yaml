@@ -46,6 +46,8 @@ dependencies:
   firebase_messaging: ^16.4.1
   url_launcher: ^6.3.2
   geolocator: ^14.0.2
+  google_maps_flutter: ^2.14.2
+  flutter_dotenv: ^6.0.1
 
 dev_dependencies:
   flutter_test:
@@ -71,6 +73,7 @@ flutter:
 
   assets:
     - assets/images/
+    - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

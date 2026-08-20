@@ -10,6 +10,8 @@ import time
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
+GPS_STALENESS_THRESHOLD_MINUTES = 30
+
 # ── Shared MongoDB connection pool (thread-safe, reused across all pipeline instances) ──
 _mongo_client = None
 _mongo_db = None
@@ -84,6 +86,26 @@ class MedicationDetectionPipeline:
         self.token = token
         self.user_id = user_id
 
+    def _attach_latest_location(self, db, doc, ts_now):
+        try:
+            from bson import ObjectId
+            latest_loc = db.locationlogs.find_one(
+                {"user_id": ObjectId(str(self.user_id))},
+                sort=[("timestamp", -1)]
+            )
+            if latest_loc and "timestamp" in latest_loc and "lat" in latest_loc and "lng" in latest_loc:
+                loc_ts = latest_loc["timestamp"]
+                staleness = (ts_now - loc_ts).total_seconds() / 60.0
+                if staleness <= GPS_STALENESS_THRESHOLD_MINUTES:
+                    doc["location"] = {
+                        "lat": latest_loc["lat"],
+                        "lng": latest_loc["lng"]
+                    }
+                else:
+                    print(f"[Pipeline] [DB-Log] Skipped GPS attach: Location stale by {staleness:.1f} mins (Threshold: {GPS_STALENESS_THRESHOLD_MINUTES})")
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log] Error attaching location: {e}")
+
     def _log_scene_to_db(self, keyframe_id, motion_score):
         """
         Write a scene change activity log to MongoDB for Behavioral ML baseline.
@@ -110,6 +132,7 @@ class MedicationDetectionPipeline:
                 "createdAt": ts_now,
                 "updatedAt": ts_now
             }
+            self._attach_latest_location(db, doc, ts_now)
             db.eventlogs.insert_one(doc)
             print(f"[Pipeline] [DB-Log] Logged scene_change activity event for {self.user_id}")
         except Exception as e:
@@ -153,6 +176,7 @@ class MedicationDetectionPipeline:
                 "createdAt": ts_now,
                 "updatedAt": ts_now
             }
+            self._attach_latest_location(db, doc, ts_now)
             db.eventlogs.insert_one(doc)
             print(f"[Pipeline] [DB-Log] Logged face event: {event_type} for {self.user_id} with conf {confidence:.2f}")
         except Exception as e:
