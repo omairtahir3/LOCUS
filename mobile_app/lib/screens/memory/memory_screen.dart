@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
@@ -83,7 +84,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             category: 'Medicine',
             imageUrl: ev['keyframe_id'] != null ? ApiService.medicationFrameImageUrl(ev['keyframe_id']) : null,
             isFlagged: ev['is_flagged'] == true,
-            hasLocation: ev['location'] != null,
+            location: ev['location'],
           );
         } else if (ev['event_type'] == 'social_interaction') {
           final pIdData = ev['person_id'];
@@ -106,7 +107,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
             isFlagged: ev['is_flagged'] == true,
             personId: personId,
-            hasLocation: ev['location'] != null,
+            location: ev['location'],
           );
         }
         return null;
@@ -304,9 +305,35 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 subtitle: Row(
                   children: [
                     Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                    if (m.hasLocation) ...[
+                    if (m.location != null) ...[
                       const SizedBox(width: 6),
-                      Icon(Icons.location_on, size: 12, color: Colors.indigo),
+                      Tooltip(
+                        message: 'Lat: ${m.location!['lat']}, Lng: ${m.location!['lng']}',
+                        triggerMode: TooltipTriggerMode.tap,
+                        child: GestureDetector(
+                          onTap: () {
+                            launchUrlString('https://www.google.com/maps/search/?api=1&query=${m.location!['lat']},${m.location!['lng']}');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEEECF9), // Light purple matching web rgba(79, 70, 229, 0.15)
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: const [
+                                Icon(Icons.location_on, size: 10, color: Color(0xFF4F46E5)),
+                                SizedBox(width: 2),
+                                Text('Location Logged', style: TextStyle(
+                                  fontSize: 9, 
+                                  fontWeight: FontWeight.w700, 
+                                  color: Color(0xFF4F46E5)
+                                )),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -330,12 +357,12 @@ class _MemoryItem {
   final String? imageUrl;
   final bool isFlagged;
   final String? personId;
-  final bool hasLocation;
+  final Map<String, dynamic>? location;
   
   _MemoryItem({
     required this.id, required this.title, required this.time, 
     required this.icon, required this.color, required this.group,
     required this.category, this.imageUrl, this.isFlagged = false,
-    this.personId, this.hasLocation = false,
+    this.personId, this.location,
   });
 }

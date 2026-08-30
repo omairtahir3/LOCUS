@@ -1789,8 +1789,7 @@ class MedicationDetectionPipeline:
                 except Exception:
                     pass
 
-            # Check for skipped medicines and send notification
-            self.check_for_skipped_medicines()
+            # (Skip notifications are handled by the scheduler at the end of the time window)
 
             # NOTE: buffer is intentionally NOT flushed here so
             # /analyze can still access the last processed frames
@@ -1818,6 +1817,7 @@ class MedicationDetectionPipeline:
             try:
                 import requests
                 payload = {
+                    "user_id": str(self.user_id),
                     "scheduled_time": datetime.now(timezone.utc).isoformat(),
                     "expected_count": expected,
                     "taken_count": taken,

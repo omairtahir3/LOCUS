@@ -84,3 +84,31 @@ async def dismiss_notification(notif_id: str, db=Depends(get_db), current_user=D
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"message": "Notification dismissed"}
+
+
+@router.post("/skip")
+async def notify_skip(body: dict, db=Depends(get_db)):
+    """
+    Called by the AI pipeline when a user skips one or more medications.
+    Forwards the request to the Node.js backend which handles Gemini AI message generation and emails.
+    """
+    import httpx
+    from fastapi import HTTPException
+    
+    # Forward the request to the Node.js backend running on port 5000
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "http://localhost:5000/api/notifications/skip",
+                json=body,
+                timeout=10.0
+            )
+            
+            if resp.status_code not in (200, 201):
+                raise HTTPException(status_code=resp.status_code, detail=f"Node.js backend error: {resp.text}")
+                
+            return resp.json()
+    except Exception as e:
+        print(f"[Notifications] Error forwarding skip notification to Node.js: {e}")
+        raise HTTPException(status_code=500, detail="Failed to forward notification")
+

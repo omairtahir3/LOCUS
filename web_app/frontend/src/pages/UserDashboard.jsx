@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { userAPI, authAPI, detectionAPI } from '../services/api';
+import { formatTime12Hour } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import {
   Pill, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp,
@@ -361,7 +362,7 @@ export default function UserDashboard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, opacity: 0.9 }}>
                 <Zap size={16} /> NEXT UPCOMING DOSE
               </div>
-              <h2 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 4 }}>{upcoming.scheduled_time}</h2>
+              <h2 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 4 }}>{formatTime12Hour(upcoming.scheduled_time)}</h2>
               <div style={{ fontSize: '1.2rem', fontWeight: 600 }}>{upcoming.medication_name}</div>
               <div style={{ opacity: 0.8, fontSize: '0.95rem' }}>{upcoming.dosage}</div>
             </div>
@@ -410,7 +411,7 @@ export default function UserDashboard() {
             ) : (
               schedule.map((s, i) => (
                 <div key={i} className={`time-slot ${s.status}`}>
-                  <div className="time-label">{s.scheduled_time}</div>
+                  <div className="time-label">{formatTime12Hour(s.scheduled_time)}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{s.medication_name}</div>
                     <div style={{ fontSize: '0.85rem', color: '#64748B' }}>{s.dosage}</div>

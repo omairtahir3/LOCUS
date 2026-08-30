@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -23,9 +26,9 @@ android {
     }
 
     val envFile = file("../../.env")
-    val env = java.util.Properties()
+    val env = Properties()
     if (envFile.exists()) {
-        env.load(java.io.FileInputStream(envFile))
+        env.load(FileInputStream(envFile))
     }
     val mapsApiKey = env.getProperty("GOOGLE_MAPS_API_KEY") ?: ""
 

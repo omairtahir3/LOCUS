@@ -262,16 +262,24 @@ export default function MemorySearch() {
                                   }}>{m.status}</span>
                                 )}
                                 {m.location && (
-                                  <span style={{
-                                    fontSize: '0.7rem', fontWeight: 700,
-                                    color: '#4F46E5',
-                                    background: 'rgba(79, 70, 229, 0.15)',
-                                    padding: '2px 8px', borderRadius: 12,
-                                    display: 'flex', alignItems: 'center', gap: 4
-                                  }}>
+                                  <a 
+                                    href={`https://www.google.com/maps/search/?api=1&query=${m.location.lat},${m.location.lng}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`Lat: ${m.location.lat}, Lng: ${m.location.lng}`}
+                                    style={{
+                                      fontSize: '0.7rem', fontWeight: 700,
+                                      color: '#4F46E5',
+                                      background: 'rgba(79, 70, 229, 0.15)',
+                                      padding: '2px 8px', borderRadius: 12,
+                                      display: 'flex', alignItems: 'center', gap: 4,
+                                      cursor: 'pointer',
+                                      textDecoration: 'none'
+                                    }}
+                                  >
                                     <MapPin size={10} />
                                     Location Logged
-                                  </span>
+                                  </a>
                                 )}
                               </div>
                             </div>
@@ -312,16 +320,24 @@ export default function MemorySearch() {
                                 }}>{m.status}</span>
                               )}
                               {m.location && (
-                                <span style={{
-                                  fontSize: '0.7rem', fontWeight: 700,
-                                  color: '#4F46E5',
-                                  background: 'rgba(79, 70, 229, 0.15)',
-                                  padding: '2px 8px', borderRadius: 12,
-                                  display: 'flex', alignItems: 'center', gap: 4
-                                }}>
+                                <a 
+                                  href={`https://www.google.com/maps/search/?api=1&query=${m.location.lat},${m.location.lng}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={`Lat: ${m.location.lat}, Lng: ${m.location.lng}`}
+                                  style={{
+                                    fontSize: '0.7rem', fontWeight: 700,
+                                    color: '#4F46E5',
+                                    background: 'rgba(79, 70, 229, 0.15)',
+                                    padding: '2px 8px', borderRadius: 12,
+                                    display: 'flex', alignItems: 'center', gap: 4,
+                                    cursor: 'pointer',
+                                    textDecoration: 'none'
+                                  }}
+                                >
                                   <MapPin size={10} />
                                   Location Logged
-                                </span>
+                                </a>
                               )}
                             </div>
                           </div>

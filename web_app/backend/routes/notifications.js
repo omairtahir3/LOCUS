@@ -3,10 +3,65 @@ const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
 const { generateAISkippedMedicineAlert } = require('../utils/geminiAgent');
+const { createNotification } = require('../utils/notifications');
 
 const router = express.Router();
 
 // ─── Internal endpoints (no auth required, called by Python AI pipeline) ─────
+
+// POST /api/notifications/system-alert (Internal Python API endpoint)
+router.post('/system-alert', async (req, res) => {
+  try {
+    const { user_id, medication_id, status, notes } = req.body;
+    if (!user_id || !medication_id || !status) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const User = require('../models/User');
+    const Medication = require('../models/Medication');
+    
+    const user = await User.findById(user_id);
+    const med = await Medication.findById(medication_id);
+    
+    if (!user || !med) {
+      return res.status(404).json({ error: 'User or Medication not found' });
+    }
+
+    let title, message, type;
+    if (status === 'camera_off') {
+      title = `Camera Offline for ${med.name}`;
+      message = `${user.name}'s camera was disconnected during their scheduled window. We couldn't verify if they took their medication.`;
+      type = 'camera_off_alert';
+    } else if (status === 'missed') {
+      title = `Missed Medication: ${med.name}`;
+      message = `No intake detected for ${user.name}'s scheduled dose of ${med.name} within the window.`;
+      type = 'missed_alert';
+    } else if (status === 'skipped') {
+      title = `Skipped Medication: ${med.name}`;
+      message = `${user.name}'s medication window elapsed without verification.`;
+      type = 'missed_alert';
+    } else {
+      return res.json({ success: true, message: 'Status ignored' }); // Ignore taken/scheduled
+    }
+
+    // Call the core helper to handle the email/push dispatch
+    await createNotification({
+      recipientId: user._id, // Will also route to caregivers
+      title,
+      message,
+      type,
+      medicationId: med._id,
+      patientId: user._id,
+      requiresAck: true,
+      sender: 'System'
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[System Alert] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/notifications/skip  — create a skip notification
 router.post('/skip', async (req, res) => {
@@ -39,13 +94,14 @@ router.post('/skip', async (req, res) => {
       patientName, null, scheduled_time, expected_count, taken_count, skipped_count, false
     );
 
-    const notification = await Notification.create({
-      recipient_id: recipientId,
-      subject_user_id: recipientId,
+    const notification = await createNotification({
+      recipientId: recipientId,
+      subjectUserId: recipientId,
       type: 'skipped_medicine',
       title: userAlert.title,
       message: userAlert.message,
-      requires_acknowledgement: true,
+      requiresAcknowledgement: true,
+      sendEmailTo: recipientUser?.notification_prefs?.email ? recipientUser.email : null,
     });
 
     console.log(`[Notifications] Skip notification created: ${userAlert.title}`);
@@ -60,13 +116,14 @@ router.post('/skip', async (req, res) => {
           patientName, caregiver.name, scheduled_time, expected_count, taken_count, skipped_count, true
         );
 
-        await Notification.create({
-          recipient_id: caregiver._id,
-          subject_user_id: recipientId,
+        await createNotification({
+          recipientId: caregiver._id,
+          subjectUserId: recipientId,
           type: 'missed_dose',
           title: cgAlert.title,
           message: cgAlert.message,
-          requires_acknowledgement: true,
+          requiresAcknowledgement: true,
+          sendEmailTo: caregiver.notification_prefs?.email ? caregiver.email : null,
         });
         console.log(`[Notifications] Caregiver ${caregiver.name} notified of skipped medicine via Gemini.`);
       }

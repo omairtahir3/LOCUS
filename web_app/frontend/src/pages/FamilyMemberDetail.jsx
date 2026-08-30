@@ -5,7 +5,7 @@ import {
   ArrowLeft, Pill, CheckCircle, XCircle, Clock, AlertTriangle,
   MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell, Camera
 } from 'lucide-react';
-import { formatSmartDate } from '../utils/dateUtils';
+import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -263,7 +263,7 @@ export default function FamilyMemberDetail() {
                 <tbody>
                   {schedule.map((s, i) => (
                     <tr key={i}>
-                      <td style={{ fontWeight: 600 }}>{s.scheduled_time}</td>
+                      <td style={{ fontWeight: 600 }}>{formatTime12Hour(s.scheduled_time)}</td>
                       <td>{s.medication_name}</td>
                       <td className="text-muted">{s.dosage}</td>
                       <td>

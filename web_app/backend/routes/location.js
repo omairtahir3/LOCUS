@@ -48,13 +48,19 @@ router.post('/', auth.protect, async (req, res) => {
 // Returns the most recent location for the authenticated user, or a monitored user
 router.get('/latest', auth.protect, async (req, res) => {
   try {
-    const targetUserId = req.query.user_id || req.user.id;
+    let targetUserId = req.query.user_id || req.user.id;
     
     // If requesting for another user, ensure they are monitored by the caregiver
     if (targetUserId !== req.user.id) {
       const caregiver = await User.findById(req.user.id);
       if (!caregiver.monitoring_users.includes(targetUserId)) {
         return res.status(403).json({ msg: 'Not authorized to view this user\'s location' });
+      }
+    } else {
+      // If no user_id passed and this is a caregiver, default to their first monitored user
+      const caregiver = await User.findById(req.user.id);
+      if (caregiver && caregiver.role === 'caregiver' && caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
+        targetUserId = caregiver.monitoring_users[0];
       }
     }
 

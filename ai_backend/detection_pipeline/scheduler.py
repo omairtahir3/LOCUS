@@ -274,6 +274,27 @@ async def _start_pipeline_for_session(session, user_id):
         session.pipeline_started = False
 
 
+import aiohttp
+
+async def _fire_system_alert(user_id, medication_id, status, notes):
+    """Fire-and-forget alert to Node.js backend to trigger emails/push notifications."""
+    try:
+        # Use short timeout to avoid blocking or piling up
+        timeout = aiohttp.ClientTimeout(total=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            payload = {
+                "user_id": str(user_id),
+                "medication_id": str(medication_id),
+                "status": status,
+                "notes": notes
+            }
+            # Fire and forget; if it fails, we just log and move on
+            async with session.post("http://localhost:5000/api/notifications/system-alert", json=payload) as response:
+                if response.status not in (200, 201):
+                    print(f"[Scheduler] Warning: Failed to send system alert. Status {response.status}")
+    except Exception as e:
+        print(f"[Scheduler] Warning: Could not reach Node.js for system alert: {e}")
+
 async def _log_session_result(session):
     """Log taken/missed for each medication in the session."""
     db = get_db()
@@ -290,8 +311,18 @@ async def _log_session_result(session):
         med_id = str(med["_id"])
         user_id = med["user_id"]
 
-        # Build scheduled_time as a full datetime for the session's correct day
-        sh, sm = map(int, session.time_slot.split(":"))
+        # Find which scheduled time for this med matches the session
+        session_times = session.time_slot.split(",")
+        matched_time = None
+        for st in med.get("scheduled_times", []):
+            if st in session_times:
+                matched_time = st
+                break
+        
+        if not matched_time:
+            matched_time = session_times[0]  # Safe fallback
+
+        sh, sm = map(int, matched_time.split(":"))
         scheduled_dt_local = session_date.replace(hour=sh, minute=sm)
         # Convert local naive time to UTC equivalent since PyMongo defaults to UTC
         scheduled_dt = scheduled_dt_local.astimezone(timezone.utc).replace(tzinfo=None)
@@ -348,6 +379,15 @@ async def _log_session_result(session):
 
         await db.medication_logs.insert_one(log_doc)
         print(f"[Scheduler] Logged '{status}' for {med['name']} at {session.time_slot}")
+        
+        # Fire email/push notification asynchronously
+        import asyncio
+        asyncio.create_task(_fire_system_alert(
+            user_id=user_id,
+            medication_id=med_id,
+            status=status,
+            notes=log_doc["notes"]
+        ))
 
 
 async def _backfill_expired_slots():
@@ -471,6 +511,15 @@ async def _backfill_expired_slots():
                 day_label = "yesterday" if day_offset == 1 else "today"
                 print(f"[Scheduler] [Backfill] Auto-logged 'camera_off' for {med['name']} at {sched_time} {day_label} "
                       f"(window ended at {window_end.strftime('%H:%M')})")
+                
+                # Fire email/push notification asynchronously
+                import asyncio
+                asyncio.create_task(_fire_system_alert(
+                    user_id=med["user_id"],
+                    medication_id=med["_id"],
+                    status="camera_off",
+                    notes=log_doc["notes"]
+                ))
 
 
 async def _ensure_stream_pipelines():
@@ -483,7 +532,8 @@ async def _ensure_stream_pipelines():
         async with httpx.AsyncClient() as client:
             resp = await client.get("http://127.0.0.1:9997/v3/paths/list", timeout=3)
         items = resp.json().get("items", [])
-    except Exception:
+    except Exception as e:
+        print(f"[Scheduler] WARNING: MediaMTX API not reachable ({e}). Is mediamtx running?")
         return  # mediamtx API not reachable — skip this tick
 
     # Extract user IDs from active stream paths (pattern: live/{user_id})
@@ -493,7 +543,12 @@ async def _ensure_stream_pipelines():
         if name.startswith("live/"):
             uid = name.split("live/", 1)[1]
             if uid:
-                streaming_user_ids.add(uid)
+                # Validate that uid is a valid 24-char hex ObjectId before using it
+                if len(uid) == 24 and all(c in '0123456789abcdef' for c in uid):
+                    streaming_user_ids.add(uid)
+                else:
+                    print(f"[Scheduler] WARNING: Ignoring invalid stream user_id '{uid}' "
+                          f"(length={len(uid)}, expected 24). Phone may be publishing to a wrong RTMP path.")
 
     # Spawn pipelines for newly-streaming users
     for uid in streaming_user_ids:
@@ -523,8 +578,7 @@ async def _check_schedules():
     """Main scheduler tick — check if any medication is due now (all users)."""
     global _active_sessions
 
-    # Ensure pipelines are running for all active camera streams
-    await _ensure_stream_pipelines()
+    # Stream pipelines are now handled by run_stream_monitor() in a separate task
 
     db = get_db()
     if db is None:
@@ -699,13 +753,25 @@ async def _check_schedules():
         await _start_pipeline_for_session(session, uid)
 
 
-# ─── Scheduler Runner ─────────────────────────────────────────────────────────
+async def run_stream_monitor():
+    """Continuously poll MediaMTX for new streams every 3 seconds."""
+    global _scheduler_running
+    print("[Scheduler] Stream monitor started (checking every 3s)")
+    while _scheduler_running:
+        try:
+            await _ensure_stream_pipelines()
+        except Exception as e:
+            print(f"[Scheduler] Stream monitor error: {e}")
+        await asyncio.sleep(3)
 
 async def run_scheduler():
     """Run the medication scheduler loop — checks every 60 seconds."""
     global _scheduler_running
     _scheduler_running = True
     print("[Scheduler] Multi-user medication scheduler started (checking every 60s)")
+    
+    # Start the faster stream monitor loop in the background
+    asyncio.create_task(run_stream_monitor())
 
     while _scheduler_running:
         try:

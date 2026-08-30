@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Navigation, AlertTriangle, Shield } from 'lucide-react';
 import LocationMapComponent from '../components/LocationMap';
-import api from '../utils/api';
+import api from '../services/api';
 
 export default function LocationMap() {
   const [locationData, setLocationData] = useState(null);

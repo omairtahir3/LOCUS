@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { medicationAPI, caregiverAPI } from '../services/api';
-import { Pill, Plus, Edit, Trash2, CheckCircle, XCircle, Clock, SkipForward } from 'lucide-react';
-import { formatSmartDate } from '../utils/dateUtils';
+import { Pill, Plus, Calendar, Clock, Edit2, Trash2, CheckCircle, XCircle, SkipForward } from 'lucide-react';
+import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 
 export default function Medications() {
   const [users, setUsers] = useState([]);
@@ -183,7 +183,7 @@ export default function Medications() {
                   <tbody>
                     {schedule.map((s, i) => (
                       <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{s.scheduled_time}</td>
+                        <td style={{ fontWeight: 600 }}>{formatTime12Hour(s.scheduled_time)}</td>
                         <td><strong>{s.medication_name}</strong></td>
                         <td className="text-muted">{s.dosage}</td>
                         <td>

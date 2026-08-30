@@ -27,8 +27,8 @@ class HomeScreenState extends State<HomeScreen> {
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
     
-    // Start tracking location if elderly
-    if (ApiService.userRole == 'elderly') {
+    // Start tracking location if elderly or user (normal user)
+    if (ApiService.userRole == 'elderly' || ApiService.userRole == 'user') {
       LocationService().startTracking().catchError((e) {
         print("Failed to start location tracking: $e");
       });
@@ -36,6 +36,7 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   bool get _isElderly => ApiService.userRole == 'elderly';
+  bool get _isMonitoredUser => ApiService.userRole == 'elderly' || ApiService.userRole == 'user';
 
   void reload() => _loadData();
 

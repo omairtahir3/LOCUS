@@ -5,6 +5,7 @@ import { Menu, X } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { useKeyframeSync } from '../../hooks/useKeyframeSync';
+import { useLocationTracker } from '../../hooks/useLocationTracker';
 
 export default function AppLayout() {
   const { user, token } = useAuth();
@@ -12,6 +13,8 @@ export default function AppLayout() {
   
   // Start syncing keyframes in the background
   useKeyframeSync();
+  // Start tracking location for monitored users (elderly/normal_user)
+  useLocationTracker();
 
   if (!token) return <Navigate to="/login" replace />;
 

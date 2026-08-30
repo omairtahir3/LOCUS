@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { relationshipsAPI, detectionAPI } from '../services/api';
-import { ChevronLeft, User, Calendar } from 'lucide-react';
+import { ChevronLeft, User, Calendar, MapPin } from 'lucide-react';
 import { formatSmartDate } from '../utils/dateUtils';
 
 export default function PastInteractions() {
@@ -77,9 +77,31 @@ export default function PastInteractions() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                     <div>
                       <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Social Interaction</span>
-                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                        {formatSmartDate(interaction.timestamp)}
-                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+                          {formatSmartDate(interaction.timestamp)}
+                        </p>
+                        {interaction.location && (
+                          <a 
+                            href={`https://www.google.com/maps/search/?api=1&query=${interaction.location.lat},${interaction.location.lng}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Lat: ${interaction.location.lat}, Lng: ${interaction.location.lng}`}
+                            style={{
+                              fontSize: '0.7rem', fontWeight: 700,
+                              color: '#4F46E5',
+                              background: 'rgba(79, 70, 229, 0.15)',
+                              padding: '2px 8px', borderRadius: 12,
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              cursor: 'pointer',
+                              textDecoration: 'none'
+                            }}
+                          >
+                            <MapPin size={10} />
+                            Location Logged
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
                   

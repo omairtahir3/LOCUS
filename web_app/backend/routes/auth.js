@@ -63,7 +63,8 @@ router.post('/google', async (req, res) => {
       idToken: token,
       audience: [
         process.env.GOOGLE_CLIENT_ID, 
-        '244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com' // locus-d2fe5 web client id
+        '454678423894-37c3svs59772gipj48k9qvfqbvfbas3u.apps.googleusercontent.com', // locus web client id
+        '244657783963-pgq6940j7ie9ethpto2v5t2470m86clq.apps.googleusercontent.com'  // locus android native client id
       ],
     });
     const { email, name, picture } = ticket.getPayload();

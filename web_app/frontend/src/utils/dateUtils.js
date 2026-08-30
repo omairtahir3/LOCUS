@@ -19,3 +19,14 @@ export function formatSmartDate(dateInput) {
     return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} at ${timeStr}`;
   }
 }
+
+export function formatTime12Hour(timeStr) {
+  if (!timeStr) return '';
+  const [hh, mm] = timeStr.split(':');
+  if (hh === undefined || mm === undefined) return timeStr;
+  let h = parseInt(hh, 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12;
+  h = h ? h : 12; // 0 should be 12
+  return `${h}:${mm} ${ampm}`;
+}

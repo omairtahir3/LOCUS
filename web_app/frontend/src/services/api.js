@@ -130,3 +130,5 @@ export const relationshipsAPI = {
   dismissFace: (data) => api.post('/relationships/dismiss', data),
   acknowledgeAction: (data) => api.post('/relationships/acknowledge', data)
 };
+
+export { api };

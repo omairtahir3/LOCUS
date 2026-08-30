@@ -35,7 +35,7 @@ class LocationService {
 
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 50, // Only trigger if moved by 50 meters
+      distanceFilter: 10, // 10 meters for reasonable production updates
     );
 
     // Cancel existing stream if any
@@ -43,10 +43,13 @@ class LocationService {
 
     // Initial position fetch
     try {
-      final position = await Geolocator.getCurrentPosition();
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 20), // 20s allows cold GPS lock indoors without blocking UI
+      );
       _sendLocationToBackend(position);
     } catch(e) {
-      print("Error getting initial position: $e");
+      print("High accuracy fetch timed out/failed: $e");
     }
 
     _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(

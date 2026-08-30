@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { userAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Pill, Plus, Edit3, Trash2, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
-import { formatSmartDate } from '../utils/dateUtils';
+import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -144,7 +144,7 @@ export default function UserMedications() {
                 <tbody>
                   {schedule.map((s, i) => (
                     <tr key={s._id || s.id || i}>
-                      <td style={{ fontWeight: 600 }}>{s.scheduled_time}</td>
+                      <td style={{ fontWeight: 600 }}>{formatTime12Hour(s.scheduled_time)}</td>
                       <td><strong>{s.medication_name}</strong></td>
                       <td className="text-muted">{s.dosage}</td>
                       <td>
@@ -294,7 +294,7 @@ export default function UserMedications() {
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {(med.scheduled_times || []).map((t, i) => (
-                            <span key={i} className="badge badge-primary">{t}</span>
+                            <span key={i} className="badge badge-primary">{formatTime12Hour(t)}</span>
                           ))}
                         </div>
                       </td>
