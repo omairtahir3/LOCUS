@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
+import 'location_map_screen.dart';
+import '../chat/chat_screen.dart';
 
 class CaregiverHomeScreen extends StatefulWidget {
   const CaregiverHomeScreen({super.key});
@@ -19,6 +22,65 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   void initState() {
     super.initState();
     _loadData();
+
+    // Initialize Socket for Caregiver
+    SocketService().init();
+    SocketService().connect();
+
+    SocketService().onSosAlert = (data) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.danger,
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.white, size: 36),
+                SizedBox(width: 10),
+                Text('EMERGENCY SOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: Text('${data['user_name']} has triggered an SOS! Immediate assistance required.', style: const TextStyle(color: Colors.white)),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  // Push to location map
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
+                  // Push to Chat Screen
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
+                    recipientId: data['user_id'],
+                    recipientName: data['user_name'],
+                    isEmergency: true,
+                  )));
+                },
+                child: const Text('VIEW LOCATION & CHAT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                },
+                child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
+              )
+            ],
+          )
+        );
+      }
+    };
+
+    SocketService().onSosResolved = (data) {
+      if (mounted) {
+        final resolver = data['resolved_by'] == 'user' ? 'the user themselves' : data['resolver_name'] ?? 'a caregiver';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Emergency for ${data['user_name']} was resolved by $resolver.'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 10),
+          )
+        );
+      }
+    };
   }
 
   Future<void> _loadData() async {
@@ -33,7 +95,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
       }
       List<dynamic> notifs = [];
       try {
-        notifs = await ApiService.getNotifications(limit: 5);
+        notifs = await ApiService.getNotifications(limit: 5, unreadOnly: true);
       } catch (_) {}
       setState(() { _users = users; _summaries = summaries; _notifications = notifs; });
     } catch (_) {} finally {

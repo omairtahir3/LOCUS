@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 
+import '../../services/selected_user_service.dart';
+
 class KeyframeAuditScreen extends StatefulWidget {
   const KeyframeAuditScreen({super.key});
 
@@ -18,25 +20,33 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
   List<dynamic> _unknownFaces = [];
   String? _expandedEventId;
 
+  void _onSelectedUserChanged() {
+    _loadData();
+  }
+
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 3, vsync: this);
+    SelectedUserService().addListener(_onSelectedUserChanged);
     _loadData();
   }
 
   @override
   void dispose() {
+    SelectedUserService().removeListener(_onSelectedUserChanged);
     _tabCtrl.dispose();
     super.dispose();
   }
+
+  String? get _selectedUser => SelectedUserService().selectedUser?['_id'];
 
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
       final results = await Future.wait([
-        ApiService.getMedicationFrames(limit: 100),
-        ApiService.getKeyframes(limit: 100),
+        ApiService.getMedicationFrames(limit: 100, userId: _selectedUser),
+        ApiService.getKeyframes(limit: 100, userId: _selectedUser),
         ApiService.getEventLogKeyframes(type: 'unknown_face', limit: 40),
       ]);
       if (mounted) {
@@ -90,6 +100,34 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Keyframe Audit'),
+        actions: [
+          AnimatedBuilder(
+            animation: SelectedUserService(),
+            builder: (context, child) {
+              final service = SelectedUserService();
+              if (service.monitoringUsers.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: service.selectedUser?['_id'],
+                    icon: const Icon(Icons.arrow_drop_down, color: Colors.black54),
+                    style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) service.setSelectedUser(newValue);
+                    },
+                    items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
+                      return DropdownMenuItem<String>(
+                        value: u['_id'],
+                        child: Text(u['name'] ?? 'Unknown'),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tabCtrl,
           indicatorColor: AppColors.primary,

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/location_service.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'map_picker_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -128,6 +131,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () {
                   Navigator.pushNamed(context, '/relationships-manage');
                 },
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          if (role == 'elderly') ...[
+            // Set Home Location
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.home, size: 18, color: AppColors.primary),
+                    const SizedBox(width: 10),
+                    const Text('Home Location', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(
+                    user?['home_location'] != null 
+                      ? 'Saved Location: ${user!['home_location']['lat'].toStringAsFixed(4)}, ${user!['home_location']['lng'].toStringAsFixed(4)}'
+                      : 'No home location saved. Needed for "Take Me Home" feature.',
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted)
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        try {
+                          final LatLng? pickedLocation = await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const MapPickerScreen()),
+                          );
+                          if (pickedLocation != null) {
+                            final res = await ApiService.setHomeLocation(pickedLocation.latitude, pickedLocation.longitude);
+                            if (res['statusCode'] == 200) {
+                              if (mounted) {
+                                setState(() { _user = ApiService.user; });
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Home location saved!')));
+                              }
+                            }
+                          }
+                        } catch (e) {
+                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        }
+                      },
+                      icon: const Icon(Icons.map, size: 18),
+                      label: const Text('Pick Home Location on Map'),
+                    ),
+                  )
+                ],
               ),
             ),
             const SizedBox(height: 20),

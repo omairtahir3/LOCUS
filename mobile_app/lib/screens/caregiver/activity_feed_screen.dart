@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../services/selected_user_service.dart';
 
 class ActivityFeedScreen extends StatelessWidget {
   const ActivityFeedScreen({super.key});
@@ -40,24 +41,51 @@ class ActivityFeedScreen extends StatelessWidget {
           // Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Activity Feed', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                SizedBox(height: 2),
-                Text('Behavioral monitoring & analysis', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-              ]),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.shield_outlined, size: 12, color: AppColors.primaryDark),
-                  const SizedBox(width: 4),
-                  Text('Coming Soon', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primaryDark)),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+                  Text('Activity Feed', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                  SizedBox(height: 2),
+                  Text('Behavioral monitoring & analysis', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 ]),
+              ),
+              const SizedBox(width: 8),
+              AnimatedBuilder(
+                animation: SelectedUserService(),
+                builder: (context, child) {
+                  final service = SelectedUserService();
+                  if (service.monitoringUsers.isEmpty) return const SizedBox.shrink();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isDense: true,
+                        value: service.selectedUser?['_id'],
+                        icon: const Icon(Icons.arrow_drop_down, color: Colors.black54, size: 18),
+                        style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                        onChanged: (String? newValue) {
+                          if (newValue != null) service.setSelectedUser(newValue);
+                        },
+                        items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
+                          return DropdownMenuItem<String>(
+                            value: u['_id'],
+                            child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 12)),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
           // Stat cards
           Row(

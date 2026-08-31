@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 
+import '../../services/selected_user_service.dart';
+
 class CaregiverMedicationsScreen extends StatefulWidget {
   const CaregiverMedicationsScreen({super.key});
 
@@ -10,42 +12,46 @@ class CaregiverMedicationsScreen extends StatefulWidget {
 }
 
 class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen> {
-  List<dynamic> _users = [];
-  String? _selectedUser;
   List<dynamic> _schedule = [];
   List<dynamic> _history = [];
-  bool _loadingUsers = true;
   bool _loadingData = false;
+
+  void _onSelectedUserChanged() {
+    if (mounted) {
+      setState(() {});
+      _loadMedData();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadUsers();
+    SelectedUserService().addListener(_onSelectedUserChanged);
+    _loadMedData();
   }
 
-  Future<void> _loadUsers() async {
-    setState(() => _loadingUsers = true);
-    try {
-      final users = await ApiService.getMonitoredUsers();
-      setState(() {
-        _users = users;
-        if (users.isNotEmpty) _selectedUser = users[0]['_id'];
-      });
-      if (_selectedUser != null) _loadMedData();
-    } catch (_) {} finally {
-      setState(() => _loadingUsers = false);
-    }
+  @override
+  void dispose() {
+    SelectedUserService().removeListener(_onSelectedUserChanged);
+    super.dispose();
   }
+
+  String? get _selectedUser => SelectedUserService().selectedUser?['_id'];
 
   Future<void> _loadMedData() async {
-    if (_selectedUser == null) return;
+    if (_selectedUser == null) {
+      if (mounted) setState(() { _schedule = []; _history = []; });
+      return;
+    }
     setState(() => _loadingData = true);
     try {
       final schedule = await ApiService.getSchedule(userId: _selectedUser);
       final history = await ApiService.getDoseHistory(userId: _selectedUser, limit: 20);
-      setState(() { _schedule = schedule; _history = history; });
+      if (mounted) {
+        setState(() { _schedule = schedule; _history = history; });
+      }
     } catch (_) {} finally {
-      setState(() => _loadingData = false);
+      if (mounted) setState(() => _loadingData = false);
     }
   }
 
@@ -88,46 +94,58 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
             // Header
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Medications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                  SizedBox(height: 2),
-                  Text('Track schedules & adherence', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                ]),
-                if (_users.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _selectedUser,
-                        items: _users.map<DropdownMenuItem<String>>((u) {
-                          return DropdownMenuItem(
-                            value: u['_id'] as String,
-                            child: Text(u['name'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          );
-                        }).toList(),
-                        onChanged: (v) {
-                          setState(() => _selectedUser = v);
-                          _loadMedData();
-                        },
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+                    Text('Medications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                    SizedBox(height: 2),
+                    Text('Schedules & History', style: TextStyle(color: Colors.black54, fontSize: 13)),
+                  ]),
+                ),
+                const SizedBox(width: 8),
+                AnimatedBuilder(
+                  animation: SelectedUserService(),
+                  builder: (context, child) {
+                    final service = SelectedUserService();
+                    if (service.monitoringUsers.isEmpty) return const SizedBox.shrink();
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
                       ),
-                    ),
-                  ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isDense: true,
+                          value: service.selectedUser?['_id'],
+                          icon: const Icon(Icons.arrow_drop_down, color: Colors.black54, size: 18),
+                          style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) service.setSelectedUser(newValue);
+                          },
+                          items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
+                            return DropdownMenuItem<String>(
+                              value: u['_id'],
+                              child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 12)),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
-            if (_loadingUsers)
+            if (SelectedUserService().isLoading)
               const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()))
-            else if (_users.isEmpty)
+            else if (SelectedUserService().monitoringUsers.isEmpty)
               _emptyState('No family members', 'Link family members to view their medications.', Icons.medication_outlined)
             else if (_selectedUser == null)
-              _emptyState('Select a family member', 'Choose from the dropdown above.', Icons.medication_outlined)
+              _emptyState('Select a family member', 'Choose from the dropdown in the header.', Icons.medication_outlined)
             else ...[
               // Today's Schedule
               _sectionHeader("Today's Schedule", '${_schedule.length} doses'),

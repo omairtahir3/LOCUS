@@ -13,6 +13,7 @@ const detectionRoutes    = require('./routes/detection');
 const eventLogRoutes     = require('./routes/eventLogs');
 const relationshipRoutes = require('./routes/relationships');
 const locationRoutes     = require('./routes/location');
+const userRoutes         = require('./routes/users');
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use('/api/detection',     detectionRoutes);
 app.use('/api/event-logs',    eventLogRoutes);
 app.use('/api/relationships', relationshipRoutes);
 app.use('/api/location',      locationRoutes);
+app.use('/api/users',         userRoutes);
 
 // Health check
 app.get('/', (req, res) => res.json({
@@ -56,5 +58,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error', details: err.message });
 });
 
+const http = require('http');
+const server = http.createServer(app);
+
+// Initialize Socket.io
+const socketUtils = require('./utils/socket');
+socketUtils.init(server);
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard backend running on http://0.0.0.0:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Dashboard backend running on http://0.0.0.0:${PORT}`));

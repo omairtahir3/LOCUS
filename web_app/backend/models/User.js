@@ -26,6 +26,11 @@ const UserSchema = new mongoose.Schema({
 
   phone:        { type: String, default: null },
   camera_stream_url: { type: String, default: null },  // RTSP/RTMP camera URL for this elderly user's AI pipeline
+  home_location: {
+    lat: { type: Number },
+    lng: { type: Number },
+    address: { type: String }
+  },
   
   // AI Confidence Thresholds Override
   confidence_thresholds: {
@@ -43,6 +48,8 @@ const UserSchema = new mongoose.Schema({
     }
   },
   is_active:    { type: Boolean, default: true },
+  emergency_status: { type: Boolean, default: false },
+  last_emergency_time: { type: Date, default: null },
 }, { timestamps: true });
 
 const os = require('os');

@@ -2,9 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../chat/chat_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/location_service.dart';
+import '../../services/socket_service.dart';
 import '../caregiver/location_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,12 +20,18 @@ class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _summary;
   List<dynamic> _schedule = [];
   bool _loading = true;
+  bool _isEmergencyActive = false;
 
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    
+    // Connect to websocket so Elderly users can chat
+    SocketService().init();
+    SocketService().connect();
+    
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
     
@@ -39,6 +47,22 @@ class HomeScreenState extends State<HomeScreen> {
   bool get _isMonitoredUser => ApiService.userRole == 'elderly' || ApiService.userRole == 'user';
 
   void reload() => _loadData();
+
+  String _formatTime12h(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return '';
+    try {
+      final parts = timeStr.split(':');
+      if (parts.length < 2) return timeStr;
+      int hour = int.parse(parts[0]);
+      int minute = int.parse(parts[1]);
+      final ampm = hour >= 12 ? 'PM' : 'AM';
+      if (hour == 0) hour = 12;
+      else if (hour > 12) hour -= 12;
+      return '$hour:${minute.toString().padLeft(2, '0')} $ampm';
+    } catch (_) {
+      return timeStr;
+    }
+  }
 
   @override
   void dispose() {
@@ -88,10 +112,15 @@ class HomeScreenState extends State<HomeScreen> {
             // AI Camera Banner
             _buildRtmpBanner(),
             const SizedBox(height: 20),
+            
+            if (_isElderly)
+              _buildSOSSection(),
+            if (_isElderly)
+              const SizedBox(height: 20),
 
-            if (!_isElderly)
+            if (!_isMonitoredUser)
               _buildCaregiverLocationCard(),
-            if (!_isElderly)
+            if (!_isMonitoredUser)
               const SizedBox(height: 20),
 
             // Stats cards
@@ -140,6 +169,140 @@ class HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSOSSection() {
+    if (_isEmergencyActive) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.danger,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: AppColors.danger.withAlpha(100), blurRadius: 20, spreadRadius: 5)
+          ],
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 64),
+            const SizedBox(height: 12),
+            const Text("EMERGENCY ACTIVE", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+            const SizedBox(height: 8),
+            const Text("Help is on the way. Your caregiver has been notified of your location.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 14)),
+            const SizedBox(height: 24),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                ElevatedButton(
+                  onPressed: () async {
+                    try {
+                      await ApiService.cancelEmergency();
+                      if (mounted) setState(() => _isEmergencyActive = false);
+                    } catch (e) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.danger,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                  child: const Text("I'm Safe Now", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final home = ApiService.user?['home_location'];
+                    if (home != null && home['lat'] != null && home['lng'] != null) {
+                      final url = 'https://www.google.com/maps/dir/?api=1&destination=${home['lat']},${home['lng']}&travelmode=walking';
+                      if (await canLaunchUrl(Uri.parse(url))) {
+                        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      } else {
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not launch maps')));
+                      }
+                    } else {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Home location not set in Settings')));
+                    }
+                  },
+                  icon: const Icon(Icons.home),
+                  label: const Text("Take Me Home", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () {
+                // If there is at least one linked caregiver, open chat with the first one for now
+                final caregivers = ApiService.user?['caregiver_ids'];
+                if (caregivers != null && caregivers.isNotEmpty) {
+                  final firstCaregiverId = caregivers[0] is Map ? caregivers[0]['_id'] : caregivers[0];
+                  final caregiverName = caregivers[0] is Map ? caregivers[0]['name'] : 'Caregiver';
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
+                    recipientId: firstCaregiverId,
+                    recipientName: caregiverName,
+                    isEmergency: true,
+                  )));
+                } else {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No caregivers linked.')));
+                }
+              },
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text("Chat with Caregiver", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.surface,
+                foregroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () async {
+        try {
+          final pos = await LocationService().getCurrentPosition();
+          if (pos != null) {
+            await ApiService.triggerEmergency(pos.latitude, pos.longitude);
+            if (mounted) setState(() => _isEmergencyActive = true);
+          } else {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not acquire location')));
+          }
+        } catch (e) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        }
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [AppColors.danger, Color(0xFFD32F2F)]),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: AppColors.danger.withAlpha(80), blurRadius: 15, offset: const Offset(0, 5))
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.sos, color: Colors.white, size: 36),
+            SizedBox(width: 12),
+            Text("I'm Lost / Need Help", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -304,16 +467,15 @@ class HomeScreenState extends State<HomeScreen> {
               children: [
                 const Text('Next Dose', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 2),
-                Text(next['medication_name'] ?? 'Medication', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 17)),
-                Text('${next['dosage'] ?? ''} • ${next['scheduled_time'] ?? ''}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(next['medication_name'] ?? 'Medication', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 17))),
+                FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('${next['dosage'] ?? ''} • ${_formatTime12h(next['scheduled_time'] as String?)}', style: const TextStyle(color: Colors.white70, fontSize: 13))),
               ],
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-            child: Text(next['scheduled_time'] ?? '', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 14)),
+            child: Text(_formatTime12h(next['scheduled_time'] as String?), style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 14)),
           ),
         ],
       ),
@@ -363,139 +525,156 @@ class HomeScreenState extends State<HomeScreen> {
       case 'snoozed': statusColor = AppColors.warning; statusIcon = Icons.snooze; break;
       default:        statusColor = AppColors.textMuted; statusIcon = Icons.schedule; break;
     }
-
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
             child: Icon(Icons.medication_outlined, color: statusColor, size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(dose['medication_name'] ?? 'Medication', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                const SizedBox(height: 2),
-                Text('${dose['dosage'] ?? ''} • ${dose['scheduled_time'] ?? ''}',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-              ],
-            ),
-          ),
-          if (status == 'needs_verification')
-            _isElderly
-              ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
-                      const SizedBox(width: 4),
-                      Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    GestureDetector(
-                      onTap: () => _logDose(dose, 'taken'),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                        child: const Icon(Icons.check, color: AppColors.success, size: 18),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          dose['medication_name'] ?? 'Medication', 
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () => _logDose(dose, 'scheduled'),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                        child: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                    if (status == 'needs_verification')
+                      _isMonitoredUser
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
+                                const SizedBox(width: 4),
+                                Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
+                              ],
+                            ),
+                          )
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              GestureDetector(
+                                onTap: () => _logDose(dose, 'taken'),
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                                  child: const Icon(Icons.check, color: AppColors.success, size: 16),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () => _logDose(dose, 'scheduled'),
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                                  child: const Icon(Icons.close, color: AppColors.danger, size: 16),
+                                ),
+                              ),
+                            ],
+                          )
+                    else if (status == 'scheduled' || status == 'pending' || status == 'snoozed')
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!_isMonitoredUser) ...[
+                            GestureDetector(
+                              onTap: () => _logDose(dose, 'taken'),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(6)),
+                                child: const Icon(Icons.check, color: AppColors.success, size: 16),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(6)),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(statusIcon, size: 12, color: statusColor),
+                                const SizedBox(width: 4),
+                                Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () async {
+                              try {
+                                final logId = dose['_id'] ?? dose['id'];
+                                if (logId != null) {
+                                  await ApiService.snoozeLog(logId.toString(), minutes: 10);
+                                  _loadData();
+                                }
+                              } catch (_) {
+                                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to snooze')));
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppColors.warning.withAlpha(80))),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.snooze, size: 12, color: AppColors.warning),
+                                  const SizedBox(width: 4),
+                                  Text('SNOOZE', style: TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.w700)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(statusIcon, size: 14, color: statusColor),
+                            const SizedBox(width: 4),
+                            Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
-                )
-          else if (status == 'scheduled' || status == 'pending' || status == 'snoozed')
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!_isElderly) ...[
-                  GestureDetector(
-                    onTap: () => _logDose(dose, 'taken'),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                      child: const Icon(Icons.check, color: AppColors.success, size: 18),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                  decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(statusIcon, size: 14, color: statusColor),
-                      const SizedBox(width: 4),
-                      Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                    ],
-                  ),
                 ),
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () async {
-                    try {
-                      final logId = dose['_id'] ?? dose['id'];
-                      if (logId != null) {
-                        await ApiService.snoozeLog(logId.toString(), minutes: 10);
-                        _loadData();
-                      }
-                    } catch (_) {
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to snooze')));
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.warning.withAlpha(80))),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.snooze, size: 14, color: AppColors.warning),
-                        const SizedBox(width: 4),
-                        Text('SNOOZE', style: TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
+                const SizedBox(height: 6),
+                Text(
+                  '${dose['dosage'] ?? ''} • ${_formatTime12h(dose['scheduled_time'] as String?)}', 
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500)
                 ),
               ],
-            )
-          else
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(statusIcon, size: 14, color: statusColor),
-                  const SizedBox(width: 4),
-                  Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                ],
-              ),
             ),
+          ),
         ],
       ),
     );

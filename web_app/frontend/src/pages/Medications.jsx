@@ -2,25 +2,23 @@ import { useState, useEffect } from 'react';
 import { medicationAPI, caregiverAPI } from '../services/api';
 import { Pill, Plus, Calendar, Clock, Edit2, Trash2, CheckCircle, XCircle, SkipForward } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import UserSelector from '../components/Layout/UserSelector';
 
 export default function Medications() {
-  const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState('');
-  const [medications, setMedications] = useState([]);
+  const selectedUserContext = useSelectedUser();
+  const selectedUser = selectedUserContext?.selectedUser?._id;
+  const monitoringUsers = selectedUserContext?.monitoringUsers || [];
+  
   const [schedule, setSchedule] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [historyData, setHistoryData] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    caregiverAPI.getUsers().then(res => {
-      const list = res.data || [];
-      setUsers(list);
-      if (list.length > 0) setSelectedUser(list[0]._id);
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (!selectedUser) return;
+    if (!selectedUser) {
+      setLoading(false);
+      return;
+    }
     loadMedData();
 
     // Refresh every 30s — skip when tab is hidden
@@ -33,13 +31,16 @@ export default function Medications() {
 
   const loadMedData = async () => {
     try {
+      setLoading(true);
       const [schRes, histRes] = await Promise.all([
         medicationAPI.getSchedule(selectedUser),
         medicationAPI.getHistory({ userId: selectedUser, limit: 20 }),
       ]);
       setSchedule(schRes.data || []);
       setHistoryData(histRes.data || []);
-    } catch {}
+    } catch {} finally {
+      setLoading(false);
+    }
   };
 
   const markAsTaken = async (item, isHistory = false) => {
@@ -127,22 +128,12 @@ export default function Medications() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 className="page-title">Medication Management</h2>
-          <p className="page-description">Track medication schedules and adherence</p>
+          <p className="page-description">Schedules, adherence tracking, and history</p>
         </div>
-        <select
-          className="form-select"
-          value={selectedUser}
-          onChange={e => setSelectedUser(e.target.value)}
-          style={{ width: '100%', maxWidth: 240 }}
-        >
-          <option value="">Select Family Member</option>
-          {users.map(u => (
-            <option key={u._id} value={u._id}>{u.name}</option>
-          ))}
-        </select>
+        <UserSelector />
       </div>
 
       {!selectedUser ? (

@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../services/api_service.dart';
+import '../../services/selected_user_service.dart';
+import '../../services/socket_service.dart';
+import '../chat/chat_screen.dart';
 
 class LocationMapScreen extends StatefulWidget {
   final String? targetUserId;
@@ -22,17 +25,58 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
   String? _error;
   Timer? _refreshTimer;
   DateTime? _lastUpdated;
+  Map<String, dynamic>? _sosData;
+  
+  void _onSelectedUserChanged() {
+    _fetchLocation();
+  }
 
   @override
   void initState() {
     super.initState();
+    SelectedUserService().addListener(_onSelectedUserChanged);
     _fetchLocation();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchLocation());
+    
+    // Subscribe to socket
+    final socket = SocketService();
+    socket.onLocationUpdate = (data) {
+      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+      if (data['user_id'] == selectedId && mounted) {
+        setState(() {
+          _currentPosition = LatLng(data['lat'], data['lng']);
+          _lastUpdated = data['timestamp'] != null ? DateTime.parse(data['timestamp']) : DateTime.now();
+        });
+        _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
+      }
+    };
+    socket.onSosAlert = (data) {
+      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+      if (data['user_id'] == selectedId && mounted) {
+        setState(() {
+          _sosData = data;
+          _currentPosition = LatLng(data['location']['lat'], data['location']['lng']);
+          _lastUpdated = DateTime.now();
+        });
+        _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
+      }
+    };
+    socket.onSosResolved = (data) {
+      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+      if (data['user_id'] == selectedId && mounted) {
+        setState(() { _sosData = null; });
+      }
+    };
   }
 
   @override
   void dispose() {
+    SelectedUserService().removeListener(_onSelectedUserChanged);
     _refreshTimer?.cancel();
+    final socket = SocketService();
+    socket.onLocationUpdate = null;
+    socket.onSosAlert = null;
+    socket.onSosResolved = null;
     super.dispose();
   }
 
@@ -40,16 +84,15 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     try {
       final token = ApiService.token;
       if (token == null) {
-        setState(() {
-          _error = 'Not authenticated';
-          _isLoading = false;
-        });
+        if (mounted) setState(() { _error = 'Not authenticated'; _isLoading = false; });
         return;
       }
 
       String endpoint = '${ApiService.baseUrl}/location/latest';
-      if (widget.targetUserId != null) {
-        endpoint += '?user_id=${widget.targetUserId}';
+      
+      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+      if (selectedId != null) {
+        endpoint += '?user_id=$selectedId';
       }
 
       final response = await http.get(
@@ -102,8 +145,102 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Live Location'),
+        actions: [
+          AnimatedBuilder(
+            animation: SelectedUserService(),
+            builder: (context, child) {
+              final service = SelectedUserService();
+              if (service.monitoringUsers.isEmpty) return const SizedBox.shrink();
+              
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: service.selectedUser?['_id'],
+                    icon: const Icon(Icons.arrow_drop_down, color: Colors.black54),
+                    style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        service.setSelectedUser(newValue);
+                      }
+                    },
+                    items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
+                      return DropdownMenuItem<String>(
+                        value: u['_id'],
+                        child: Text(u['name'] ?? 'Unknown'),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
-      body: _buildBody(),
+      body: Column(
+        children: [
+          if (_sosData != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.red,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.warning, color: Colors.white),
+                      const SizedBox(width: 8),
+                      Text(
+                        'EMERGENCY SOS: ${_sosData!['user_name']}',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Location updated automatically.', style: TextStyle(color: Colors.white)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, foregroundColor: Colors.white, side: const BorderSide(color: Colors.white)),
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
+                            recipientId: _sosData!['user_id'],
+                            recipientName: _sosData!['user_name'],
+                            isEmergency: true,
+                          )));
+                        },
+                        child: const Text('OPEN CHAT'),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.red),
+                          onPressed: () async {
+                            try {
+                              await http.delete(
+                                Uri.parse('${ApiService.baseUrl}/users/${_sosData!['user_id']}/emergency'),
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': 'Bearer ${ApiService.token}',
+                                },
+                              );
+                              if (mounted) setState(() { _sosData = null; });
+                            } catch (e) {
+                              print(e);
+                            }
+                          },
+                          child: const Text('RESOLVE'),
+                        ),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          Expanded(child: _buildBody()),
+        ],
+      ),
     );
   }
 

@@ -6,6 +6,8 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { useKeyframeSync } from '../../hooks/useKeyframeSync';
 import { useLocationTracker } from '../../hooks/useLocationTracker';
+import { useSocketSOS } from '../../hooks/useSocketSOS';
+import ChatPanel from '../Chat/ChatPanel';
 
 export default function AppLayout() {
   const { user, token } = useAuth();
@@ -15,8 +17,15 @@ export default function AppLayout() {
   useKeyframeSync();
   // Start tracking location for monitored users (elderly/normal_user)
   useLocationTracker();
+  // Listen for SOS events (for caregivers)
+  const { socket, activeSOS, setActiveSOS } = useSocketSOS();
+  
+  // State for manually opened chats
+  const [activeChat, setActiveChat] = useState(null);
 
   if (!token) return <Navigate to="/login" replace />;
+
+  const chatProps = activeSOS || activeChat;
 
   return (
     <div className="app-layout">
@@ -30,8 +39,29 @@ export default function AppLayout() {
 
       <Sidebar isMobileOpen={isMobileOpen} closeMobile={() => setIsMobileOpen(false)} />
 
-      <main className="main-content">
-        <Outlet />
+      <main className="main-content" style={{ display: 'flex', flexDirection: 'row' }}>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <Outlet context={{ 
+            socket, 
+            openChat: (userId, userName) => setActiveChat({ userId, userName, isEmergency: false }),
+            openEmergencyChat: (userId, userName) => setActiveChat({ userId, userName, isEmergency: true })
+          }} />
+        </div>
+        
+        {chatProps && (
+          <div style={{ width: 350, borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+            <ChatPanel 
+              socket={socket}
+              recipientId={chatProps.userId}
+              recipientName={chatProps.userName}
+              isEmergency={chatProps.isEmergency}
+              onClose={() => {
+                if (activeSOS) setActiveSOS(null);
+                if (activeChat) setActiveChat(null);
+              }}
+            />
+          </div>
+        )}
       </main>
     </div>
   );

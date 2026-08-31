@@ -41,6 +41,8 @@ export const authAPI = {
   googleLogin: (token, role, confirmRole = false) => api.post('/auth/google', { token, role, confirmRole }),
   getRtmpHost: () => api.get('/auth/rtmp-host'),
   updatePreferences: (data) => api.put('/auth/preferences', data),
+  setHomeLocation: (data) => api.put('/users/me/home_location', data),
+  getChatHistory: (userId) => api.get(`/users/chat/${userId}`),
 };
 
 // ── Medications ──────────────────────────────────────────────────────────────

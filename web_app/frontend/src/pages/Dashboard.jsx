@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
 import { caregiverAPI, notificationAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { openChat } = useOutletContext();
 
   useEffect(() => {
     loadData();
@@ -31,7 +32,7 @@ export default function Dashboard() {
     try {
       const [usersRes, notifsRes] = await Promise.all([
         caregiverAPI.getUsers(),
-        notificationAPI.getAll({ limit: 5 }),
+        notificationAPI.getAll({ limit: 5, unread_only: true }),
       ]);
       const userList = usersRes.data || [];
       setUsers(userList);
@@ -339,9 +340,14 @@ export default function Dashboard() {
                         <h4>{u.name}</h4>
                         <p>{u.email}</p>
                       </div>
-                      <Link to={`/family/${u._id}`} className="btn btn-icon btn-ghost btn-sm">
-                        <ArrowUpRight size={18} />
-                      </Link>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => openChat(u._id, u.name)} className="btn btn-icon btn-ghost btn-sm" title="Open Chat">
+                          <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        </button>
+                        <Link to={`/family/${u._id}`} className="btn btn-icon btn-ghost btn-sm">
+                          <ArrowUpRight size={18} />
+                        </Link>
+                      </div>
                     </div>
                     
                     <div>

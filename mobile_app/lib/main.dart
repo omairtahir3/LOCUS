@@ -18,12 +18,13 @@ import 'screens/caregiver/caregiver_home_screen.dart';
 import 'screens/caregiver/family_members_screen.dart';
 import 'screens/caregiver/medications_screen.dart';
 import 'screens/caregiver/notifications_screen.dart';
-import 'screens/caregiver/location_screen.dart';
+import 'screens/caregiver/location_map_screen.dart';
 import 'screens/caregiver/activity_feed_screen.dart';
 
 import 'screens/caregiver/keyframe_audit_screen.dart';
 import 'screens/memory/past_interactions_screen.dart';
 import 'screens/settings/relationships_manage_screen.dart';
+import 'services/selected_user_service.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -116,6 +117,9 @@ class _MainShellState extends State<MainShell> {
   void initState() {
     super.initState();
     _setupFirebaseMessaging();
+    if (ApiService.userRole == 'caregiver') {
+      SelectedUserService().initialize();
+    }
   }
 
   Future<void> _setupFirebaseMessaging() async {
@@ -276,7 +280,7 @@ class _MoreScreen extends StatelessWidget {
           const SizedBox(height: 4),
           Text('Additional features', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const SizedBox(height: 20),
-          _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationScreen()),
+          _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationMapScreen(), wrapInScaffold: false),
           _moreTile(context, Icons.timeline_outlined, 'Activity Feed', 'Behavioral monitoring & analysis', AppColors.accent, const ActivityFeedScreen()),
 
           _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen(), wrapInScaffold: false),

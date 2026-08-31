@@ -116,7 +116,7 @@ class ApiService {
       Uri.parse('$baseUrl/auth/google'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'token': googleToken, 'role': role, 'confirmRole': confirmRole}),
-    );
+    ).timeout(const Duration(seconds: 10));
     final data = jsonDecode(res.body);
     if (res.statusCode == 200 && data['requiresRole'] != true) {
       final token = data['access_token'] ?? data['token'];
@@ -250,6 +250,30 @@ class ApiService {
     }
     return [];
   }
+
+  // ── Emergency (SOS) ────────────────────────────────────────────────────────
+  
+  static Future<void> triggerEmergency(double lat, double lng) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/users/me/emergency'),
+      headers: _headers,
+      body: jsonEncode({'lat': lat, 'lng': lng})
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Failed to trigger emergency: ${res.body}');
+    }
+  }
+  
+  static Future<void> cancelEmergency() async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/users/me/emergency'),
+      headers: _headers,
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Failed to cancel emergency: ${res.body}');
+    }
+  }
+
 
   static Future<Map<String, dynamic>> recordDose(String medicationId, String status, String scheduledTime, {String? notes}) async {
     final res = await http.post(
@@ -439,8 +463,8 @@ class ApiService {
     return {'notifications': [], 'unread_count': 0};
   }
 
-  static Future<List<dynamic>> getNotifications({int limit = 20}) async {
-    final data = await getNotificationsData(limit: limit);
+  static Future<List<dynamic>> getNotifications({int limit = 20, bool unreadOnly = false}) async {
+    final data = await getNotificationsData(limit: limit, unreadOnly: unreadOnly);
     return data['notifications'] ?? [];
   }
 
@@ -512,9 +536,10 @@ class ApiService {
     return {'is_running': false, 'buffer_size': 0};
   }
 
-  static Future<List<dynamic>> getKeyframes({int limit = 50}) async {
+  static Future<List<dynamic>> getKeyframes({int limit = 50, String? userId}) async {
+    final query = userId != null ? '&user_id=$userId' : '';
     final res = await http.get(
-      Uri.parse('$baseUrl/detection/keyframes?limit=$limit'),
+      Uri.parse('$baseUrl/detection/keyframes?limit=$limit$query'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -524,9 +549,10 @@ class ApiService {
     return [];
   }
 
-  static Future<List<dynamic>> getMedicationFrames({int limit = 50}) async {
+  static Future<List<dynamic>> getMedicationFrames({int limit = 50, String? userId}) async {
+    final query = userId != null ? '&user_id=$userId' : '';
     final res = await http.get(
-      Uri.parse('$baseUrl/detection/medication_frames?limit=$limit'),
+      Uri.parse('$baseUrl/detection/medication_frames?limit=$limit$query'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -644,5 +670,39 @@ class ApiService {
       body: jsonEncode({'eventId': eventId}),
     );
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  // ── Home Location & Chat ──────────────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> setHomeLocation(double lat, double lng, {String? address}) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/users/me/home_location'),
+      headers: _headers,
+      body: jsonEncode({
+        'lat': lat,
+        'lng': lng,
+        if (address != null) 'address': address,
+      }),
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (_user != null) {
+        _user!['home_location'] = data['home_location'];
+        await _prefs.setString('locus_user', jsonEncode(_user));
+      }
+      return {'statusCode': 200, 'data': data};
+    }
+    return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+  }
+
+  static Future<List<dynamic>> getChatHistory(String otherUserId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/users/chat/$otherUserId'), headers: _headers);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data is List ? data : [];
+      }
+    } catch (_) {}
+    return [];
   }
 }

@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { Bell, Search } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const pageTitles = {
   '/':              'Dashboard Overview',
@@ -18,15 +19,17 @@ const pageTitles = {
 export default function Topbar() {
   const location = useLocation();
   const path = location.pathname;
+  const { user } = useAuth();
 
   // Handle dynamic routes
   let title = pageTitles[path] || 'Dashboard';
   if (path.startsWith('/family/')) title = 'Family Member Details';
 
   return (
-    <header className="topbar" style={{ position: 'fixed', top: 0, left: '260px', width: 'calc(100vw - 260px)', display: 'flex', alignItems: 'center', paddingLeft: '40px', zIndex: 1000, backgroundColor: '#ffffff' }}>
+    <header className="topbar" style={{ position: 'fixed', top: 0, left: '260px', width: 'calc(100vw - 260px)', display: 'flex', alignItems: 'center', paddingLeft: '40px', zIndex: 1000, backgroundColor: '#ffffff', borderBottom: '1px solid var(--border)' }}>
       <h1 className="topbar-title" style={{ margin: 0, flex: 1 }}>{title}</h1>
-      <div className="topbar-right" style={{ position: 'absolute', right: '40px' }}>
+      <div className="topbar-right" style={{ position: 'absolute', right: '40px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+        
         <div style={{ position: 'relative' }}>
           <input
             type="text"

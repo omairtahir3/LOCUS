@@ -1,4 +1,5 @@
 import { Activity, Brain, Moon, Footprints, Shield, Coffee, Clock, TrendingUp } from 'lucide-react';
+import UserSelector from '../components/Layout/UserSelector';
 
 // Mock data for the activity feed
 const mockActivities = [
@@ -23,12 +24,12 @@ const typeColors = {
 export default function ActivityFeed() {
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 className="page-title">Activity Feed</h2>
           <p className="page-description">Behavioral monitoring and routine analysis</p>
         </div>
-        <span className="coming-soon-badge"><Shield size={12} /> Coming Soon</span>
+        <UserSelector />
       </div>
 
       <div className="grid-2">

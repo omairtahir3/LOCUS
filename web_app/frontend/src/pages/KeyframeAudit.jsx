@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { eventLogsAPI, relationshipsAPI, detectionAPI, caregiverAPI } from '../services/api';
 // Local IDB import removed
 import { useAuth } from '../context/AuthContext';
-import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User } from 'lucide-react';
+import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User, AlertTriangle } from 'lucide-react';
+import UserSelector from '../components/Layout/UserSelector';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -12,6 +13,7 @@ const PHASE_LABELS = {
 
 export default function KeyframeAudit() {
   const { user } = useAuth();
+  const { selectedUser, setSelectedUser } = useSelectedUser();
   const [keyframes, setKeyframes] = useState([]);
   const [evidenceFrames, setEvidenceFrames] = useState([]);
   const [unknownFaces, setUnknownFaces] = useState([]);
@@ -28,7 +30,6 @@ export default function KeyframeAudit() {
   const [filter, setFilter] = useState('all'); // 'all' | 'medicine_only'
   const [page, setPage] = useState(1);
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState('');
   const PER_PAGE = 12;
 
   useEffect(() => {
@@ -160,26 +161,14 @@ export default function KeyframeAudit() {
   }
 
   return (
-    <div>
-      <div className="page-header">
+    <div style={{ padding: '0 20px', maxWidth: '1400px', margin: '0 auto', marginBottom: '80px' }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 className="page-title">Keyframe Confidence Audit</h2>
           <p className="page-description">Per-frame AI evidence for medication intake verification</p>
         </div>
+        <UserSelector />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {user?.role === 'caregiver' && users.length > 0 && (
-            <select
-              className="form-select"
-              value={selectedUser}
-              onChange={e => setSelectedUser(e.target.value)}
-              style={{ width: '100%', maxWidth: 240 }}
-            >
-              <option value="">Select Family Member</option>
-              {users.map(u => (
-                <option key={u._id} value={u._id}>{u.name}</option>
-              ))}
-            </select>
-          )}
           <button
             className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('all')}
