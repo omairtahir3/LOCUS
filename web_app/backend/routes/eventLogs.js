@@ -4,7 +4,7 @@ const EventLog = require('../models/EventLog');
 const { protect: auth } = require('../middleware/auth');
 
 // GET /api/event-logs/memory-search
-// Only returns medication_intake and social_interaction, excluding rejected
+// Returns medication_intake, social_interaction and activity, excluding rejected
 router.get('/memory-search', auth, async (req, res) => {
   try {
     let userId = req.user.id;
@@ -17,11 +17,15 @@ router.get('/memory-search', auth, async (req, res) => {
       }
     }
 
-    const { type, limit = 50 } = req.query;
+    const { type, limit = 50, q } = req.query;
 
     const query = {
       user_id: userId,
-      event_type: { $in: ['medication_intake', 'social_interaction'] },
+      event_type: { $in: ['medication_intake', 'social_interaction', 'activity', 'object'] },
+      // scene_change events share event_type 'activity' but are raw motion-burst
+      // captures with no classification — they belong in Keyframe Audit, not a
+      // memory timeline, where they render as meaningless "Activity detected".
+      'details.action': { $ne: 'scene_change' },
       verification_status: { $ne: 'rejected' }
     };
 

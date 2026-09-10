@@ -14,7 +14,7 @@ class MemoryScreen extends StatefulWidget {
 class _MemoryScreenState extends State<MemoryScreen> {
   final _searchCtrl = TextEditingController();
   String _activeFilter = 'All';
-  final _filters = ['All', 'Medicine', 'People'];
+  final _filters = ['All', 'Medicine', 'People', 'Activity'];
   
   List<dynamic> _events = [];
   bool _isLoading = false;
@@ -107,6 +107,20 @@ class _MemoryScreenState extends State<MemoryScreen> {
             imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
             isFlagged: ev['is_flagged'] == true,
             personId: personId,
+            location: ev['location'],
+          );
+        } else if (ev['event_type'] == 'activity') {
+          final details = ev['details'];
+          return _MemoryItem(
+            id: ev['_id'],
+            title: (details is Map ? details['sentence'] : null) ?? 'Activity detected',
+            time: timeLabel,
+            icon: Icons.directions_run,
+            color: AppColors.warning,
+            group: groupLabel,
+            category: 'Activity',
+            imageUrl: ev['keyframe_id'] != null ? '${ApiService.baseUrl}/detection/keyframes/${ev['keyframe_id']}/image' : null,
+            isFlagged: ev['is_flagged'] == true,
             location: ev['location'],
           );
         }

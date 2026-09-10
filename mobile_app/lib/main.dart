@@ -25,6 +25,7 @@ import 'screens/caregiver/keyframe_audit_screen.dart';
 import 'screens/memory/past_interactions_screen.dart';
 import 'screens/settings/relationships_manage_screen.dart';
 import 'services/selected_user_service.dart';
+import 'services/fall_detection_service.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -119,7 +120,17 @@ class _MainShellState extends State<MainShell> {
     _setupFirebaseMessaging();
     if (ApiService.userRole == 'caregiver') {
       SelectedUserService().initialize();
+    } else if (ApiService.userRole == 'elderly' && !kIsWeb) {
+      FallDetectionService().startListening();
     }
+  }
+
+  @override
+  void dispose() {
+    if (ApiService.userRole == 'elderly' && !kIsWeb) {
+      FallDetectionService().stopListening();
+    }
+    super.dispose();
   }
 
   Future<void> _setupFirebaseMessaging() async {

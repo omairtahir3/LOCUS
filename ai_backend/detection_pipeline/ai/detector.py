@@ -38,7 +38,7 @@ class PillDetector:
         )
         self.input_name  = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
-        self.img_size    = self.input_shape[2]
+        self.img_size    = self.input_shape[2] if isinstance(self.input_shape[2], int) else 640
         print(f"Pill detection model loaded. Input shape: {self.input_shape}")
 
     def preprocess(self, frame):
@@ -50,11 +50,9 @@ class PillDetector:
         return img
 
     def preprocess_single(self, frame):
-        """Preprocess and pad to batch-8 for single-frame inference."""
+        """Preprocess a single frame for model input (dynamic batch size 1)."""
         img = self.preprocess(frame)
-        batch = np.zeros((8, 3, self.img_size, self.img_size), dtype=np.float32)
-        batch[0] = img
-        return batch
+        return np.expand_dims(img, axis=0)
 
     def postprocess(self, outputs, orig_h, orig_w, conf_threshold=PILL_CONFIDENCE_THRESHOLD):
         """Parse raw ONNX output into detection list."""
@@ -125,16 +123,20 @@ class PillDetector:
 
     def detect_batch(self, frames):
         """
-        Run detection across temporal buffer frames.
-        Packs up to 8 real frames per ONNX call to exploit the
-        model's fixed batch-8 input instead of wasting 7 slots on zeros.
+        Run detection across temporal buffer frames with dynamic batching.
+        Feeds the exact number of frames dynamically without padding blanks.
         """
+        if not frames:
+            return []
+
         results = []
         n = len(frames)
+        batch_size_chunk = 8
 
-        for chunk_start in range(0, n, 8):
-            chunk = frames[chunk_start:chunk_start + 8]
-            batch_tensor = np.zeros((8, 3, self.img_size, self.img_size), dtype=np.float32)
+        for chunk_start in range(0, n, batch_size_chunk):
+            chunk = frames[chunk_start:chunk_start + batch_size_chunk]
+            k = len(chunk)
+            batch_tensor = np.zeros((k, 3, self.img_size, self.img_size), dtype=np.float32)
             orig_sizes = []
 
             for j, frame_data in enumerate(chunk):
@@ -142,10 +144,10 @@ class PillDetector:
                 orig_sizes.append(frm.shape[:2])  # (h, w)
                 batch_tensor[j] = self.preprocess(frm)
 
-            # Single ONNX call for up to 8 frames
+            # Single ONNX call for exact k frames
             raw_outputs = self.session.run(None, {self.input_name: batch_tensor})
 
-            # raw_outputs[0] shape: (8, num_preds, 6) — parse each real frame
+            # raw_outputs[0] shape: (k, num_preds, 6) — parse each real frame
             for j, frame_data in enumerate(chunk):
                 orig_h, orig_w = orig_sizes[j]
                 # Extract single-frame output

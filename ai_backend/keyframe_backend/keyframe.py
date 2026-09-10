@@ -88,14 +88,20 @@ class KeyframeStorage:
         }
 
         try:
-
             with open(meta_path, "w") as f:
-
                 json.dump(meta, f, indent=2)
-
         except Exception as e:
-
             print(f"[KeyframeStorage.save] ✗ ERROR writing metadata: {e}")
+
+        # Tier-2 Asynchronous Daily Life Item Indexer
+        try:
+            try:
+                from ai_backend.detection_pipeline.ai.item_indexer import DailyItemIndexer
+            except ImportError:
+                from ai.item_indexer import DailyItemIndexer
+            DailyItemIndexer.get_instance().enqueue_keyframe(keyframe_id, frame, metadata)
+        except Exception:
+            pass
 
 
 
@@ -356,6 +362,26 @@ class SocialInteractionStorage(KeyframeStorage):
     """
     def __init__(self, storage_dir=SOCIAL_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
+
+
+ACTIVITY_STORAGE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "activities_storage"
+)
+
+class ActivityStorage(KeyframeStorage):
+    """
+    Persists activity detection frames to disk.
+    Storage layout:
+        activities_storage/
+            <user_id>/
+                <YYYY-MM-DD>/
+                    <uuid>.jpg
+                    <uuid>.json
+    """
+    def __init__(self, storage_dir=ACTIVITY_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
+        super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
+
 
 MEDICATION_EVIDENCE_STORAGE_DIR = os.path.join(
 

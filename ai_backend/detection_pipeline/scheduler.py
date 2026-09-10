@@ -39,6 +39,12 @@ _active_sessions = {}   # user_id -> VerificationSession (concurrent per user)
 _pipelines = {}          # user_id -> MedicationDetectionPipeline
 _pipeline_threads = {}   # user_id -> threading.Thread
 
+# user_id -> monotonic timestamp of the last failed construction attempt.
+# A pipeline that fails to build registers nothing, so without this the
+# 3s stream-monitor tick would rebuild (and reload every model) forever.
+_pipeline_spawn_failures = {}
+_SPAWN_RETRY_BACKOFF_SECONDS = 60
+
 
 async def _get_camera_url_for_user(user_id):
     """
@@ -72,14 +78,32 @@ def _spawn_pipeline_for_user(user_id, camera_url):
     existing_thread = _pipeline_threads.get(user_id)
     if existing_thread and existing_thread.is_alive():
         return _pipelines.get(user_id)
-    
-    pipeline = MedicationDetectionPipeline(
-        api_base_url="http://localhost:8000",
-        expected_medicine_count=0,
-        user_id=user_id,
-    )
+
+    import time as _time
+    last_failure = _pipeline_spawn_failures.get(user_id)
+    if last_failure is not None and (_time.monotonic() - last_failure) < _SPAWN_RETRY_BACKOFF_SECONDS:
+        return None
+
+    try:
+        pipeline = MedicationDetectionPipeline(
+            api_base_url="http://localhost:8000",
+            expected_medicine_count=0,
+            user_id=user_id,
+        )
+    except Exception as e:
+        # Construction failed, so nothing below registers this user. Record the
+        # failure to back the retry off, and surface the full stack — the caller
+        # only prints str(e), which hides where the failure actually came from.
+        import traceback
+        _pipeline_spawn_failures[user_id] = _time.monotonic()
+        print(f"[Scheduler] ERROR: pipeline construction failed for {user_id}: {e}")
+        print(f"[Scheduler] Retrying in {_SPAWN_RETRY_BACKOFF_SECONDS}s.")
+        traceback.print_exc()
+        return None
+
+    _pipeline_spawn_failures.pop(user_id, None)
     _pipelines[user_id] = pipeline
-    
+
     def _run_pipeline():
         """Run the pipeline with auto-reconnect on stream failure."""
         import time as _time
@@ -560,8 +584,10 @@ async def _ensure_stream_pipelines():
                 pipeline._stream_gone_since = None
             continue
         camera_url = f"rtsp://127.0.0.1:8554/live/{uid}"
-        _spawn_pipeline_for_user(uid, camera_url)
-        print(f"[Scheduler] Stream detected for {uid[:8]}… — pipeline started")
+        # _spawn_pipeline_for_user handles and logs its own failures; keep going
+        # so one user's bad pipeline can't skip other users or the teardown pass.
+        if _spawn_pipeline_for_user(uid, camera_url):
+            print(f"[Scheduler] Stream detected for {uid[:8]}… — pipeline started")
 
     # Stop pipelines whose stream has been gone for >30s
     for uid in list(_pipelines.keys()):
@@ -761,7 +787,9 @@ async def run_stream_monitor():
         try:
             await _ensure_stream_pipelines()
         except Exception as e:
+            import traceback
             print(f"[Scheduler] Stream monitor error: {e}")
+            traceback.print_exc()
         await asyncio.sleep(3)
 
 async def run_scheduler():

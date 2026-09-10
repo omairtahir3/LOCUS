@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import os
 
-from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR
+from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
 
@@ -101,7 +101,9 @@ async def get_keyframe_image(keyframe_id: str):
     matches = glob.glob(os.path.join(KEYFRAME_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
     if not matches:
         matches = glob.glob(os.path.join(SOCIAL_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
-        
+    if not matches:
+        matches = glob.glob(os.path.join(ACTIVITY_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
+
     if matches:
         img_path = matches[0]
     else:

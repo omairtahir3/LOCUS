@@ -11,7 +11,7 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 * **Complex Activity Recognition:** Recognizes multi-frame activities such as medication intake, doorway item-checks, and social interactions.
 * **Plugin-Based Architecture:** Easily extensible AI detection pipeline allowing new detection capabilities to be added without rebuilding the core.
 * **Confidence Scoring:** Analyzes full frame buffers to score confidence, reducing single-frame false positives. Auto-logs events at ≥85%, requests user confirmation at 70-84%, and discards below 70%.
-* **Smart Storage Management:** Auto-deletes stored keyframes after 24-42 hours unless explicitly flagged by the user or caregiver.
+* **Smart Storage Management:** Auto-deletes stored keyframes after 72 hours unless explicitly flagged by the user or caregiver.
 * **Unified Cloud Records:** Generates and uploads structured JSON event records containing timestamps, action types, confidence scores, GPS coordinates, and keyframe IDs.
 * **Adaptive AI Learning:** Learns individual user detection patterns over time, adjusting confidence thresholds to maximize accuracy. 
 * **Outdoor Contextual Awareness:** Automatically loosens confidence thresholds when outdoors to adapt to variable lighting and busy backgrounds. Tracks items exiting the house and alerts users/caregivers if items disappear.

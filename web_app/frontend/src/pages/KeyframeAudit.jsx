@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { eventLogsAPI, relationshipsAPI, detectionAPI, caregiverAPI } from '../services/api';
 // Local IDB import removed
 import { useAuth } from '../context/AuthContext';
+import { useSelectedUser } from '../context/SelectedUserContext';
 import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User, AlertTriangle } from 'lucide-react';
 import UserSelector from '../components/Layout/UserSelector';
 

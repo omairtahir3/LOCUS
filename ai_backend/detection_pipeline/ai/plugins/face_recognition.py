@@ -33,6 +33,8 @@ class FaceRecognitionPlugin(DetectorPlugin):
         self._ru_lock = threading.Lock()  # Protects recent_unknowns from concurrent access
         self.conversation_timeout_seconds = 300
         self.last_face_seen_time = 0.0
+        self._social_storage = None   # see _storages(): one instance, one cleanup thread
+        self._keyframe_storage = None
         
         # Load InsightFace Model (CPU for free-tier compatibility)
         self.app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
@@ -99,6 +101,18 @@ class FaceRecognitionPlugin(DetectorPlugin):
             print(f"[{self.model_name}] Error matching face: {e}")
             
         return None
+
+    def _storages(self):
+        """Lazily build one instance of each storage and reuse it.
+
+        KeyframeStorage.__init__ starts a cleanup daemon thread, so
+        constructing these per detection leaked a thread every event.
+        """
+        if self._social_storage is None:
+            from keyframe_backend.keyframe import SocialInteractionStorage, KeyframeStorage
+            self._social_storage = SocialInteractionStorage()
+            self._keyframe_storage = KeyframeStorage()
+        return self._social_storage, self._keyframe_storage
 
     def _calculate_frontality(self, kps: np.ndarray) -> float:
         """
@@ -249,8 +263,8 @@ class FaceRecognitionPlugin(DetectorPlugin):
                 # Emit SOCIAL_INTERACTION for known person
                 face_keyframe_id = str(uuid.uuid4())
                 try:
-                    from keyframe_backend.keyframe import SocialInteractionStorage, KeyframeStorage
-                    
+                    storage_soc, storage_gen = self._storages()
+
                     person_name = match.get('person_name', 'Unknown')
                     if isinstance(person_name, str):
                         person_name = person_name.strip()
@@ -268,11 +282,9 @@ class FaceRecognitionPlugin(DetectorPlugin):
                         metadata["relationship_type"] = rel_type
                     
                     # Store in social_storage
-                    storage_soc = SocialInteractionStorage()
                     storage_soc.save(face_keyframe_id, cropped_face, metadata)
-                    
+
                     # Store in keyframe_storage (Keyframe Audit)
-                    storage_gen = KeyframeStorage()
                     storage_gen.save(face_keyframe_id, cropped_face, metadata)
                     
                 except Exception as e:
@@ -310,8 +322,7 @@ class FaceRecognitionPlugin(DetectorPlugin):
                                 ev = self.db.eventlogs.find_one({"keyframe_id": ru.get("keyframe_id")})
                                 if ev and ev.get("verification_status") not in ["confirmed", "rejected"]:
                                     try:
-                                        from keyframe_backend.keyframe import KeyframeStorage
-                                        storage = KeyframeStorage()
+                                        _, storage = self._storages()
                                         storage.save(ru["keyframe_id"], cropped_face, {
                                             "user_id": str(context.user_id), 
                                             "source_frame": best_frame.get("id"),
@@ -338,16 +349,15 @@ class FaceRecognitionPlugin(DetectorPlugin):
                 if not is_recent:
                     # Save to disk and return result (outside the lock to avoid holding it during I/O)
                     try:
-                        from keyframe_backend.keyframe import SocialInteractionStorage, KeyframeStorage
-                        
+                        _, storage_gen = self._storages()
+
                         metadata = {
-                            "user_id": str(context.user_id), 
+                            "user_id": str(context.user_id),
                             "source_frame": best_frame.get("id"),
                             "type": "face_crop"
                         }
-                        
+
                         # Store in keyframe_storage (Keyframe Audit)
-                        storage_gen = KeyframeStorage()
                         storage_gen.save(face_keyframe_id, cropped_face, metadata)
                         
                     except Exception as e:

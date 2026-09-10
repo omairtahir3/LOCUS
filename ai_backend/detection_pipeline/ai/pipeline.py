@@ -66,12 +66,14 @@ class MedicationDetectionPipeline:
         from .core.policy import ConfidencePolicy
         from .plugins.medication import MedicationIntakePlugin
         from .plugins.face_recognition import FaceRecognitionPlugin
+        from .plugins.egocentric_activity import EgocentricActivityPlugin
         med_thresholds = (confidence_thresholds or {}).get("medication_intake", {})
         auto_v = med_thresholds.get("auto_verify", 0.85)
         conf = med_thresholds.get("confirm", 0.70)
         self.event_policy = ConfidencePolicy(auto_verify_threshold=auto_v, confirmation_threshold=conf)
         self.event_plugin = MedicationIntakePlugin()
         self.face_plugin = FaceRecognitionPlugin(similarity_threshold=0.65)
+        self.activity_plugin = EgocentricActivityPlugin()
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -135,6 +137,15 @@ class MedicationDetectionPipeline:
             self._attach_latest_location(db, doc, ts_now)
             db.eventlogs.insert_one(doc)
             print(f"[Pipeline] [DB-Log] Logged scene_change activity event for {self.user_id}")
+
+            # Tier-2 Asynchronous Daily Life Item Indexer (Passive indexing for Memory Search)
+            try:
+                from .item_indexer import DailyItemIndexer
+                DailyItemIndexer.get_instance().enqueue_keyframe(
+                    keyframe_id, None, {"user_id": str(self.user_id), "timestamp": ts_now.isoformat()}
+                )
+            except Exception as e:
+                print(f"[Pipeline] [ItemIndexer Hook Note] {e}")
         except Exception as e:
             print(f"[Pipeline] [DB-Log] Error logging scene change: {e}")
 
@@ -183,6 +194,44 @@ class MedicationDetectionPipeline:
             import traceback
             print(f"[Pipeline] [DB-Log] Error logging face event: {e}")
             traceback.print_exc()
+
+    def _log_activity_result_to_db(self, act_result):
+        """
+        Write an ACTIVITY event to the EventLog collection.
+        """
+        if not self.user_id:
+            return
+            
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            
+            # pipeline.py might import datetime, but let's be safe just in case
+            from datetime import datetime
+            ts_now = datetime.utcnow()
+            
+            confidence = act_result.confidence
+            kf_id = act_result.evidence_keyframe_ids[0] if act_result.evidence_keyframe_ids else None
+            event_type = act_result.action_type.value
+            
+            doc = {
+                "user_id": ObjectId(str(self.user_id)),
+                "event_type": event_type,
+                "timestamp": ts_now,
+                "confidence": confidence,
+                "details": act_result.attributes,
+                "keyframe_id": kf_id,
+                "createdAt": ts_now,
+                "updatedAt": ts_now
+            }
+            self._attach_latest_location(db, doc, ts_now)
+            db.eventlogs.insert_one(doc)
+            print(f"[Pipeline] [DB-Log] Logged activity event for {self.user_id}: {act_result.attributes.get('sentence', 'Unknown')}")
+        except Exception as e:
+            import traceback
+            print(f"[Pipeline] [DB-Log] Error logging activity event: {e}")
 
     def _log_detection_to_db(self, status, confidence, keyframe_id=None):
         """
@@ -1734,6 +1783,26 @@ class MedicationDetectionPipeline:
                             self._face_busy = False
                     
                     threading.Thread(target=_run_face_batch, daemon=True).start()
+
+                # Run Egocentric Activity Plugin
+                if not getattr(self, '_activity_busy', False):
+                    def _run_activity_batch():
+                        self._activity_busy = True
+                        try:
+                            act_buffer = list(self.extractor.buffer)
+                            if act_buffer:
+                                from .core.contracts import EventContext
+                                ctx = EventContext(user_id=self.user_id)
+                                act_result = self.activity_plugin.analyze(act_buffer, ctx)
+                                if act_result:
+                                    self._log_activity_result_to_db(act_result)
+                        except Exception as e:
+                            import traceback
+                            print('[Activity Detection Error] ' + traceback.format_exc())
+                        finally:
+                            self._activity_busy = False
+                    
+                    threading.Thread(target=_run_activity_batch, daemon=True).start()
 
                 # Display annotated frame if debugging
                 if display:

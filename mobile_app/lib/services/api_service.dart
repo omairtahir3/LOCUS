@@ -18,7 +18,9 @@ class ApiService {
     // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
     // and the laptop's actual IP for physical Android devices via Wi-Fi/USB.
     if (kIsWeb) return 'http://localhost:5000/api';
-    return 'http://192.168.1.13:5000/api';
+    // TEMP-FOR-VERIFICATION: routed through `adb reverse tcp:5000 tcp:5000`
+    // for the SOS bug-fix live test. Revert to the real LAN IP afterward.
+    return 'http://127.0.0.1:5000/api';
   }
 
   static late SharedPreferences _prefs;
@@ -189,6 +191,26 @@ class ApiService {
       await _prefs.setString('locus_user', jsonEncode(_user));
     } else {
       throw Exception('Failed to update preferences');
+    }
+  }
+
+  static Future<void> triggerEmergencySos({double? lat, double? lng}) async {
+    if (_token == null) throw Exception('Not authenticated');
+    
+    final body = <String, dynamic>{};
+    if (lat != null && lng != null) {
+      body['lat'] = lat;
+      body['lng'] = lng;
+    }
+    
+    final res = await http.post(
+      Uri.parse('$baseUrl/users/me/emergency'),
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token'},
+      body: jsonEncode(body),
+    );
+    
+    if (res.statusCode != 200) {
+      throw Exception('Failed to trigger SOS: ${res.body}');
     }
   }
 

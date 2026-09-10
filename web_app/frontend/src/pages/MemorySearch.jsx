@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin } from 'lucide-react';
+import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
-const FILTERS = ['All', 'Medicine', 'People'];
+const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
 
 export default function MemorySearch() {
   const [query, setQuery] = useState('');
@@ -99,6 +99,45 @@ export default function MemorySearch() {
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
         location: ev.location
       };
+    } else if (ev.event_type === 'activity') {
+      return {
+        id: ev._id,
+        keyframe_id: ev.keyframe_id,
+        title: ev.details?.sentence || 'Activity detected',
+        time: timeLabel,
+        icon: Activity,
+        color: 'var(--warning)',
+        group: groupLabel,
+        category: 'Activity',
+        confidence: ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '',
+        status: '',
+        hasImage: !!ev.keyframe_id,
+        is_flagged: !!ev.is_flagged,
+        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        location: ev.location
+      };
+    } else if (ev.event_type === 'object') {
+      const itemsList = ev.details?.item_names || (ev.details?.items ? ev.details.items.map(it => it.name) : []);
+      const titleText = itemsList.length > 0
+        ? `Spotted ${itemsList.slice(0, 3).join(', ')}${itemsList.length > 3 ? ` +${itemsList.length - 3} more` : ''}`
+        : (ev.details?.summary || 'Items detected');
+      return {
+        id: ev._id,
+        keyframe_id: ev.keyframe_id,
+        title: titleText,
+        time: timeLabel,
+        icon: Package,
+        color: '#6366f1',
+        group: groupLabel,
+        category: 'Objects',
+        confidence: ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '',
+        status: '✓ Logged',
+        hasImage: !!ev.keyframe_id,
+        is_flagged: !!ev.is_flagged,
+        image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        location: ev.location,
+        items: itemsList
+      };
     }
     return null;
   }).filter(Boolean);
@@ -155,7 +194,7 @@ export default function MemorySearch() {
                 padding: '6px 14px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 600,
                 whiteSpace: 'nowrap', transition: 'all 0.2s', border: 'none', cursor: 'pointer',
                 background: activeFilter === f
-                  ? (f === 'Medicine' ? 'var(--success)' : 'var(--primary)')
+                  ? (f === 'Medicine' ? 'var(--success)' : f === 'Activity' ? 'var(--warning)' : 'var(--primary)')
                   : 'var(--border-light)',
                 color: activeFilter === f ? '#fff' : 'var(--text-secondary)'
               }}

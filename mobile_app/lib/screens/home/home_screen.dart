@@ -31,7 +31,8 @@ class HomeScreenState extends State<HomeScreen> {
     // Connect to websocket so Elderly users can chat
     SocketService().init();
     SocketService().connect();
-    
+    SocketService().addSosResolvedListener(_handleSosResolved);
+
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
     
@@ -67,7 +68,23 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    SocketService().removeSosResolvedListener(_handleSosResolved);
     super.dispose();
+  }
+
+  void _handleSosResolved(Map<String, dynamic> data) {
+    // Fires when a caregiver resolves this user's SOS remotely (self-cancel
+    // takes the local button path instead and never reaches this listener).
+    if (mounted && _isEmergencyActive) {
+      setState(() => _isEmergencyActive = false);
+      final resolver = data['resolver_name'] ?? 'your caregiver';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Your emergency was resolved by $resolver.'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    }
   }
 
   Future<void> _loadData() async {

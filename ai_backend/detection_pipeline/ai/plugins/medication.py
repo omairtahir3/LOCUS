@@ -38,7 +38,11 @@ class MedicationIntakePlugin(DetectorPlugin):
 
         valid_frames = []
         for kf in event_buffer:
-            raw = kf.get("raw_frame") or kf.get("frame")
+            # `or` would force a truth test on the array itself, which numpy
+            # rejects for multi-element arrays — check for None explicitly.
+            raw = kf.get("raw_frame")
+            if raw is None:
+                raw = kf.get("frame")
             if raw is not None:
                 valid_frames.append({
                     "frame": raw,

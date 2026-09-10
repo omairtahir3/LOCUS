@@ -27,60 +27,70 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     SocketService().init();
     SocketService().connect();
 
-    SocketService().onSosAlert = (data) {
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.danger,
-            title: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.white, size: 36),
-                SizedBox(width: 10),
-                Text('EMERGENCY SOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            content: Text('${data['user_name']} has triggered an SOS! Immediate assistance required.', style: const TextStyle(color: Colors.white)),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  // Push to location map
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
-                  // Push to Chat Screen
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
-                    recipientId: data['user_id'],
-                    recipientName: data['user_name'],
-                    isEmergency: true,
-                  )));
-                },
-                child: const Text('VIEW LOCATION & CHAT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                },
-                child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
-              )
-            ],
-          )
-        );
-      }
-    };
+    SocketService().addSosAlertListener(_handleSosAlert);
+    SocketService().addSosResolvedListener(_handleSosResolved);
+  }
 
-    SocketService().onSosResolved = (data) {
-      if (mounted) {
-        final resolver = data['resolved_by'] == 'user' ? 'the user themselves' : data['resolver_name'] ?? 'a caregiver';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Emergency for ${data['user_name']} was resolved by $resolver.'),
-            backgroundColor: AppColors.success,
-            duration: const Duration(seconds: 10),
-          )
-        );
-      }
-    };
+  void _handleSosAlert(Map<String, dynamic> data) {
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.danger,
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.white, size: 36),
+              SizedBox(width: 10),
+              Text('EMERGENCY SOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Text('${data['user_name']} has triggered an SOS! Immediate assistance required.', style: const TextStyle(color: Colors.white)),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Push to location map
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
+                // Push to Chat Screen
+                Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
+                  recipientId: data['user_id'],
+                  recipientName: data['user_name'],
+                  isEmergency: true,
+                )));
+              },
+              child: const Text('VIEW LOCATION & CHAT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+              },
+              child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
+            )
+          ],
+        )
+      );
+    }
+  }
+
+  void _handleSosResolved(Map<String, dynamic> data) {
+    if (mounted) {
+      final resolver = data['resolved_by'] == 'user' ? 'the user themselves' : data['resolver_name'] ?? 'a caregiver';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Emergency for ${data['user_name']} was resolved by $resolver.'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 10),
+        )
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    SocketService().removeSosAlertListener(_handleSosAlert);
+    SocketService().removeSosResolvedListener(_handleSosResolved);
+    super.dispose();
   }
 
   Future<void> _loadData() async {

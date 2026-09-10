@@ -37,36 +37,42 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     SelectedUserService().addListener(_onSelectedUserChanged);
     _fetchLocation();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchLocation());
-    
+
     // Subscribe to socket
     final socket = SocketService();
-    socket.onLocationUpdate = (data) {
-      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
-      if (data['user_id'] == selectedId && mounted) {
-        setState(() {
-          _currentPosition = LatLng(data['lat'], data['lng']);
-          _lastUpdated = data['timestamp'] != null ? DateTime.parse(data['timestamp']) : DateTime.now();
-        });
-        _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
-      }
-    };
-    socket.onSosAlert = (data) {
-      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
-      if (data['user_id'] == selectedId && mounted) {
-        setState(() {
-          _sosData = data;
-          _currentPosition = LatLng(data['location']['lat'], data['location']['lng']);
-          _lastUpdated = DateTime.now();
-        });
-        _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
-      }
-    };
-    socket.onSosResolved = (data) {
-      final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
-      if (data['user_id'] == selectedId && mounted) {
-        setState(() { _sosData = null; });
-      }
-    };
+    socket.addLocationUpdateListener(_handleLocationUpdate);
+    socket.addSosAlertListener(_handleSosAlert);
+    socket.addSosResolvedListener(_handleSosResolved);
+  }
+
+  void _handleLocationUpdate(Map<String, dynamic> data) {
+    final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+    if (data['user_id'] == selectedId && mounted) {
+      setState(() {
+        _currentPosition = LatLng(data['lat'], data['lng']);
+        _lastUpdated = data['timestamp'] != null ? DateTime.parse(data['timestamp']) : DateTime.now();
+      });
+      _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
+    }
+  }
+
+  void _handleSosAlert(Map<String, dynamic> data) {
+    final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+    if (data['user_id'] == selectedId && mounted) {
+      setState(() {
+        _sosData = data;
+        _currentPosition = LatLng(data['location']['lat'], data['location']['lng']);
+        _lastUpdated = DateTime.now();
+      });
+      _controller.future.then((c) => c.animateCamera(CameraUpdate.newLatLng(_currentPosition!)));
+    }
+  }
+
+  void _handleSosResolved(Map<String, dynamic> data) {
+    final selectedId = widget.targetUserId ?? SelectedUserService().selectedUser?['_id'];
+    if (data['user_id'] == selectedId && mounted) {
+      setState(() { _sosData = null; });
+    }
   }
 
   @override
@@ -74,9 +80,9 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     SelectedUserService().removeListener(_onSelectedUserChanged);
     _refreshTimer?.cancel();
     final socket = SocketService();
-    socket.onLocationUpdate = null;
-    socket.onSosAlert = null;
-    socket.onSosResolved = null;
+    socket.removeLocationUpdateListener(_handleLocationUpdate);
+    socket.removeSosAlertListener(_handleSosAlert);
+    socket.removeSosResolvedListener(_handleSosResolved);
     super.dispose();
   }
 
