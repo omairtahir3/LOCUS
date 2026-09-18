@@ -120,6 +120,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 20),
 
+          // Personal Belongings / Exemplar Items
+          Container(
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+            child: ListTile(
+              leading: const Icon(Icons.inventory_2_outlined, color: AppColors.primary),
+              title: const Text('Personal Belongings', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Enroll & manage items for AI visual tracking', style: TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.pushNamed(context, '/my-items');
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+
           if (role == 'caregiver' || role == 'user') ...[
             Container(
               decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),

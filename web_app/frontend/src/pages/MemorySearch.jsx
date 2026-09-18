@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package } from 'lucide-react';
+import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
@@ -10,6 +10,9 @@ export default function MemorySearch() {
   const [activeFilter, setActiveFilter] = useState('All');
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Full-image viewer. Thumbnails are cropped to 100px with objectFit:cover,
+  // so the evidence frame can't be read without opening it full size.
+  const [lightbox, setLightbox] = useState(null);
 
   const fetchEvents = async () => {
     setLoading(true);
@@ -250,9 +253,11 @@ export default function MemorySearch() {
                         <div style={{ display: 'flex' }}>
                           <div
                             className="memory-thumb"
+                            onClick={() => setLightbox({ url: m.image_url, title: m.title })}
+                            title="Click to view full image"
                             style={{
                               width: 100, minHeight: 80, flexShrink: 0,
-                              overflow: 'hidden', position: 'relative',
+                              overflow: 'hidden', position: 'relative', cursor: 'zoom-in',
                             }}
                           >
                             <img
@@ -388,6 +393,45 @@ export default function MemorySearch() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '92vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column', gap: 10 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.95rem' }}>{lightbox.title}</span>
+              <button
+                onClick={() => setLightbox(null)}
+                aria-label="Close"
+                style={{
+                  background: 'transparent', border: 'none', color: '#fff',
+                  cursor: 'pointer', display: 'flex', padding: 4,
+                }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <img
+              src={lightbox.url}
+              alt={lightbox.title}
+              style={{
+                maxWidth: '92vw', maxHeight: '82vh',
+                objectFit: 'contain', borderRadius: 10, background: '#000',
+              }}
+            />
+          </div>
         </div>
       )}
     </div>

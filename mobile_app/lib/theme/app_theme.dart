@@ -107,6 +107,7 @@ class AppTheme {
       ),
       dividerTheme: const DividerThemeData(color: AppColors.borderLight, thickness: 1),
       chipTheme: ChipThemeData(
+        showCheckmark: false,
         backgroundColor: AppColors.borderLight,
         labelStyle: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

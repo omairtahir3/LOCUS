@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import os
 
-from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR
+from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR, ItemStorage
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
 
@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
 _storage = None
 _evidence_storage = None
 _social_storage = None
+_item_storage = None
 
 
 def _get_storage():
@@ -34,6 +35,13 @@ def _get_social_storage():
     return _social_storage
 
 
+def _get_item_storage():
+    global _item_storage
+    if _item_storage is None:
+        _item_storage = ItemStorage(ITEMS_STORAGE_DIR)
+    return _item_storage
+
+
 def _parse_timestamp(ts):
     if not ts: return 0.0
     if isinstance(ts, (int, float)): return float(ts)
@@ -48,16 +56,13 @@ def _parse_timestamp(ts):
     return 0.0
 
 @router.get("")
-async def list_keyframes(limit: int = 200, user_id: str = "", medication_only: bool = False):
+async def list_keyframes(limit: int = 50, user_id: str = ""):
     """
     List stored keyframes with metadata.
+    Auto-cleaned after 72 hours.
     """
     storage = _get_storage()
-    keyframes = storage.list_keyframes(
-        user_id=user_id or None,
-        medication_only=medication_only,
-        limit=limit,
-    )
+    keyframes = storage.list_keyframes(user_id=user_id or None, limit=limit)
     
     if keyframes:
         try:
@@ -84,8 +89,8 @@ async def list_keyframes(limit: int = 200, user_id: str = "", medication_only: b
                 else:
                     k["is_flagged"] = False
                 
-        except Exception as e:
-            print(f"Error fetching flags for keyframes: {e}")
+        except Exception as ex:
+            print(f"Error fetching flags for keyframes: {ex}")
             for k in keyframes:
                 if "is_flagged" not in k: k["is_flagged"] = False
                 
@@ -103,6 +108,8 @@ async def get_keyframe_image(keyframe_id: str):
         matches = glob.glob(os.path.join(SOCIAL_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
     if not matches:
         matches = glob.glob(os.path.join(ACTIVITY_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
+    if not matches:
+        matches = glob.glob(os.path.join(ITEMS_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
 
     if matches:
         img_path = matches[0]

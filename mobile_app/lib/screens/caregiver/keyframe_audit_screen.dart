@@ -65,33 +65,77 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
 
 
   List<Map<String, dynamic>> _groupedEvents() {
-    final Map<String, List<Map<String, dynamic>>> groups = {};
-    for (final ev in _evidence) {
-      final ts = ev['detected_at'] ?? ev['saved_at'] ?? 'unknown';
-      groups.putIfAbsent(ts, () => []);
-      groups[ts]!.add(Map<String, dynamic>.from(ev));
-    }
-    final sorted = groups.entries.toList()
-      ..sort((a, b) => b.key.compareTo(a.key));
+    if (_evidence.isEmpty) return [];
 
-    return sorted.map((entry) {
-      final frames = entry.value;
+    // Clone and sort items by timestamp descending
+    final items = List<Map<String, dynamic>>.from(
+      _evidence.map((e) => Map<String, dynamic>.from(e as Map)),
+    )..sort((a, b) {
+      final tA = DateTime.tryParse(a['detected_at'] ?? a['saved_at'] ?? '') ?? DateTime(1970);
+      final tB = DateTime.tryParse(b['detected_at'] ?? b['saved_at'] ?? '') ?? DateTime(1970);
+      return tB.compareTo(tA);
+    });
+
+    final List<Map<String, dynamic>> grouped = [];
+
+    for (final item in items) {
+      final itemTime = DateTime.tryParse(item['detected_at'] ?? item['saved_at'] ?? '') ?? DateTime(1970);
+      final medName = item['medication_name'] ?? 'Unknown';
+      final userId = item['user_id'] ?? '';
+
+      // Find an existing group within 30 seconds with the same medication & user
+      bool added = false;
+      for (final g in grouped) {
+        final gTime = g['time'] as DateTime;
+        final gMed = g['medication'] as String;
+        final gUser = g['user_id'] as String;
+
+        if (gMed == medName && (userId.isEmpty || gUser.isEmpty || gUser == userId) &&
+            gTime.difference(itemTime).abs().inSeconds <= 30) {
+          (g['frames'] as List<Map<String, dynamic>>).add(item);
+          added = true;
+          break;
+        }
+      }
+
+      if (!added) {
+        grouped.add({
+          'time': itemTime,
+          'timestamp': item['detected_at'] ?? item['saved_at'] ?? 'unknown',
+          'medication': medName,
+          'user_id': userId,
+          'confidence': item['detection_confidence'] ?? item['phase_score'] ?? 0.0,
+          'status': item['detection_status'] ?? 'unknown',
+          'frames': [item],
+        });
+      }
+    }
+
+    // Sort frames within each group by phase order: P1 (pill in hand), P2 (hand to mouth), P3 (hand empty)
+    for (final g in grouped) {
+      final frames = g['frames'] as List<Map<String, dynamic>>;
       frames.sort((a, b) {
-        const order = {
-          'phase1_pill_visible': 0,
-          'phase2_grip_motion': 1,
-          'phase3_pill_gone': 2,
-        };
-        return (order[a['phase_role']] ?? 9).compareTo(order[b['phase_role']] ?? 9);
+        final orderA = a['phase_order'] as int? ??
+            (a['phase_role'] == 'phase1_pill_visible'
+                ? 1
+                : a['phase_role'] == 'phase2_grip_motion'
+                    ? 2
+                    : 3);
+        final orderB = b['phase_order'] as int? ??
+            (b['phase_role'] == 'phase1_pill_visible'
+                ? 1
+                : b['phase_role'] == 'phase2_grip_motion'
+                    ? 2
+                    : 3);
+        return orderA.compareTo(orderB);
       });
-      return {
-        'timestamp': entry.key,
-        'frames': frames,
-        'medication': frames.first['medication_name'] ?? 'Unknown',
-        'confidence': frames.first['detection_confidence'] ?? 0.0,
-        'status': frames.first['detection_status'] ?? 'unknown',
-      };
-    }).toList();
+      if (frames.isNotEmpty) {
+        g['confidence'] = frames.first['detection_confidence'] ?? g['confidence'];
+        g['status'] = frames.first['detection_status'] ?? g['status'];
+      }
+    }
+
+    return grouped;
   }
 
   @override
@@ -318,7 +362,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
             child: Row(
               children: frames.map((f) {
                 final role = f['phase_role'] ?? '';
-                final evId = f['evidence_id'] ?? '';
+                final evId = f['evidence_id'] ?? f['id'] ?? f['keyframe_id'] ?? f['file']?.toString().replaceAll('.jpg', '') ?? '';
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -328,19 +372,27 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           borderRadius: BorderRadius.circular(8),
                           child: AspectRatio(
                             aspectRatio: 16 / 9,
-                            child: Image.network(
-                              ApiService.medicationFrameImageUrl(evId),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: AppColors.borderLight,
-                                child: const Icon(Icons.broken_image, size: 24),
-                              ),
-                            ),
+                            child: evId.toString().isNotEmpty
+                                ? Image.network(
+                                    ApiService.medicationFrameImageUrl(evId.toString()),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: AppColors.borderLight,
+                                      child: const Icon(Icons.medication_outlined, size: 22, color: AppColors.primary),
+                                    ),
+                                  )
+                                : Container(
+                                    color: AppColors.borderLight,
+                                    child: const Icon(Icons.medication_outlined, size: 22, color: AppColors.primary),
+                                  ),
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           _phaseLabel(role),
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
@@ -365,7 +417,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
 
   Widget _expandedPhaseCard(Map<String, dynamic> f) {
     final role = f['phase_role'] ?? '';
-    final evId = f['evidence_id'] ?? '';
+    final evId = f['evidence_id'] ?? f['id'] ?? f['keyframe_id'] ?? f['file']?.toString().replaceAll('.jpg', '') ?? '';
     final score = ((f['phase_score'] as num?) ?? 0).toDouble();
 
     return Padding(
@@ -374,9 +426,11 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: _phaseColor(role).withAlpha(20),
                   borderRadius: BorderRadius.circular(6),
@@ -384,24 +438,25 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 child: Text(
                   _phaseLabel(role),
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: _phaseColor(role),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                _phaseDescription(role),
-                style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-              ),
-              const Spacer(),
-              Text(
-                'Score: ${(score * 100).toStringAsFixed(0)}%',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textSecondary,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.borderLight,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Score: ${(score * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
             ],
@@ -409,22 +464,29 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: Image.network(
-              ApiService.medicationFrameImageUrl(evId),
-              fit: BoxFit.contain,
-              height: 200,
-              width: double.infinity,
-              errorBuilder: (_, __, ___) => Container(
-                height: 200,
-                color: AppColors.borderLight,
-                alignment: Alignment.center,
-                child: const Text('Image unavailable'),
-              ),
-            ),
+            child: evId.toString().isNotEmpty
+                ? Image.network(
+                    ApiService.medicationFrameImageUrl(evId.toString()),
+                    fit: BoxFit.contain,
+                    height: 200,
+                    width: double.infinity,
+                    errorBuilder: (_, __, ___) => Container(
+                      height: 200,
+                      color: AppColors.borderLight,
+                      alignment: Alignment.center,
+                      child: const Text('Image unavailable'),
+                    ),
+                  )
+                : Container(
+                    height: 200,
+                    color: AppColors.borderLight,
+                    alignment: Alignment.center,
+                    child: const Text('Image unavailable'),
+                  ),
           ),
           const SizedBox(height: 6),
           Text(
-            'ID: ${evId.length > 12 ? '${evId.substring(0, 12)}...' : evId}',
+            'ID: ${evId.toString().length > 12 ? '${evId.toString().substring(0, 12)}...' : evId}',
             style: TextStyle(fontSize: 9, color: AppColors.textMuted),
           ),
         ],
@@ -901,19 +963,6 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
         return 'P3: HAND EMPTY';
       default:
         return role.toUpperCase();
-    }
-  }
-
-  String _phaseDescription(String role) {
-    switch (role) {
-      case 'phase1_pill_visible':
-        return 'Pill detected in palm area';
-      case 'phase2_grip_motion':
-        return 'Hand moved toward face';
-      case 'phase3_pill_gone':
-        return 'Hand returned empty';
-      default:
-        return '';
     }
   }
 

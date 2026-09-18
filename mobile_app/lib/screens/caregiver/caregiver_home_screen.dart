@@ -113,6 +113,60 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     }
   }
 
+  Future<void> _clearRecentActivity() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Clear Recent Activity', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: const Text('Are you sure you want to clear all recent activity alerts?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _notifications = [];
+      });
+      try {
+        await ApiService.clearAllNotifications();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Recent activity cleared'),
+              backgroundColor: AppColors.success,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear activity: $e'),
+              backgroundColor: AppColors.danger,
+            ),
+          );
+          _loadData();
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userName = ApiService.user?['name']?.toString().split(' ').first ?? 'Caregiver';
@@ -125,9 +179,6 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     final avg = _summaries.values.fold<double>(0, (sum, s) {
       return sum + ((s?['today_adherence']?['adherence_percentage'] ?? 0) as num).toDouble();
     }) / (totalUsers > 0 ? totalUsers : 1);
-    final totalMissed = _summaries.values.fold<int>(0, (sum, s) {
-      return sum + ((s?['today_adherence']?['missed'] ?? 0) as num).toInt();
-    });
 
     return RefreshIndicator(
       onRefresh: _loadData,
@@ -174,7 +225,18 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
               ..._users.asMap().entries.map((e) => _memberCard(e.key, e.value)),
 
             const SizedBox(height: 40),
-            const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                if (_notifications.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _clearRecentActivity,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 18, color: AppColors.danger),
+                    label: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.danger)),
+                  ),
+              ],
+            ),
             const SizedBox(height: 16),
 
             if (_notifications.isEmpty)

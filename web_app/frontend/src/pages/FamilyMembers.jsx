@@ -72,9 +72,21 @@ export default function FamilyMembers() {
               <Link key={u._id} to={`/family/${u._id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div className="card" style={{ cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div className="avatar avatar-lg" style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}>
-                      {u.name?.charAt(0)?.toUpperCase()}
-                    </div>
+                    {(u.picture || u.profile_picture) ? (
+                      <img 
+                        src={u.picture || u.profile_picture} 
+                        alt="" 
+                        className="avatar avatar-lg" 
+                        referrerPolicy="no-referrer"
+                        crossOrigin="anonymous"
+                        style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} 
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className="avatar avatar-lg" style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}>
+                        {u.name?.charAt(0)?.toUpperCase()}
+                      </div>
+                    )}
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: '1rem' }}>{u.name}</div>
                       <div className="text-xs text-muted">{u.email}</div>

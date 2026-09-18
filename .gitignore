@@ -57,6 +57,7 @@ ai_backend/keyframe_backend/keyframe_storage/
 ai_backend/keyframe_backend/activities_storage/
 ai_backend/keyframe_backend/medications_storage/
 ai_backend/keyframe_backend/social_audio_storage/
+ai_backend/keyframe_backend/items_storage/
 scratch/
 *.bak
 .claudecode-instructions.md

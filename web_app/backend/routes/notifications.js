@@ -191,6 +191,17 @@ router.patch('/:id/acknowledge', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// DELETE /api/notifications/clear-all  — dismiss all notifications for current user
+router.delete('/clear-all', async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { recipient_id: req.user._id, is_dismissed: { $ne: true } },
+      { $set: { is_dismissed: true, is_read: true } }
+    );
+    res.json({ message: 'All notifications cleared' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // DELETE /api/notifications/:id  — dismiss
 router.delete('/:id', async (req, res) => {
   try {

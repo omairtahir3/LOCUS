@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../services/api_service.dart';
@@ -306,29 +305,34 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
         ),
         if (_lastUpdated != null)
           Positioned(
-            bottom: 16,
+            bottom: 28,
             left: 16,
             right: 16,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Row(
-                  children: [
-                    const Icon(Icons.access_time, color: Colors.teal),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Last updated: ${_lastUpdated!.toLocal().toString().split('.')[0]}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+            child: SafeArea(
+              top: false,
+              child: Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.access_time, color: Colors.teal),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Last updated: ${_lastUpdated!.toLocal().toString().split('.')[0]}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: () {
-                        _fetchLocation();
-                      },
-                    )
-                  ],
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: () {
+                          _fetchLocation();
+                        },
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),

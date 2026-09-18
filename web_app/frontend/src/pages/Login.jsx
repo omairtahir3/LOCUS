@@ -400,7 +400,14 @@ export default function Login() {
             textAlign: 'center'
           }}>
             {googleRoleModal.picture && (
-              <img src={googleRoleModal.picture} alt="" style={{ width: '70px', height: '70px', borderRadius: '50%', margin: '0 auto 16px auto', border: '3px solid #3B82F6' }} />
+              <img 
+                src={googleRoleModal.picture} 
+                alt="" 
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                style={{ width: '70px', height: '70px', borderRadius: '50%', margin: '0 auto 16px auto', border: '3px solid #3B82F6', objectFit: 'cover' }} 
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
             )}
             <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1E293B', marginBottom: '8px' }}>
               Welcome, {googleRoleModal.name}!

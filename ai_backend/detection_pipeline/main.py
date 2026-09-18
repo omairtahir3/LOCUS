@@ -47,6 +47,19 @@ async def lifespan(app: FastAPI):
     print(f"[Startup] Default camera fallback: {os.environ.get('CAMERA_SOURCE', '0')}")
 
     scheduler_task = asyncio.create_task(run_scheduler())
+
+    # Pre-warm Item Embedding Backbone in background thread to avoid cold-start lag
+    def _prewarm_backbone():
+        try:
+            from ai.embedding_backbone import ItemEmbeddingBackbone
+            ItemEmbeddingBackbone.get_instance()
+            print("[Startup] ItemEmbeddingBackbone pre-warmed and ready.")
+        except Exception as e:
+            print(f"[Startup] ItemEmbeddingBackbone pre-warm warning: {e}")
+
+    import threading
+    threading.Thread(target=_prewarm_backbone, daemon=True).start()
+
     yield
     stop_scheduler()
     scheduler_task.cancel()

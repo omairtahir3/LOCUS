@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 
 class ApiService {
@@ -10,17 +10,19 @@ class ApiService {
   // UPDATED: Uses laptop IP for local dev, and Production URL when deployed.
   static String get baseUrl {
     if (kReleaseMode) {
-      // When you deploy the app, it will use this production URL instead of your laptop's IP.
-      // You can override this at build time using: flutter build apk --dart-define=API_URL=https://your-aws-url.com/api
+      // Production URL when deployed
       return const String.fromEnvironment('API_URL', defaultValue: 'https://your-production-server.com/api');
     }
     
-    // For local development: use localhost for Web/iOS, 10.0.2.2 for Android emulators, 
-    // and the laptop's actual IP for physical Android devices via Wi-Fi/USB.
+    // For local development:
+    // Web / iOS Simulator
     if (kIsWeb) return 'http://localhost:5000/api';
-    // TEMP-FOR-VERIFICATION: routed through `adb reverse tcp:5000 tcp:5000`
-    // for the SOS bug-fix live test. Revert to the real LAN IP afterward.
-    return 'http://127.0.0.1:5000/api';
+
+    // Physical Android device over Wi-Fi / LAN or USB
+    const customUrl = String.fromEnvironment('API_URL');
+    if (customUrl.isNotEmpty) return customUrl;
+    
+    return 'http://192.168.1.5:5000/api';
   }
 
   static late SharedPreferences _prefs;
@@ -506,6 +508,10 @@ class ApiService {
     await http.delete(Uri.parse('$baseUrl/notifications/$id'), headers: _headers);
   }
 
+  static Future<void> clearAllNotifications() async {
+    await http.delete(Uri.parse('$baseUrl/notifications/clear-all'), headers: _headers);
+  }
+
   static Future<void> respondNotification(String id, String message) async {
     await http.post(
       Uri.parse('$baseUrl/notifications/$id/respond'),
@@ -585,12 +591,17 @@ class ApiService {
   }
 
   static String medicationFrameImageUrl(String frameId) => '$baseUrl/detection/medication_frames/$frameId/image';
+  static String keyframeImageUrl(String frameId) => '$baseUrl/detection/keyframes/$frameId/image';
 
   // ── Event Logs / Memory Search ──────────────────────────────────────────────
 
-  static Future<List<dynamic>> getMemorySearchEvents({int limit = 50}) async {
+  static Future<List<dynamic>> getMemorySearchEvents({String? userId, int limit = 50}) async {
+    final params = [
+      'limit=$limit',
+      if (userId != null) 'userId=$userId',
+    ].join('&');
     final res = await http.get(
-      Uri.parse('$baseUrl/event-logs/memory-search?limit=$limit'),
+      Uri.parse('$baseUrl/event-logs/memory-search?$params'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -726,5 +737,68 @@ class ApiService {
       }
     } catch (_) {}
     return [];
+  }
+
+  // ── User Items / Exemplar Gallery ─────────────────────────────────────────
+
+  static Future<List<dynamic>> getUserItems() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/user-items'), headers: _headers);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data is List ? data : [];
+      }
+    } catch (e) {
+      print('Error fetching user items: $e');
+    }
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> enrollUserItem(String itemName, List<String> frames) async {
+    try {
+      final client = http.Client();
+      try {
+        final res = await client.post(
+          Uri.parse('$baseUrl/user-items/enroll'),
+          headers: _headers,
+          body: jsonEncode({
+            'item_name': itemName,
+            'frames': frames,
+          }),
+        ).timeout(const Duration(seconds: 60));
+        return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+      } finally {
+        client.close();
+      }
+    } on TimeoutException {
+      return {'statusCode': 408, 'data': {'error': 'Request timed out. Please try again.'}};
+    } catch (e) {
+      return {'statusCode': 500, 'data': {'error': e.toString()}};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateUserItem(String id, String itemName) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/user-items/$id'),
+        headers: _headers,
+        body: jsonEncode({'item_name': itemName}),
+      );
+      return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+    } catch (e) {
+      return {'statusCode': 500, 'data': {'error': e.toString()}};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteUserItem(String id) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/user-items/$id'),
+        headers: _headers,
+      );
+      return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
+    } catch (e) {
+      return {'statusCode': 500, 'data': {'error': e.toString()}};
+    }
   }
 }

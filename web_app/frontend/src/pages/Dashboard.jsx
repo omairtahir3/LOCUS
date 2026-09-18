@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { caregiverAPI, notificationAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -12,6 +12,7 @@ const AVATAR_COLORS = ['#0D9488', '#6366F1', '#EC4899', '#F59E0B', '#10B981', '#
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [summaries, setSummaries] = useState({});
   const [notifications, setNotifications] = useState([]);
@@ -20,6 +21,10 @@ export default function Dashboard() {
   const { openChat } = useOutletContext();
 
   useEffect(() => {
+    if (user && user.role !== 'caregiver' && user.role !== 'admin') {
+      navigate('/my-dashboard', { replace: true });
+      return;
+    }
     loadData();
     // Refresh every 30s — not 5s — to avoid hammering the backend
     const interval = setInterval(() => {
@@ -330,7 +335,15 @@ export default function Dashboard() {
                   <div key={u._id} className="member-card">
                     <div className="member-header">
                       {(u.picture || u.profile_picture) ? (
-                        <img src={u.picture || u.profile_picture} alt="" className="avatar" style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} />
+                        <img 
+                          src={u.picture || u.profile_picture} 
+                          alt="" 
+                          className="avatar" 
+                          referrerPolicy="no-referrer"
+                          crossOrigin="anonymous"
+                          style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} 
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
                       ) : (
                         <div className="avatar" style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}>
                           {u.name?.charAt(0)?.toUpperCase()}
