@@ -502,7 +502,19 @@ router.get('/logs/history', async (req, res) => {
       .sort({ scheduled_time: -1 })
       .limit(parseInt(limit));
 
-    res.json(logs);
+    // Flatten the populated medication onto the log, same shape the create/update
+    // handlers return. Without this every consumer reading log.medication_name
+    // gets undefined and renders "Unknown" — the name only lived on the
+    // populated medication_id sub-document. Deleted medications populate to
+    // null, so fall back to a label that says so rather than "Unknown".
+    res.json(logs.map(log => {
+      const med = log.medication_id;
+      return {
+        ...log.toObject(),
+        medication_name: med?.name || 'Deleted medication',
+        dosage: med?.dosage || '',
+      };
+    }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

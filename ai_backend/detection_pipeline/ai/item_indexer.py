@@ -1,9 +1,11 @@
 """
-Tier-2 Asynchronous Daily Life Item Indexer.
+Tier-2 Asynchronous Daily Life Item Indexer & Activity Enrichment Engine.
 
 Uses YOLO11n-Objects365 (365 daily object categories including keys, wallet,
-glasses, watch, hygiene products, kitchenware, remotes, bags, etc.) to
-passively catalog and index items detected in saved scene keyframes.
+glasses, watch, hygiene products, kitchenware, remotes, bags, etc.) to:
+1. Passively catalog and index personal items detected in saved scene keyframes (Memory Search).
+2. Perform Tier-2 Gap-Filling Enrichment for activities that Tier-1 (COCO 80 classes)
+   cannot see (e.g., Plate -> Eating, Pot/Kettle -> Cooking, Toothbrush -> Brushing teeth, Soap -> Washing hands).
 
 Runs on a dedicated background worker queue (Tier-2) completely decoupled from
 the synchronous Tier-1 live camera ingest loop.
@@ -29,6 +31,163 @@ DEFAULT_MODEL_PATH = os.path.join(
     "yolo11n_object365.pt"
 )
 
+# Personal belongings and handheld/wearable items only.
+# Static appliances, furniture, fixtures, and sports equipment are excluded.
+# Tier-2 Gap-Fill triggers (Gas stove, Coffee Machine, etc.) are kept because
+# the enrichment engine needs them detected to infer activities.
+PERSONAL_ITEM_CLASS_IDS = {
+    # ── Footwear ──
+    1: "Sneakers",
+    3: "Other Shoes",
+    22: "Leather Shoes",
+    29: "Boots",
+    45: "Slippers",
+    51: "Sandals",
+    57: "High Heels",
+    # ── Accessories / Jewelry ──
+    4: "Hat",
+    7: "Glasses",
+    4: "Hat",
+    14: "Bracelet",
+    32: "Necklace",
+    33: "Ring",
+    36: "Belt",
+    42: "Watch",
+    43: "Tie",
+    44: "Cap",
+    151: "Bow Tie",
+    17: "Helmet",
+    208: "Mask",
+    # ── Bags / Carry ──
+    13: "Handbag/Satchel",
+    38: "Backpack",
+    39: "Umbrella",
+    120: "Luggage",
+    194: "Briefcase",
+    # ── Electronics ──
+    61: "Cell Phone",
+    63: "Camera",
+    73: "Laptop",
+    106: "Keyboard",
+    115: "Mouse",
+    123: "Telephone",
+    125: "Head Phone",
+    207: "earphone",
+    132: "Remote",
+    243: "Tablet",
+    316: "Calculator",
+    # ── Personal Care / Hygiene ──
+    105: "Toiletry",
+    226: "Toothbrush",           # Tier-2 Gap-Fill (Brushing teeth)
+    293: "Soap",                 # Tier-2 Gap-Fill (Washing hands)
+    328: "Hair Dryer",           # Tier-2 Gap-Fill (Drying hair)
+    351: "Comb",                 # Tier-2 Gap-Fill (Grooming)
+    256: "Brush",
+    244: "Cosmetics",
+    355: "Cosmetics Brush/Eyeliner Pencil",
+    361: "Lipstick",
+    362: "Cosmetics Mirror",
+    69: "Towel",                 # Tier-2 Gap-Fill (Drying/Hygiene)
+    225: "Tissue",
+    # ── Kitchen / Eating (Tier-2 Gap-Fill triggers) ──
+    8: "Bottle",
+    10: "Cup",
+    15: "Plate",                 # Tier-2 Gap-Fill (Eating)
+    26: "Bowl/Basin",
+    84: "Knife",                 # Tier-2 Gap-Fill (Eating/Cooking)
+    88: "Fork",                  # Tier-2 Gap-Fill (Eating)
+    93: "Spoon",                 # Tier-2 Gap-Fill (Eating)
+    95: "Pot",                   # Tier-2 Gap-Fill (Cooking)
+    122: "Tea pot",              # Tier-2 Gap-Fill (Drinking/Cooking)
+    140: "Jug",                  # Tier-2 Gap-Fill (Drinking)
+    149: "Gas stove",            # Tier-2 Gap-Fill (Cooking)
+    166: "Cutting/chopping Board",# Tier-2 Gap-Fill (Cooking)
+    169: "Scissors",
+    203: "Tong",
+    209: "Kettle",               # Tier-2 Gap-Fill (Cooking/Drinking)
+    213: "Coffee Machine",       # Tier-2 Gap-Fill (Drinking)
+    268: "Induction Cooker",     # Tier-2 Gap-Fill (Cooking)
+    290: "Flask",
+    # ── Stationery / Office ──
+    18: "Book",
+    54: "Pen/Pencil",
+    170: "Marker",
+    205: "Folder",
+    281: "Notepaper",
+    343: "Pencil Case",
+    357: "Eraser",
+    306: "Stapler",
+    242: "Tape",
+    # ── Valuables / Keys ──
+    238: "Wallet/Purse",
+    251: "Key",
+    332: "Lighter",
+    # ── Misc Personal ──
+    19: "Gloves",
+    70: "Stuffed Toy",
+}
+
+# Tier-2 Gap-Filling Mapping: Objects365 Class ID -> (activity_name, default_environment)
+# Triggered when Tier-1 (YOLOv8 COCO) could not detect an activity or was structurally blind to the object class.
+TIER2_GAP_FILL_ACTIVITY_MAP: dict[int, tuple[str, str]] = {
+    15: ("eating", "dining area"),          # Plate (Missing in COCO)
+    88: ("eating", "dining area"),          # Fork
+    93: ("eating", "dining area"),          # Spoon
+    84: ("eating", "dining area"),          # Knife
+    95: ("cooking", "kitchen"),             # Pot
+    122: ("drinking", "kitchen"),           # Tea pot
+    140: ("drinking", "kitchen"),           # Jug
+    149: ("cooking", "kitchen"),            # Gas stove
+    166: ("cooking", "kitchen"),            # Cutting/chopping Board
+    209: ("cooking", "kitchen"),            # Kettle
+    213: ("drinking", "kitchen"),           # Coffee Machine
+    226: ("brushing teeth", "bathroom"),    # Toothbrush
+    268: ("cooking", "kitchen"),            # Induction Cooker
+    293: ("washing hands", "bathroom"),     # Soap
+    328: ("drying hair", "bathroom"),       # Hair Dryer
+    351: ("grooming", "bathroom"),          # Comb
+}
+
+# Items are persistent in a way activities are not — a wallet left on a desk
+# stays in frame for hours, so a 15-minute (900s) window prevents keyframe flooding
+# while re-indexing items when re-encountered. Suppression is per (user, item identity).
+ITEM_DEDUP_SECONDS = 900  # 15 minutes
+
+# ── Tiled exemplar scan ───────────────────────────────────────────────────────
+# Objects365 cannot box small personal items: across 6 real chest-cam frames it
+# produced a box on the wearer's car keys 0/6 times, and a sweep of imgsz
+# (640/960/1280) x conf (0.30/0.15/0.05) produced ZERO "Key" boxes in 36 runs.
+# The exemplar gallery, given the correct crop, scores those same keys 0.653-0.823
+# against a 0.65 threshold and ranks them #1 in 6/6 -- so the matcher works and
+# only candidate generation was failing. This scans the frame directly.
+#
+# Measured on those 6 frames (keys found / false positives / cost):
+#   YOLO allowlist only (before)      0/6   1 FP    7 crops
+#   class-agnostic conf 0.10          2/6   1 FP   17 crops
+#   tiles [120,200,320] stride 0.60   5/6   0 FP  121 regions  2765ms
+#   tiles [120,200]     stride 0.75   5/6   0 FP  100 regions   975ms  <-- shipped
+# Tile sizes are fractions of frame width so they hold at other resolutions.
+TILE_SCALE_FRACS = (0.094, 0.156)   # ~120px and ~200px at 1280 wide
+TILE_STRIDE_FRAC = 0.75             # stride as a fraction of tile size
+TILE_REGION_X = (0.05, 0.95)        # horizontal search bounds
+# 0.10, not the 0.30 "lower-centre interactive zone" the YOLO path assumes: when
+# the wearer reclines, the sofa surface rises into the upper half and the keys
+# landed at y=85-150. At y0=0.30 that frame was unreachable and scored 4/6; at
+# 0.10 it is found at sim=0.825 for 5/6, still 0 false positives, ~100 regions.
+TILE_REGION_Y0 = 0.10
+TILE_MIN_PX = 20
+
+# How long an unenrolled sighting stays in the suggestion queue before MongoDB
+# expires it. Long enough that the user sees it next time they open the
+# enrollment screen; short enough that unattributed sightings never accumulate
+# as permanent history.
+SUGGESTION_TTL_SECONDS = 48 * 3600
+
+# Minimum trigger confidence before Tier-2 may synthesise an activity.
+# Matches Tier-1's weakest real tier (0.55) so the gap-filler can't assert
+# activities at confidences Tier-1 would have rejected outright.
+TIER2_MIN_ACTIVITY_CONF = 0.55
+
 # Shared singleton instance
 _indexer_instance: Optional[DailyItemIndexer] = None
 _indexer_lock = threading.Lock()
@@ -36,17 +195,38 @@ _indexer_lock = threading.Lock()
 
 class DailyItemIndexer:
     """
-    Asynchronous background item indexer for Memory Search & Object Retrieval.
+    Asynchronous background item indexer for Memory Search & Tier-2 Activity Gap-Filling.
     Processes saved keyframes without blocking video frame ingestion.
+
+    Exemplar Embedding Gallery:
+    After YOLO detects items, each bounding box crop is run through MobileNetV3-Small
+    and matched against the user's enrolled item embeddings (cosine similarity ≥ 0.75).
+    This personalizes detections from generic class labels ("Key") to user-specific names
+    ("Omair's silver house keys").
     """
 
-    def __init__(self, model_path: str = DEFAULT_MODEL_PATH, conf_threshold: float = 0.35):
+    # Minimum cosine similarity to consider an embedding match
+    # Calibrated to 0.65 based on real-world cross-keyframe re-encounter benchmarks
+    # (True re-encounters: 0.70-0.95; Distractor clutter: 0.10-0.48).
+    EXEMPLAR_MATCH_THRESHOLD = 0.65
+    # How often (seconds) to refresh the user_items cache from MongoDB
+    EXEMPLAR_CACHE_TTL = 300  # 5 minutes
+
+    def __init__(self, model_path: str = DEFAULT_MODEL_PATH, conf_threshold: float = 0.30):
         self.model_path = model_path
         self.conf_threshold = conf_threshold
         self._model = None
         self._model_lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue(maxsize=100)
+        self._last_item_seen: dict[tuple[str, int], float] = {}  # (user, class_id) -> monotonic ts
+        self._last_enriched_activity: dict[tuple[str, str], float] = {}  # (user, activity) -> monotonic ts
         self._is_running = True
+
+        # Exemplar Gallery: embedding backbone + user_items cache
+        self._embedding_backbone = None
+        self._user_items_cache: dict[str, tuple[float, list[dict]]] = {}  # user_id -> (timestamp, items)
+        self._db_client = None
+
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name="DailyItemIndexerWorker")
         self._worker_thread.start()
         print(f"[DailyItemIndexer] Initialized background worker with model at {self.model_path}")
@@ -78,7 +258,7 @@ class DailyItemIndexer:
 
     def enqueue_keyframe(self, keyframe_id: str, frame: Any, metadata: dict[str, Any] | None = None) -> bool:
         """
-        Enqueue a saved keyframe for background item indexing.
+        Enqueue a saved keyframe for background item indexing and Tier-2 enrichment.
         Accepts numpy ndarray frame or image file path.
         Returns immediately (non-blocking).
         """
@@ -116,7 +296,7 @@ class DailyItemIndexer:
                 self._queue.task_done()
 
     def _process_keyframe_task(self, task: dict[str, Any]):
-        """Run YOLO11n-Objects365 detection on keyframe and index items to MongoDB."""
+        """Run YOLO11n-Objects365 detection on keyframe and index items / enrich activity."""
         keyframe_id = task["keyframe_id"]
         frame_input = task["frame"]
         metadata = task["metadata"]
@@ -165,9 +345,26 @@ class DailyItemIndexer:
 
         for box in boxes:
             cls_id = int(box.cls[0].item())
+            # Personal belongings & activity objects only
+            if cls_id not in PERSONAL_ITEM_CLASS_IDS:
+                continue
             conf = float(box.conf[0].item())
+            if conf < self.conf_threshold:
+                continue
             cls_name = self._model.names.get(cls_id, f"class_{cls_id}")
             xyxy = box.xyxy[0].tolist()
+
+            # Position-based proximity proxy (lower-center interactive zone):
+            # In chest/head-worn egocentric view, items held or in front of the wearer:
+            # 1. Fall within horizontal central field of view (0.10 <= cx <= 0.90)
+            # 2. Reside in the lower interactive half (center_y >= 0.48 or base y2 >= 0.58)
+            # This rejects distant background items (e.g. distant bottles at cy=0.40-0.45, y2=0.55)
+            # while preserving small in-hand belongings (keys, mouse, phone, ring, plate).
+            norm_cx = ((xyxy[0] + xyxy[2]) / 2.0) / orig_w
+            norm_cy = ((xyxy[1] + xyxy[3]) / 2.0) / orig_h
+            norm_y2 = float(xyxy[3]) / orig_h
+            if not (0.10 <= norm_cx <= 0.90 and (norm_cy >= 0.38 or norm_y2 >= 0.45)):
+                continue
 
             detections.append({
                 "name": cls_name,
@@ -181,14 +378,435 @@ class DailyItemIndexer:
                 }
             })
 
+        # ── Exemplar Embedding Gallery: match detections against enrolled items ──
+        user_id_str = str((metadata or {}).get("user_id", ""))
+        if detections and user_id_str:
+            self._enrich_with_exemplar_matches(detections, image, user_id_str)
+
+        # Objects365 cannot box small personal items -- it boxed the wearer's car
+        # keys in 0 of 6 real frames, including one where they filled a third of
+        # the view. When no enrolled item was matched from a YOLO box, scan the
+        # frame directly; the gallery scores correct crops 0.65-0.82. Runs only
+        # when the YOLO path came up empty, so frames that already matched pay
+        # nothing extra.
+        if user_id_str and not any(d.get("matched_item") for d in detections):
+            detections.extend(self._scan_tiles_for_enrolled_items(image, user_id_str))
+
         if not detections:
             return
 
-        item_names = sorted(list(set(d["name"] for d in detections)))
-        print(f"[DailyItemIndexer] Keyframe {keyframe_id}: Detected {len(detections)} items ({', '.join(item_names)}) in {elapsed_ms:.1f}ms")
+        # Tier-2 Gap-Filling Activity Enrichment
+        self._check_and_enrich_activity(keyframe_id, detections, metadata)
 
-        # Persist to MongoDB
-        self._persist_to_db(keyframe_id, detections, item_names, metadata)
+        # ── Item Deduplication Gate ──────────────────────────────────────────
+        # Design Specification:
+        # 1. ENROLLED items: Dedup key is (user_id, enrolled_item_id).
+        #    Each custom enrolled item tracks its own independent 15-minute window,
+        #    allowing distinct belongings (e.g., "House Keys" vs "Car Keys") to be
+        #    indexed separately even if they share the same base YOLO category.
+        # 2. UNENROLLED items: Dedup key falls back to (user_id, class_id).
+        #    Generic unenrolled items collapse into a single per-class dedup bucket
+        #    (an accepted design limitation since unenrolled objects lack unique signatures).
+        user_key = str((metadata or {}).get("user_id", "unknown"))
+        now_ts = time.monotonic()
+        fresh = []
+        suppressed = []
+        for d in detections:
+            item_identity = d.get("enrolled_item_id") or d["class_id"]
+            k = (user_key, item_identity)
+            last = self._last_item_seen.get(k)
+            if last is None or (now_ts - last) >= ITEM_DEDUP_SECONDS:
+                self._last_item_seen[k] = now_ts
+                fresh.append(d)
+            else:
+                suppressed.append(d.get("matched_item", d["name"]))
+
+        if not fresh:
+            # All items suppressed within dedup window (zero disk writes, zero DB inserts)
+            return
+
+        detections = fresh
+
+        # ── Option B: identity-gated persistence ─────────────────────────────
+        # Only detections matched to a specifically enrolled item become
+        # permanent records. Generic allowlist detections cannot be attributed
+        # to a known belonging, so persisting them produced 174 unattributed
+        # rows against 0 matched ones. They now go to a short-TTL suggestion
+        # queue instead, surfacing as "we noticed an unenrolled wallet" on the
+        # enrollment screen and expiring on their own.
+        matched = [d for d in detections if d.get("matched_item")]
+        unmatched = [d for d in detections if not d.get("matched_item")]
+
+        if unmatched:
+            self._write_enrollment_suggestions(unmatched, metadata)
+
+        if not matched:
+            names = sorted(set(d["name"] for d in unmatched))
+            print(f"[DailyItemIndexer] No enrolled-item match; {len(unmatched)} "
+                  f"detection(s) routed to suggestions ({', '.join(names)})")
+            return
+
+        detections = matched
+        item_names = sorted(list(set(d.get("matched_item", d["name"]) for d in detections)))
+        extra = f" [suppressed: {', '.join(sorted(set(suppressed)))}]" if suppressed else ""
+        matched_count = len(matched)
+        match_str = f" ({matched_count} exemplar-matched)" if matched_count else ""
+
+        # ── Persist Item Keyframe Evidence into items_storage/ ──
+        import uuid
+        item_keyframe_id = str(uuid.uuid4())
+        try:
+            storage = self._get_item_storage()
+            if storage is not None:
+                storage.save(item_keyframe_id, image, {
+                    **(metadata or {}),
+                    "user_id": user_key,
+                    "type": "item_detection",
+                    "items": item_names,
+                    "matched_count": matched_count
+                })
+        except Exception as e:
+            print(f"[DailyItemIndexer] Error saving item evidence keyframe: {e}")
+
+        print(f"[DailyItemIndexer] Keyframe {item_keyframe_id}: Detected {len(detections)} items ({', '.join(item_names)}){match_str} in {elapsed_ms:.1f}ms{extra}")
+
+        # Persist to MongoDB referencing the exact item_keyframe_id
+        self._persist_to_db(item_keyframe_id, detections, item_names, metadata)
+
+    def _get_item_storage(self):
+        """Lazy-load the ItemStorage for persisting item detection keyframes."""
+        if not hasattr(self, "_item_storage") or self._item_storage is None:
+            try:
+                from keyframe_backend.keyframe import ItemStorage
+                self._item_storage = ItemStorage()
+            except ImportError:
+                import sys, os
+                kb_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "keyframe_backend"))
+                if kb_dir not in sys.path:
+                    sys.path.insert(0, kb_dir)
+                from keyframe_backend.keyframe import ItemStorage
+                self._item_storage = ItemStorage()
+        return self._item_storage
+
+    def _write_enrollment_suggestions(self, unmatched: list[dict], metadata: dict):
+        """Record unenrolled sightings in a short-TTL suggestion queue.
+
+        Expiry is a MongoDB TTL index on `expires_at` rather than a cleanup
+        thread, so the database enforces it and there is no extra worker to own.
+        """
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            from datetime import timedelta
+
+            user_id = (metadata or {}).get("user_id")
+            if not user_id:
+                return
+
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            self._ensure_suggestion_ttl_index(db)
+
+            now = datetime.now(timezone.utc)
+            expires = now + timedelta(seconds=SUGGESTION_TTL_SECONDS)
+            try:
+                uid = ObjectId(str(user_id))
+            except Exception:
+                uid = str(user_id)
+
+            for d in unmatched:
+                # One live suggestion per (user, class): re-seeing the same
+                # unenrolled object refreshes its expiry instead of stacking.
+                db.item_suggestions.update_one(
+                    {"user_id": uid, "class_id": d["class_id"]},
+                    {"$set": {
+                        "user_id": uid,
+                        "class_id": d["class_id"],
+                        "item_name": d["name"],
+                        "confidence": d.get("confidence"),
+                        "last_seen": now,
+                        "expires_at": expires,
+                    },
+                     "$inc": {"sighting_count": 1},
+                     "$setOnInsert": {"created_at": now}},
+                    upsert=True,
+                )
+        except Exception as e:
+            print(f"[DailyItemIndexer] Error writing enrollment suggestions: {e}")
+
+    @staticmethod
+    def _ensure_suggestion_ttl_index(db):
+        """Create the TTL index once; MongoDB then expires documents itself."""
+        try:
+            existing = db.item_suggestions.index_information()
+            if not any(i.get("expireAfterSeconds") is not None for i in existing.values()):
+                db.item_suggestions.create_index("expires_at", expireAfterSeconds=0)
+                print("[DailyItemIndexer] Created TTL index on item_suggestions.expires_at")
+        except Exception as e:
+            print(f"[DailyItemIndexer] Could not ensure suggestion TTL index: {e}")
+
+    def _get_embedding_backbone(self):
+        """Lazy-load the MobileNetV3-Small embedding backbone."""
+        if self._embedding_backbone is None:
+            try:
+                from ai.embedding_backbone import ItemEmbeddingBackbone
+                self._embedding_backbone = ItemEmbeddingBackbone.get_instance()
+            except Exception as e:
+                print(f"[DailyItemIndexer] Error loading embedding backbone: {e}")
+        return self._embedding_backbone
+
+    def _get_user_items_cached(self, user_id_str: str) -> list[dict]:
+        """
+        Fetch active enrolled items with embeddings for a given user from MongoDB.
+        Caches results in memory for EXEMPLAR_CACHE_TTL seconds.
+        """
+        now = time.monotonic()
+        cached = self._user_items_cache.get(user_id_str)
+        if cached is not None:
+            cached_time, items = cached
+            if now - cached_time < self.EXEMPLAR_CACHE_TTL:
+                return items
+
+        # Query MongoDB
+        items = []
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            if self._db_client is None:
+                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+            db = self._db_client["locusDB"]
+
+            try:
+                user_oid = ObjectId(user_id_str)
+                query = {"user_id": user_oid, "is_active": True}
+            except Exception:
+                query = {"user_id": user_id_str, "is_active": True}
+
+            cursor = db.useritems.find(query, {"item_name": 1, "item_embeddings": 1})
+            for doc in cursor:
+                embs = doc.get("item_embeddings", [])
+                if embs:
+                    embs_arr = [np.array(e, dtype=np.float32) for e in embs if len(e) == 576]
+                    # Adaptive threshold: if multi-angle internal similarity is very high (>= 0.96),
+                    # the item lacks high-frequency surface texture (e.g. plain solid surface).
+                    # For such items, apply a cautious 0.72 threshold to prevent ambient clutter false matches.
+                    if len(embs_arr) >= 2:
+                        pairwise = [
+                            float(np.dot(embs_arr[i], embs_arr[j]))
+                            for i in range(len(embs_arr))
+                            for j in range(i + 1, len(embs_arr))
+                        ]
+                        mean_internal_sim = sum(pairwise) / len(pairwise) if pairwise else 1.0
+                    else:
+                        mean_internal_sim = 1.0
+
+                    item_thresh = 0.72 if mean_internal_sim >= 0.96 else self.EXEMPLAR_MATCH_THRESHOLD
+
+                    items.append({
+                        "id": str(doc["_id"]),
+                        "name": doc.get("item_name", "Unknown Item"),
+                        "embeddings": embs_arr,
+                        "threshold": item_thresh
+                    })
+        except Exception as e:
+            print(f"[DailyItemIndexer] Error fetching user items for {user_id_str}: {e}")
+
+        self._user_items_cache[user_id_str] = (now, items)
+        return items
+
+    def _enrich_with_exemplar_matches(self, detections: list[dict], image: np.ndarray, user_id_str: str):
+        """
+        Exemplar Matching:
+        For each YOLO-detected personal item, crop the bounding box, extract a 576-D embedding,
+        and compare it against the user's enrolled item embeddings.
+        If max cosine similarity >= item threshold (0.65 for textured items, 0.72 for plain items),
+        rename the detection to the user's custom name.
+        """
+        user_items = self._get_user_items_cached(user_id_str)
+        if not user_items:
+            return
+
+        backbone = self._get_embedding_backbone()
+        if backbone is None:
+            return
+
+        img_h, img_w = image.shape[:2]
+
+        # Collect every crop first, then embed them in ONE batched forward pass.
+        # Embedding was the dominant cost in the worker: measured 109ms/crop when
+        # extract() was called per detection in a loop, vs 61ms/crop through
+        # extract_batch() on the same 8 crops (1.8x). A typical keyframe yields
+        # 2-5 allowlisted boxes, so this removes ~100-250ms per keyframe.
+        crops = []
+        crop_dets = []
+        for d in detections:
+            bbox = d.get("bbox")
+            if not bbox:
+                continue
+
+            x1 = max(0, int(bbox["x1"]))
+            y1 = max(0, int(bbox["y1"]))
+            x2 = min(img_w, int(bbox["x2"]))
+            y2 = min(img_h, int(bbox["y2"]))
+
+            if (x2 - x1) < 15 or (y2 - y1) < 15:
+                continue
+
+            crop = image[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+
+            crops.append(crop)
+            crop_dets.append(d)
+
+        if not crops:
+            return
+
+        try:
+            crop_embs = backbone.extract_batch(crops)
+        except Exception as e:
+            print(f"[DailyItemIndexer] Error extracting crop embeddings: {e}")
+            return
+
+        # Stack each item's gallery once so scoring is a single matrix product
+        # per item instead of a Python loop over individual embeddings.
+        for d, crop_emb in zip(crop_dets, crop_embs):
+            best_match_name = None
+            best_sim = 0.0
+            best_item_id = None
+            best_thresh = self.EXEMPLAR_MATCH_THRESHOLD
+
+            for item in user_items:
+                thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
+                sims = np.asarray(item["embeddings"]) @ crop_emb
+                sim = float(sims.max()) if sims.size else 0.0
+                if sim > best_sim and sim >= thresh:
+                    best_sim = sim
+                    best_match_name = item["name"]
+                    best_item_id = item["id"]
+                    best_thresh = thresh
+
+            if best_match_name:
+                generic_name = d["name"]
+                d["matched_item"] = best_match_name
+                d["enrolled_item_id"] = best_item_id
+                d["exemplar_similarity"] = round(best_sim, 3)
+                d["generic_name"] = generic_name
+                d["name"] = best_match_name
+                print(f"[DailyItemIndexer] Exemplar MATCH: '{generic_name}' -> '{best_match_name}' (sim={best_sim:.3f} >= {best_thresh})")
+
+    def _check_and_enrich_activity(self, keyframe_id: str, detections: list[dict], metadata: dict):
+        """
+        Tier-2 Activity Gap-Filling:
+        If Tier-1 produced no activity or was blind to the object class (e.g. Plate, Toothbrush, Soap),
+        synthesize the activity from Objects365 detections and log an enriched activity event.
+        """
+        tier1_activity = metadata.get("activity")
+        tier1_sentence = metadata.get("sentence")
+        tier1_env = metadata.get("environment")
+
+        # If Tier-1 already found a confident activity (e.g. typing, drinking), do not override
+        if tier1_activity and tier1_sentence and metadata.get("type") == "activity":
+            return
+
+        # Find best candidate from TIER2_GAP_FILL_ACTIVITY_MAP
+        best_match = None
+        best_conf = 0.0
+        for d in detections:
+            cid = d["class_id"]
+            if cid in TIER2_GAP_FILL_ACTIVITY_MAP and d["confidence"] > best_conf:
+                best_conf = d["confidence"]
+                act_label, fallback_env = TIER2_GAP_FILL_ACTIVITY_MAP[cid]
+                best_match = (act_label, fallback_env, d["name"], best_conf)
+
+        if not best_match:
+            return
+
+        act_label, fallback_env, trigger_item, conf = best_match
+
+        # Tier-2 synthesises activities from raw YOLO class confidence, which is
+        # continuous and was firing as low as 0.30 — a Plate/Bowl on a desk
+        # produced "Eating in the dining area." while the wearer was typing.
+        # Tier-1's weakest real tier is 0.55; hold Tier-2 to the same bar rather
+        # than letting it assert activities Tier-1 would never have claimed.
+        if conf < TIER2_MIN_ACTIVITY_CONF:
+            print(f"[DailyItemIndexer] [Tier-2] Rejected '{act_label}' — trigger "
+                  f"{trigger_item}={conf:.3f} below {TIER2_MIN_ACTIVITY_CONF}")
+            return
+        env = tier1_env if tier1_env else fallback_env
+
+        # Dedup enriched activities (120s window)
+        user_key = str((metadata or {}).get("user_id", "unknown"))
+        now_ts = time.monotonic()
+        last_ts = self._last_enriched_activity.get((user_key, act_label))
+        if last_ts is not None and (now_ts - last_ts) < 120.0:
+            return
+        self._last_enriched_activity[(user_key, act_label)] = now_ts
+
+        # Synthesize sentence
+        if act_label and env:
+            sentence = f"{act_label.capitalize()} in the {env}."
+        elif act_label:
+            sentence = f"{act_label.capitalize()}."
+        else:
+            sentence = f"In the {env}."
+
+        print(f"[DailyItemIndexer] [Tier-2 Enrichment] Synthesized activity '{sentence}' triggered by {trigger_item}={conf:.3f} on keyframe {keyframe_id}")
+
+        # Write enriched activity to MongoDB
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            client = MongoClient("mongodb://localhost:27017")
+            db = client["locusDB"]
+            ts_now = datetime.now(timezone.utc)
+            user_id = metadata.get("user_id")
+            if not user_id:
+                return
+            try:
+                user_oid = ObjectId(str(user_id))
+            except Exception:
+                user_oid = str(user_id)
+
+            # 1. Update keyframemetas
+            db.keyframemetas.update_one(
+                {"keyframe_id": keyframe_id},
+                {"$set": {
+                    "activity": act_label,
+                    "environment": env,
+                    "sentence": sentence,
+                    "enriched_by": "yolo11n_object365",
+                    "enriched_item": trigger_item,
+                    "enriched_at": ts_now
+                }},
+                upsert=False
+            )
+
+            # 2. Insert enriched EventLog
+            event_doc = {
+                "user_id": user_oid,
+                "event_type": "activity",
+                "timestamp": ts_now,
+                "confidence": round(conf, 2),
+                "details": {
+                    "action": act_label,
+                    "activity": act_label,
+                    "environment": env,
+                    "sentence": sentence,
+                    "description": sentence,
+                    "trigger_item": trigger_item,
+                    "gap_filled": True,
+                    "source": "tier2_enrichment"
+                },
+                "keyframe_id": keyframe_id,
+                "verification_status": "confirmed",
+                "createdAt": ts_now,
+                "updatedAt": ts_now
+            }
+            db.eventlogs.insert_one(event_doc)
+            print(f"[DailyItemIndexer] [Tier-2 Enrichment] Successfully logged enriched activity event to EventLog for user {user_id}")
+        except Exception as e:
+            print(f"[DailyItemIndexer] [Tier-2 Enrichment] DB write note: {e}")
 
     def _persist_to_db(self, keyframe_id: str, detections: list[dict], item_names: list[str], metadata: dict):
         """Update keyframemetas and write object eventlog to MongoDB."""
@@ -273,3 +891,171 @@ class DailyItemIndexer:
         except Exception as e:
             print(f"[DailyItemIndexer] DB error during persistence: {e}")
             traceback.print_exc()
+
+    # ── Tiled exemplar scan ──────────────────────────────────────────────────
+    def _tile_regions(self, img_w: int, img_h: int) -> list[tuple[int, int, int, int]]:
+        """Multi-scale sliding windows over the searchable region of the frame."""
+        x0 = int(TILE_REGION_X[0] * img_w)
+        x1 = int(TILE_REGION_X[1] * img_w)
+        y0 = int(TILE_REGION_Y0 * img_h)
+        regions = []
+        for frac in TILE_SCALE_FRACS:
+            size = max(TILE_MIN_PX, int(frac * img_w))
+            stride = max(8, int(size * TILE_STRIDE_FRAC))
+            for yy in range(y0, max(y0 + 1, img_h - size + 1), stride):
+                for xx in range(x0, max(x0 + 1, x1 - size + 1), stride):
+                    regions.append((xx, yy, min(img_w, xx + size), min(img_h, yy + size)))
+        return regions
+
+    def _scan_tiles_for_enrolled_items(self, image: np.ndarray, user_id_str: str) -> list[dict]:
+        """Find enrolled items that YOLO failed to box, by scanning the frame directly.
+
+        Decision rule is deliberately winner-take-all per item rather than
+        "every region over threshold": an enrolled belonging appears at most once
+        in a frame, and accepting every region above 0.65 produced false positives
+        in 4/6 frames against 4/6 detections. Taking only each item's best-scoring
+        region gave 5/6 detections with 0 false positives on the same frames.
+
+        Returns synthesized detection dicts, already carrying matched_item, so the
+        existing dedup and identity-gated persistence path handles them unchanged.
+        """
+        user_items = self._get_user_items_cached(user_id_str)
+        if not user_items:
+            return []
+        backbone = self._get_embedding_backbone()
+        if backbone is None:
+            return []
+
+        img_h, img_w = image.shape[:2]
+        regions, crops = [], []
+        for r in self._tile_regions(img_w, img_h):
+            if (r[2] - r[0]) < TILE_MIN_PX or (r[3] - r[1]) < TILE_MIN_PX:
+                continue
+            crop = image[r[1]:r[3], r[0]:r[2]]
+            if crop.size == 0:
+                continue
+            regions.append(r)
+            crops.append(crop)
+        if not crops:
+            return []
+
+        t0 = time.perf_counter()
+        try:
+            embs = backbone.extract_batch(crops)
+        except Exception as e:
+            print(f"[DailyItemIndexer] Tile scan embedding failed: {e}")
+            return []
+
+        best: dict[str, tuple[float, tuple, dict]] = {}
+        for region, emb in zip(regions, embs):
+            for item in user_items:
+                thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
+                sims = np.asarray(item["embeddings"]) @ emb
+                sim = float(sims.max()) if sims.size else 0.0
+                if sim < thresh:
+                    continue
+                cur = best.get(item["id"])
+                if cur is None or sim > cur[0]:
+                    best[item["id"]] = (sim, region, item)
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        if not best:
+            print(f"[DailyItemIndexer] Tile scan: {len(crops)} regions, no match ({elapsed:.0f}ms)")
+            return []
+
+        out = []
+        for item_id, (sim, region, item) in best.items():
+            print(f"[DailyItemIndexer] Tile scan MATCH: '{item['name']}' "
+                  f"(sim={sim:.3f}) at {region} over {len(crops)} regions ({elapsed:.0f}ms)")
+            out.append({
+                "name": item["name"],
+                "class_id": -1,                 # no YOLO class: found by tile scan
+                "confidence": round(sim, 3),
+                "bbox": {"x1": region[0], "y1": region[1], "x2": region[2], "y2": region[3]},
+                "matched_item": item["name"],
+                "enrolled_item_id": item_id,
+                "exemplar_similarity": round(sim, 3),
+                "generic_name": "tile_scan",
+            })
+        return out
+
+
+# ── module level ──
+
+# ── Enrollment-side tight cropping ───────────────────────────────────────────
+ENROLL_CROP_MARGIN = 0.15      # padding added around the detected box
+ENROLL_CROP_MIN_CONF = 0.25    # below this, keep the full photo
+ENROLL_CROP_MIN_AREA = 0.02    # ignore specks
+ENROLL_CROP_MAX_AREA = 0.90    # ignore whole-scene boxes
+
+
+def tight_crop_enrollment_image(image_bgr: np.ndarray,
+                                margin: float = ENROLL_CROP_MARGIN) -> np.ndarray:
+    """Crop a phone enrollment photo down to the object it is a photo OF.
+
+    Enrollment photos frame the item against whatever it was lying on, and
+    MobileNetV3 embeds that background along with the item. Measured on the real
+    Car Keys enrollment photo (keys on a yellow sofa) against the four live
+    chest-cam frames, distractor-controlled:
+
+        full photo   keys ranked #1 in 3/4, 0/4 above threshold, mean margin +0.157
+                     -- and in the frame that fired in production the wearer's
+                     black phone scored 0.558 vs the keys' 0.551, i.e. the phone
+                     won and was logged as "Car Keys"
+        tight +15%   keys ranked #1 in 4/4, 3/4 above threshold, mean margin +0.320
+                     -- phone falls to 0.633, below the 0.65 threshold, 0 false
+                     positives across all four frames
+
+    The class label is deliberately ignored. Objects365 calls these keys
+    "Motorcycle" at 0.83 confidence, but the BOX is tight and correct, and only
+    the box is used. Cropping to a wrong-labelled box is fine; the exemplar
+    gallery never sees the label.
+
+    Falls back to the untouched image whenever localisation is not confident,
+    so a photo the detector cannot parse still enrolls as it did before.
+    """
+    if image_bgr is None or image_bgr.size == 0:
+        return image_bgr
+
+    try:
+        indexer = DailyItemIndexer.get_instance()
+        indexer._ensure_model_loaded()
+        model = indexer._model
+        if model is None:
+            return image_bgr
+
+        h, w = image_bgr.shape[:2]
+        frame_area = float(h * w)
+        results = model(image_bgr, conf=ENROLL_CROP_MIN_CONF, verbose=False)
+        if not results or results[0].boxes is None or len(results[0].boxes) == 0:
+            return image_bgr
+
+        best_box, best_conf = None, 0.0
+        for box in results[0].boxes:
+            conf = float(box.conf[0].item())
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            area = max(0.0, (x2 - x1)) * max(0.0, (y2 - y1)) / frame_area
+            if not (ENROLL_CROP_MIN_AREA <= area <= ENROLL_CROP_MAX_AREA):
+                continue
+            if conf > best_conf:
+                best_conf, best_box = conf, (x1, y1, x2, y2)
+
+        if best_box is None:
+            return image_bgr
+
+        x1, y1, x2, y2 = best_box
+        px, py = (x2 - x1) * margin, (y2 - y1) * margin
+        cx1 = max(0, int(x1 - px))
+        cy1 = max(0, int(y1 - py))
+        cx2 = min(w, int(x2 + px))
+        cy2 = min(h, int(y2 + py))
+        if cx2 - cx1 < 20 or cy2 - cy1 < 20:
+            return image_bgr
+
+        print(f"[enrollment] tight crop {w}x{h} -> {cx2-cx1}x{cy2-cy1} "
+              f"(box conf={best_conf:.2f}, margin={margin:.0%})")
+        return image_bgr[cy1:cy2, cx1:cx2]
+
+    except Exception as e:
+        print(f"[enrollment] tight crop failed, using full image: {e}")
+        return image_bgr

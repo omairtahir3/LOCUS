@@ -10,10 +10,14 @@ router.get('/memory-search', auth, async (req, res) => {
     let userId = req.user.id;
     // If caregiver, they view logs for their connected elderly user
     if (req.user.role === 'caregiver') {
-      const User = require('../models/User');
-      const caregiver = await User.findById(req.user.id);
-      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-        userId = caregiver.monitoring_users[0];
+      if (req.query.userId) {
+        userId = req.query.userId;
+      } else {
+        const User = require('../models/User');
+        const caregiver = await User.findById(req.user.id);
+        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
+          userId = caregiver.monitoring_users[0];
+        }
       }
     }
 

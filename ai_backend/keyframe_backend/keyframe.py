@@ -93,15 +93,18 @@ class KeyframeStorage:
         except Exception as e:
             print(f"[KeyframeStorage.save] ✗ ERROR writing metadata: {e}")
 
-        # Tier-2 Asynchronous Daily Life Item Indexer
+        # Tier-2 Asynchronous Daily Life Item Indexer.
+        # Import via ONE path only. Python caches modules by import path, so
+        # importing this as both `ai.item_indexer` and
+        # `ai_backend.detection_pipeline.ai.item_indexer` produced two distinct
+        # module objects — two singletons, two worker threads, two model loads,
+        # and two independent dedup dicts, which silently bypassed the 120s
+        # enrichment window (observed: duplicate "Eating" events in the same second).
         try:
-            try:
-                from ai_backend.detection_pipeline.ai.item_indexer import DailyItemIndexer
-            except ImportError:
-                from ai.item_indexer import DailyItemIndexer
+            from ai.item_indexer import DailyItemIndexer
             DailyItemIndexer.get_instance().enqueue_keyframe(keyframe_id, frame, metadata)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[KeyframeStorage] Item indexer enqueue failed: {e}")
 
 
 
@@ -296,6 +299,11 @@ class KeyframeStorage:
             for r in rels:
                 if r.get("representative_keyframe_id"): retained_kids.add(r.get("representative_keyframe_id"))
                 
+            # Check user items representative images
+            user_items = db.useritems.find({"representative_keyframe_id": {"$in": expired_kids}}, {"representative_keyframe_id": 1})
+            for u in user_items:
+                if u.get("representative_keyframe_id"): retained_kids.add(u.get("representative_keyframe_id"))
+                
             client.close()
         except Exception as e:
             print(f"[Storage] DB Error during cleanup retention check: {e}")
@@ -380,6 +388,25 @@ class ActivityStorage(KeyframeStorage):
                     <uuid>.json
     """
     def __init__(self, storage_dir=ACTIVITY_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
+        super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
+
+
+ITEMS_STORAGE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "items_storage"
+)
+
+class ItemStorage(KeyframeStorage):
+    """
+    Persists personal belongings item detection keyframes to disk.
+    Storage layout:
+        items_storage/
+            <user_id>/
+                <YYYY-MM-DD>/
+                    <uuid>.jpg
+                    <uuid>.json
+    """
+    def __init__(self, storage_dir=ITEMS_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
 
 

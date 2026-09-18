@@ -35,6 +35,11 @@ def _get_mongo_db():
 from .core.policy import ConfidencePolicy
 EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
 THRESHOLD_AUTO_VERIFY = EVENT_CONFIDENCE_POLICY.auto_verify_threshold
+
+# Minimum pill confidence required IN THE PHASE-2 FRAME. Phase 2 judged hand
+# position alone, so any hand raised toward the face scored >= 0.75 whether it
+# held a pill, a pen, or nothing. Matches the 0.45 bar phase 1 already applies.
+PHASE2_MIN_PILL_CONF = 0.45
 THRESHOLD_CONFIRM = EVENT_CONFIDENCE_POLICY.confirmation_threshold
 THRESHOLD_MISSED = EVENT_CONFIDENCE_POLICY.confirmation_threshold
 
@@ -1314,21 +1319,39 @@ class MedicationDetectionPipeline:
             # Compute Phase 2 score
             if p2_data["hands"] > 0 and not p2_disappeared:
                 p2_score = max(p2_data["motion"], p2_data.get("near_top_score", 0))
+                # Height bonuses, not floors. These were `max(p2_score, X)`,
+                # which meant any visible hand scored >= 0.75 regardless of
+                # motion — a hand near the face scored the same whether it
+                # held a pill, a pen, or nothing at all.
                 if p2_data["hand_y"] < 0.25:
-                    p2_score = max(p2_score, 0.95)
+                    p2_score += 0.25
                 elif p2_data["hand_y"] < 0.35:
-                    p2_score = max(p2_score, 0.90)
+                    p2_score += 0.20
                 elif p2_data["hand_y"] < 0.45:
-                    p2_score = max(p2_score, 0.85)
+                    p2_score += 0.15
                 elif p2_data["hand_y"] < 0.55:
-                    p2_score = max(p2_score, 0.80)
-                p2_score = max(p2_score, 0.75)
+                    p2_score += 0.10
+                p2_score = min(1.0, p2_score)
+
+                # Phase 2 previously ignored the pill signal entirely, judging
+                # only hand position. The ONNX model already scores the pill in
+                # this frame, so require it to still be present during the
+                # hand-to-mouth motion rather than trusting the gesture alone.
+                p2_pill = p2_data.get("best_pill", 0.0)
+                if p2_pill < PHASE2_MIN_PILL_CONF:
+                    print(f"  [Phase2] REJECTED at frame {p2_idx}: pill not present "
+                          f"during motion (best_pill={p2_pill:.3f} < {PHASE2_MIN_PILL_CONF})")
+                    search_start = p1_idx + 1
+                    continue
                 print(f"  [Phase2] OK Best hand-toward-mouth at frame {p2_idx} "
                       f"(hand_y={p2_data['hand_y']:.2f}, motion={p2_data['motion']:.2f}, "
                       f"composite={best_p2_composite:.2f}, score={p2_score:.2f})")
             else:
-                # Hand disappeared for 3+ frames = body cam evidence
-                p2_score = 0.80
+                # Hand disappeared for 3+ frames = body cam evidence.
+                # Lowered from a flat 0.80: a hand simply leaving frame is weak
+                # evidence (it happens reaching for anything off-camera), and
+                # at 0.80 it contributed as much as a clearly observed motion.
+                p2_score = 0.60
                 print(f"  [Phase2] OK Hand disappeared for {consecutive_no_hand} frames at {p2_idx}")
 
             # ── PHASE 3: Hand comes back EMPTY (ONLY frames AFTER P2) ──
@@ -1387,9 +1410,15 @@ class MedicationDetectionPipeline:
             p1_score = p1_data["best_pill"]
             p3_score = min(1.0, max(0.70, pill_drop / max(0.01, p1_data["best_pill"])))
 
-            # Boost P1 if dual-confirmed (YOLO + MediaPipe overlap)
+            # NOTE: a `p1_score = max(p1_score, 0.90)` floor used to sit here.
+            # It overrode the measured pill confidence, so a single spurious
+            # detection (observed: capsule=0.568 at the frame's bottom edge
+            # during a laptop session) scored p1=0.90, p2=0.80, p3=1.00 and
+            # produced exactly 0.904 — above the 0.85 auto-verify bar. That
+            # constant was logged on three separate days. Dual confirmation
+            # now adds a bounded bonus instead of replacing the measurement.
             if p1_data["pill_in_hand"] and p1_data["in_hand_count"] >= 1:
-                p1_score = max(p1_score, 0.90)
+                p1_score = min(1.0, p1_score + 0.05)
 
             # All 3 phases contribute meaningfully to confidence
             weighted_avg = p1_score * 0.35 + p2_score * 0.30 + p3_score * 0.35
