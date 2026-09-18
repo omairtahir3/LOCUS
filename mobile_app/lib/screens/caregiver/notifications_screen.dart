@@ -62,6 +62,61 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  Future<void> _clearAllNotifs() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Clear All Notifications', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: const Text('Are you sure you want to clear all alerts and notifications?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _notifications = [];
+        _unreadCount = 0;
+      });
+      try {
+        await ApiService.clearAllNotifications();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('All notifications cleared'),
+              backgroundColor: AppColors.success,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear notifications: $e'),
+              backgroundColor: AppColors.danger,
+            ),
+          );
+          _loadNotifs();
+        }
+      }
+    }
+  }
+
   List<dynamic> get _filtered {
     if (_filter == 'all' || _filter == 'unread') return _notifications;
     return _notifications.where((n) {
@@ -93,20 +148,67 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           children: [
             // Header
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Notifications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 2),
-                  Text('$_unreadCount unread', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                ]),
-                TextButton.icon(
-                  onPressed: () async {
-                    await ApiService.markAllNotificationsRead();
-                    _loadNotifs();
-                  },
-                  icon: const Icon(Icons.done_all, size: 16),
-                  label: const Text('Mark All Read', style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Notifications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text('$_unreadCount unread', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () async {
+                        await ApiService.markAllNotificationsRead();
+                        _loadNotifs();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.done_all, size: 14, color: AppColors.primary),
+                            SizedBox(width: 4),
+                            Text('Mark Read', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_notifications.isNotEmpty)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: _clearAllNotifs,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(Icons.delete_sweep_outlined, size: 14, color: AppColors.danger),
+                              SizedBox(width: 4),
+                              Text('Clear All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.danger)),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -121,6 +223,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
+                      showCheckmark: false,
                       selected: isSelected,
                       label: Text(f['label']!),
                       onSelected: (_) {
@@ -128,7 +231,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         _loadNotifs();
                       },
                       selectedColor: AppColors.primaryLight,
-                      checkmarkColor: AppColors.primary,
                       labelStyle: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

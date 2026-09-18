@@ -578,6 +578,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                   spacing: 8,
                   children: ['daily', 'weekly', 'as_needed'].map((f) =>
                     ChoiceChip(
+                      showCheckmark: false,
                       label: Text(f.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
                         color: frequency == f ? Colors.white : AppColors.textSecondary)),
                       selected: frequency == f,

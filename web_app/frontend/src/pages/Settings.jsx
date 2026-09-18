@@ -51,7 +51,14 @@ export default function SettingsPage() {
             <div className="card-title">Profile Information</div>
           </div>
           {(user?.picture || user?.profile_picture) ? (
-            <img src={user.picture || user.profile_picture} alt="" style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }} />
+            <img 
+              src={user.picture || user.profile_picture} 
+              alt="" 
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+              style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }} 
+              onError={(e) => { e.target.style.display = 'none'; }}
+            />
           ) : (
             <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>
               {user?.name?.charAt(0)?.toUpperCase() || 'U'}

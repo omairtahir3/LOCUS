@@ -24,6 +24,22 @@ import UserHistory from './pages/UserHistory';
 import MemorySearch from './pages/MemorySearch';
 import RelationshipsManage from './pages/RelationshipsManage';
 
+function CaregiverOnlyRoute({ element }) {
+  const { user } = useAuth();
+  if (user && user.role !== 'caregiver' && user.role !== 'admin') {
+    return <Navigate to="/my-dashboard" replace />;
+  }
+  return element;
+}
+
+function UserOnlyRoute({ element }) {
+  const { user } = useAuth();
+  if (user && (user.role === 'caregiver' || user.role === 'admin')) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return element;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -37,26 +53,26 @@ function App() {
             
             <Route element={<AppLayout />}>
               {/* Caregiver routes */}
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="family" element={<FamilyMembers />} />
-              <Route path="family/:userId" element={<FamilyMemberDetail />} />
-              <Route path="medications" element={<Medications />} />
-              <Route path="notifications" element={<Notifications />} />
-              <Route path="location" element={<LocationMap />} />
-              <Route path="activity" element={<ActivityFeed />} />
-              <Route path="interactions/:id" element={<PastInteractions />} />
-              <Route path="relationships" element={<RelationshipsManage />} />
+              <Route path="dashboard" element={<CaregiverOnlyRoute element={<Dashboard />} />} />
+              <Route path="family" element={<CaregiverOnlyRoute element={<FamilyMembers />} />} />
+              <Route path="family/:userId" element={<CaregiverOnlyRoute element={<FamilyMemberDetail />} />} />
+              <Route path="medications" element={<CaregiverOnlyRoute element={<Medications />} />} />
+              <Route path="location" element={<CaregiverOnlyRoute element={<LocationMap />} />} />
+              <Route path="interactions/:id" element={<CaregiverOnlyRoute element={<PastInteractions />} />} />
+              <Route path="relationships" element={<CaregiverOnlyRoute element={<RelationshipsManage />} />} />
 
+              {/* Shared monitoring & settings routes */}
+              <Route path="activity" element={<ActivityFeed />} />
+              <Route path="notifications" element={<Notifications />} />
               <Route path="keyframes" element={<KeyframeAudit />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="memory-search" element={<MemorySearch />} />
 
               {/* Normal user routes */}
-              <Route path="my-dashboard" element={<UserDashboard />} />
-              <Route path="my-medications" element={<UserMedications />} />
-              <Route path="my-history" element={<UserHistory />} />
-              <Route path="my-activity" element={<ActivityFeed />} />
-
-              <Route path="memory-search" element={<MemorySearch />} />
+              <Route path="my-dashboard" element={<UserOnlyRoute element={<UserDashboard />} />} />
+              <Route path="my-medications" element={<UserOnlyRoute element={<UserMedications />} />} />
+              <Route path="my-history" element={<UserOnlyRoute element={<UserHistory />} />} />
+              <Route path="my-activity" element={<UserOnlyRoute element={<ActivityFeed />} />} />
             </Route>
 
             {/* Catch-all */}

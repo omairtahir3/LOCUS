@@ -24,6 +24,8 @@ import 'screens/caregiver/activity_feed_screen.dart';
 import 'screens/caregiver/keyframe_audit_screen.dart';
 import 'screens/memory/past_interactions_screen.dart';
 import 'screens/settings/relationships_manage_screen.dart';
+import 'screens/items/my_items_screen.dart';
+import 'screens/items/item_enroll_screen.dart';
 import 'services/selected_user_service.dart';
 import 'services/fall_detection_service.dart';
 
@@ -78,6 +80,8 @@ class LocusApp extends StatelessWidget {
         '/register': (_) => const RegisterScreen(),
         '/home': (_) => const MainShell(),
         '/relationships-manage': (_) => const RelationshipsManageScreen(),
+        '/my-items': (_) => const MyItemsScreen(),
+        '/item-enroll': (_) => const ItemEnrollScreen(),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/past-interactions') {
@@ -293,7 +297,7 @@ class _MoreScreen extends StatelessWidget {
           const SizedBox(height: 20),
           _moreTile(context, Icons.location_on_outlined, 'Location Map', 'Real-time family member tracking', AppColors.info, const LocationMapScreen(), wrapInScaffold: false),
           _moreTile(context, Icons.timeline_outlined, 'Activity Feed', 'Behavioral monitoring & analysis', AppColors.accent, const ActivityFeedScreen()),
-
+          _moreTile(context, Icons.search_outlined, 'Memory Search', 'Search memories, interactions & detected objects', AppColors.primary, const MemoryScreen()),
           _moreTile(context, Icons.camera_alt_outlined, 'Keyframe Audit', 'Per-frame AI evidence log', AppColors.accent, const KeyframeAuditScreen(), wrapInScaffold: false),
           _moreTile(context, Icons.settings_outlined, 'Settings', 'Account, notifications & preferences', AppColors.textSecondary, const SettingsScreen()),
         ],

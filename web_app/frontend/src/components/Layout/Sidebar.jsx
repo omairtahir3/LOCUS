@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, Pill, Bell, MapPin, Activity,
@@ -45,7 +45,9 @@ export default function Sidebar({ isMobileOpen, closeMobile }) {
       <div className={`sidebar-overlay ${isMobileOpen ? 'open' : ''}`} onClick={closeMobile} />
       <aside className={`sidebar ${isMobileOpen ? 'open' : ''}`}>
         <div className="sidebar-logo" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <img src="/logo.png" alt="LOCUS" />
+          <Link to={isCaregiver ? '/dashboard' : '/my-dashboard'} onClick={closeMobile} style={{ display: 'flex', alignItems: 'center' }}>
+            <img src="/logo.png" alt="LOCUS" />
+          </Link>
           {isMobileOpen && (
             <button className="btn btn-icon btn-ghost d-md-none" onClick={closeMobile} style={{ padding: 4 }}>
               <X size={20} />
@@ -101,8 +103,19 @@ export default function Sidebar({ isMobileOpen, closeMobile }) {
       <div className="sidebar-footer">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '0 4px' }}>
           {(user?.picture || user?.profile_picture) ? (
-            <img src={user.picture || user.profile_picture} alt={user?.name || 'User'} className="avatar avatar-sm" style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} />
-          ) : (
+            <img 
+              src={user.picture || user.profile_picture} 
+              alt={user?.name || 'User'} 
+              className="avatar avatar-sm" 
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+              style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)' }} 
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
+          ) : null}
+          {(!(user?.picture || user?.profile_picture)) && (
             <div className="avatar avatar-sm" style={{ background: isCaregiver ? 'var(--primary)' : 'var(--accent)' }}>
               {user?.name?.charAt(0)?.toUpperCase() || 'U'}
             </div>

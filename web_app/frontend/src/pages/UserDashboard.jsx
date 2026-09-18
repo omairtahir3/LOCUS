@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { userAPI, authAPI, detectionAPI } from '../services/api';
 import { formatTime12Hour } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +10,7 @@ import {
 
 export default function UserDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [schedule, setSchedule] = useState([]);
   const [adherence, setAdherence] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -20,13 +22,17 @@ export default function UserDashboard() {
   const [rtmpHost, setRtmpHost] = useState('');
 
   useEffect(() => {
+    if (user && (user.role === 'caregiver' || user.role === 'admin')) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
     loadData();
     authAPI.getRtmpHost().then(res => setRtmpHost(res.data.host)).catch(() => setRtmpHost(window.location.hostname));
     const interval = setInterval(() => {
       if (!document.hidden) loadData();
     }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user, navigate]);
 
   const loadData = async () => {
     try {

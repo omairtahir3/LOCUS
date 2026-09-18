@@ -140,9 +140,21 @@ export default function FamilyMemberDetail() {
       </Link>
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap' }}>
-        <div className="avatar avatar-lg" style={{ background: '#0D9488', fontSize: '1.4rem' }}>
-          {user?.name?.charAt(0)?.toUpperCase()}
-        </div>
+        {(user?.picture || user?.profile_picture) ? (
+          <img 
+            src={user.picture || user.profile_picture} 
+            alt="" 
+            className="avatar avatar-lg" 
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
+            style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)', width: 56, height: 56 }} 
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        ) : (
+          <div className="avatar avatar-lg" style={{ background: '#0D9488', fontSize: '1.4rem' }}>
+            {user?.name?.charAt(0)?.toUpperCase()}
+          </div>
+        )}
         <div style={{ flex: 1 }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>{user?.name}</h2>
           <p className="text-muted text-sm">{user?.email} • {user?.phone || 'No phone'}</p>
