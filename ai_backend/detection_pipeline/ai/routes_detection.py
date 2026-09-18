@@ -328,3 +328,76 @@ async def rewatch_medication_route(req: RewatchRequest):
 
 
 # Keyframe routes have been moved to keyframe_backend/routes.py
+
+
+# ── Exemplar Embedding Gallery ───────────────────────────────────────────
+
+class EmbeddingRequest(BaseModel):
+    frames: list[str]  # List of base64-encoded JPEG images (3-5 from different angles)
+
+
+@router.post("/extract-embedding")
+async def extract_embedding(req: EmbeddingRequest):
+    """
+    Extract MobileNetV3-Small 576-D embeddings from base64-encoded JPEG images.
+    Used during item enrollment: the mobile app captures 3-5 photos of a personal item,
+    the Node.js backend forwards them here for embedding extraction.
+
+    Returns:
+        { embeddings: [[576 floats], ...], count: int }
+    """
+    import base64
+    import numpy as np
+    import cv2
+
+    if not req.frames or len(req.frames) < 1:
+        raise HTTPException(status_code=400, detail="At least 1 frame is required")
+    if len(req.frames) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 frames allowed")
+
+    try:
+        from ai.embedding_backbone import ItemEmbeddingBackbone
+        backbone = ItemEmbeddingBackbone.get_instance()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load embedding backbone: {e}")
+
+    valid_images = []
+    for i, frame_b64 in enumerate(req.frames):
+        try:
+            # Strip data URI prefix if present (e.g., "data:image/jpeg;base64,...")
+            if ',' in frame_b64:
+                frame_b64 = frame_b64.split(',', 1)[1]
+            img_bytes = base64.b64decode(frame_b64)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if image is not None:
+                valid_images.append(image)
+            else:
+                print(f"[extract-embedding] Frame {i}: Failed to decode image")
+        except Exception as e:
+            print(f"[extract-embedding] Frame {i}: Error decoding - {e}")
+            continue
+
+    if not valid_images:
+        raise HTTPException(status_code=422, detail="Could not extract embeddings from any provided image")
+
+    # Crop each photo down to the item before embedding. Enrollment shots frame
+    # the item against a couch/table, and that background ends up in the vector:
+    # the un-cropped Car Keys gallery scored the wearer's black phone (0.558)
+    # ABOVE the keys themselves (0.551) and logged it as "Car Keys". Cropping to
+    # the detected object + 15% margin moved the keys to rank #1 in 4/4 frames
+    # and dropped the phone to 0.633, under threshold. See
+    # tight_crop_enrollment_image for the full measurement.
+    try:
+        from ai.item_indexer import tight_crop_enrollment_image
+        valid_images = [tight_crop_enrollment_image(img) for img in valid_images]
+    except Exception as e:
+        print(f"[extract-embedding] tight crop unavailable, using full frames: {e}")
+
+    # Fast batch inference in a single forward pass
+    # enrollment=True: these are phone photos, so strip the high-frequency
+    # detail the wearable camera never captures (see _simulate_wearable_optics).
+    raw_embeddings = backbone.extract_batch(valid_images, enrollment=True)
+    embeddings = [emb.tolist() for emb in raw_embeddings]
+
+    return {"embeddings": embeddings, "count": len(embeddings)}

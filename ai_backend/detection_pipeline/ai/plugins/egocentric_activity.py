@@ -9,6 +9,22 @@ from ..core.plugins import DetectorPlugin
 # keeping it here preserves the previous detection behaviour exactly.
 DETECT_CONF = 0.25
 
+# Per-class confidence floors, applied on top of DETECT_CONF.
+#
+# 'cell phone': yolov8n reads a black car-key fob as a phone, which logged
+# "Using a phone." repeatedly while the wearer was holding keys and no phone was
+# in frame at all. Measured over every 'cell phone' box in 6 real frames, scored
+# against hand-labelled keys and phone locations:
+#     real phone : 0.66, 0.58
+#     key fob    : 0.38, 0.28, 0.27, 0.16, 0.16, 0.12, 0.11, 0.10, 0.07, 0.05
+# The two populations separate cleanly, so 0.45 sits in the gap: it drops all 3
+# false hits that cleared DETECT_CONF while keeping both real-phone detections.
+# Narrow evidence (6 frames, one fob, one phone) -- revisit if a genuine phone
+# is ever missed, since a dim or partly-occluded phone could fall under 0.45.
+CLASS_CONF_FLOORS = {
+    'cell phone': 0.45,
+}
+
 # What we actually ask YOLO for. Inference runs once at this lower threshold so
 # near-miss detections are visible in the logs; everything between DEBUG_CONF
 # and DETECT_CONF is logged but excluded from all detection logic below.
@@ -18,7 +34,7 @@ DEBUG_CONF = 0.05
 # own. Below it, the room is only accepted when a second, different object maps
 # to the same environment. Environment detection has no center-frame or
 # interaction check to fall back on, so this is its only guard.
-ENV_SINGLE_CONF = 0.50
+ENV_SINGLE_CONF = 0.70
 
 # Corroborated evidence (2+ distinct classes) only outranks a confident single
 # detection if its strongest class clears this floor, so a pair of weak false
@@ -32,6 +48,10 @@ ENV_CORROBORATION_FLOOR = 0.35
 # changes. Longer than a social interaction's window because activities like
 # typing or reading plausibly run for minutes.
 ACTIVITY_DEDUP_SECONDS = 120
+
+
+class _SkipFrameSave(Exception):
+    """Internal control-flow signal: log the event, skip the disk write."""
 
 class EgocentricActivityPlugin(DetectorPlugin):
     """
@@ -66,7 +86,7 @@ class EgocentricActivityPlugin(DetectorPlugin):
             # Drinking
             'bottle': 'drinking', 'wine glass': 'drinking', 'cup': 'drinking',
             # Eating
-            'fork': 'eating', 'knife': 'eating', 'spoon': 'eating', 'bowl': 'eating',
+            'fork': 'eating', 'knife': 'eating', 'spoon': 'eating',
             'banana': 'eating', 'apple': 'eating', 'sandwich': 'eating', 'orange': 'eating',
             'broccoli': 'eating', 'carrot': 'eating', 'hot dog': 'eating', 'pizza': 'eating',
             'donut': 'eating', 'cake': 'eating',
@@ -100,6 +120,11 @@ class EgocentricActivityPlugin(DetectorPlugin):
             'potted plant': 'gardening/tending plants', 'vase': 'arranging flowers/decorating',
             # Comfort objects
             'teddy bear': 'resting/relaxing',
+            # Tableware — moved out of ACTIVITY_MAP: 'bowl' fired "eating" on a
+            # laptop desk in every frame (0.32-0.76), a persistent round-object
+            # false positive. Its presence no more implies eating than a vase
+            # implies arranging flowers.
+            'bowl': 'tableware present',
             # Gray zone — not yet live-tested for false positives on passive
             # presence (e.g. a closed book on a shelf); moved here rather than
             # ACTIVITY_MAP until individually vetted.
@@ -201,9 +226,12 @@ class EgocentricActivityPlugin(DetectorPlugin):
             # Inference runs at DEBUG_CONF so near-misses are loggable; ignore
             # anything under the effective threshold here so detection
             # behaviour matches what it was before conf= was passed.
-            if float(boxes.conf[i]) < DETECT_CONF:
+            conf = float(boxes.conf[i])
+            if conf < DETECT_CONF:
                 continue
             cls_name = names[int(cls_id)]
+            if conf < CLASS_CONF_FLOORS.get(cls_name, 0.0):
+                continue
             bbox = boxes.xyxy[i].cpu().numpy()  # [x1, y1, x2, y2]
             if cls_name == 'person':
                 person_bboxes.append(bbox)
@@ -396,6 +424,12 @@ class EgocentricActivityPlugin(DetectorPlugin):
                     and (now_ts - self._last_event[1]) < ACTIVITY_DEDUP_SECONDS:
                 print(f"[ACT-DEBUG] EXIT: duplicate {state!r} within {ACTIVITY_DEDUP_SECONDS}s window")
                 return None
+            # A window-expiry repeat of the SAME state is the same ongoing
+            # activity, so it still logs an event but does not need another
+            # near-identical frame on disk. Only a genuine state change is
+            # worth storing evidence for — one frame per activity, not one
+            # per window.
+            is_state_change = (self._last_event is None) or (self._last_event[0] != state)
             self._last_event = (state, now_ts)
 
             # 3. Generate Sentence
@@ -430,18 +464,32 @@ class EgocentricActivityPlugin(DetectorPlugin):
             # ever an in-memory handle — nothing wrote it to disk, so every
             # activity event carried a keyframe_id that 404'd.
             import uuid
-            activity_keyframe_id = str(uuid.uuid4())
+            activity_keyframe_id = str(uuid.uuid4()) if is_state_change else None
             try:
+                if not is_state_change:
+                    print(f"[ACT-DEBUG] Ongoing {state!r} — event logged, no new frame stored")
+                    raise _SkipFrameSave()
                 if self._storage is None:
-                    from keyframe_backend.keyframe import ActivityStorage
+                    try:
+                        from keyframe_backend.keyframe import ActivityStorage
+                    except ImportError:
+                        import sys
+                        import os
+                        ai_backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                        if ai_backend_dir not in sys.path:
+                            sys.path.insert(0, ai_backend_dir)
+                        from keyframe_backend.keyframe import ActivityStorage
                     self._storage = ActivityStorage()
-                self._storage.save(activity_keyframe_id, frame, {
-                    "user_id": str(context.user_id),
-                    "type": "activity",
-                    "activity": activity_found,
-                    "environment": env_found,
-                    "sentence": sentence,
-                })
+                if self._storage:
+                    self._storage.save(activity_keyframe_id, frame, {
+                        "user_id": str(context.user_id),
+                        "type": "activity",
+                        "activity": activity_found,
+                        "environment": env_found,
+                        "sentence": sentence,
+                    })
+            except _SkipFrameSave:
+                pass
             except Exception:
                 import traceback
                 print(f"[{self.model_name}] Error saving activity frame: {traceback.format_exc()}")

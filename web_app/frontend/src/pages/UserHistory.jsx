@@ -203,9 +203,11 @@ export default function UserHistory() {
                     })()}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{log.medication_name || 'Unknown'}</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                      {log.medication_id?.name || log.medication_name || 'Deleted medication'}
+                    </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      {log.dosage || ''}
+                      {log.medication_id?.dosage || log.dosage || ''}
                       {log.verification_method && (
                         <span style={{ marginLeft: 8 }}>
                           via {['visual', 'Camera', 'ai_visual'].includes(log.verification_method) ? 'Camera AI' : log.verification_method === 'manual_caregiver' ? 'Caregiver' : log.verification_method === 'manual' ? 'Manual' : log.verification_method}

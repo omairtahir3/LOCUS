@@ -14,6 +14,7 @@ const eventLogRoutes     = require('./routes/eventLogs');
 const relationshipRoutes = require('./routes/relationships');
 const locationRoutes     = require('./routes/location');
 const userRoutes         = require('./routes/users');
+const userItemRoutes     = require('./routes/userItems');
 
 const app = express();
 
@@ -26,7 +27,10 @@ notificationScheduler.init();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Item enrolment posts 3-5 base64 photos in one body; phone-camera frames run
+// several MB each, well past the 100kb default, which rejected the request
+// before the route ran and surfaced as a generic 500.
+app.use(express.json({ limit: '25mb' }));
 app.use(morgan('dev'));
 
 // Routes
@@ -37,6 +41,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/detection',     detectionRoutes);
 app.use('/api/event-logs',    eventLogRoutes);
 app.use('/api/relationships', relationshipRoutes);
+app.use('/api/user-items',    userItemRoutes);
 app.use('/api/location',      locationRoutes);
 app.use('/api/users',         userRoutes);
 
