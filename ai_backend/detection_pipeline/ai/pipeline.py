@@ -34,6 +34,10 @@ def _get_mongo_db():
 # Confidence thresholds - tuned for real-world YOLO + MediaPipe accuracy
 from .core.policy import ConfidencePolicy
 EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
+
+# Per-frame activity events are retired in favour of Tier-2 environment
+# sessions. Flip to True to restore the old behaviour for comparison.
+EMIT_PER_FRAME_ACTIVITY_EVENTS = False
 THRESHOLD_AUTO_VERIFY = EVENT_CONFIDENCE_POLICY.auto_verify_threshold
 
 # Minimum pill confidence required IN THE PHASE-2 FRAME. Phase 2 judged hand
@@ -1845,7 +1849,19 @@ class MedicationDetectionPipeline:
                                 from .core.contracts import EventContext
                                 ctx = EventContext(user_id=self.user_id)
                                 act_result = self.activity_plugin.analyze(act_buffer, ctx)
-                                if act_result:
+                                # Per-frame activity claims ("Typing.", "Drinking.",
+                                # "Using a phone.") are no longer logged. They inferred
+                                # an ACTION from object presence in a single frame and
+                                # hallucinated constantly: a bottle on a far table beat
+                                # a laptop at 0.94 and logged "Drinking." while the
+                                # wearer typed; the wearer holding a water bottle in
+                                # both hands logged "Typing." because the bottle was not
+                                # detected at all. The feed now carries environment
+                                # sessions from Tier-2 instead (see ai/scene.py), which
+                                # report a room over a span of time rather than an action
+                                # in an instant. The plugin still runs because its
+                                # result feeds Tier-2's metadata.
+                                if act_result and EMIT_PER_FRAME_ACTIVITY_EVENTS:
                                     self._log_activity_result_to_db(act_result)
                         except Exception as e:
                             import traceback

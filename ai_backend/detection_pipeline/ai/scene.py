@@ -92,12 +92,24 @@ MIN_SCENE_MARGIN = 0.15    # winner must beat the runner-up by this much
 # lap is not a change of room.
 SCENE_SWITCH_FRAMES = 2
 
+# How long a session may coast on unknown frames before it is closed at its last
+# confirmed sighting. Unknown frames must extend a session -- the wearer looking
+# down at their lap is not a change of room -- but extending it indefinitely is
+# wrong: a bedroom sighting at 03:16 followed by 19 minutes of unrecognised
+# frames produced a single "bedroom, 19 min" session covering a stretch the
+# wearer had long since walked out of. Beyond this gap we have simply lost
+# track, and the honest end of the session is the last time we actually saw the
+# room.
+SCENE_STALE_SECONDS = 180
+
 # A session shorter than this is noise (walking through a room), not an event.
-# 30s, not 60s: the calibration recording moved kitchen -> bedroom -> desk in
-# about 100 seconds total, and a 60s floor discarded every one of them. Real
-# sessions ("Kitchen activity for 25 minutes") are far longer, so this floor
-# only decides how brief a visit still counts as one.
-MIN_SESSION_SECONDS = 30
+# 10s, because keyframes arrive roughly every 14 seconds: a session is measured
+# from its first sighting to its last CONFIRMED sighting, so a genuine two-frame
+# visit spans only ~14s and a 30s floor silently discarded a real trip to the
+# kitchen. The defining-object rule keeps precision high (0 wrong across the
+# 22-frame calibration set), so short sessions here are real visits rather than
+# noise, and dropping them loses information a memory aid actually wants.
+MIN_SESSION_SECONDS = 10
 
 
 def classify_scene(detections: dict[str, float]) -> tuple[Optional[str], float, dict[str, float]]:
@@ -131,6 +143,7 @@ class SceneSessionTracker:
         self._current: Optional[str] = None
         self._started_at: Optional[float] = None
         self._last_seen: Optional[float] = None
+        self._last_confirmed: Optional[float] = None
         self._pending: Optional[str] = None
         self._pending_count = 0
         self._pending_since: Optional[float] = None
@@ -142,13 +155,17 @@ class SceneSessionTracker:
         ts = timestamp if timestamp is not None else time.time()
 
         if room is None:
-            # Unknown frames extend the current session without ending it.
+            # Unknown frames extend the current session, but only so far.
             if self._current is not None:
+                anchor = self._last_confirmed or self._started_at or ts
+                if (ts - anchor) > SCENE_STALE_SECONDS:
+                    return self._close(anchor)
                 self._last_seen = ts
             return None
 
         if room == self._current:
             self._last_seen = ts
+            self._last_confirmed = ts
             self._frames += 1
             self._pending = None
             self._pending_count = 0
@@ -176,6 +193,7 @@ class SceneSessionTracker:
         self._current = room
         self._started_at = switch_ts
         self._last_seen = ts
+        self._last_confirmed = ts
         self._frames = 1
         self._evidence = defaultdict(float)
         for cls, conf in detections.items():
@@ -193,12 +211,15 @@ class SceneSessionTracker:
         if self._current is None or self._started_at is None:
             return None
         start = self._started_at
-        end = max(self._last_seen or ts, ts)
+        # End at the last time the room was actually confirmed. Trailing unknown
+        # frames are not evidence the wearer was still there.
+        end = self._last_confirmed or self._last_seen or ts
         duration = max(0.0, end - start)
         room, evidence, frames = self._current, dict(self._evidence), self._frames
         self._current = None
         self._started_at = None
         self._last_seen = None
+        self._last_confirmed = None
         self._evidence = defaultdict(float)
         self._frames = 0
         if duration < MIN_SESSION_SECONDS:
