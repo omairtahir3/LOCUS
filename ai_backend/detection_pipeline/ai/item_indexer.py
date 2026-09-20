@@ -422,8 +422,25 @@ class DailyItemIndexer:
         # frame directly; the gallery scores correct crops 0.65-0.82. Runs only
         # when the YOLO path came up empty, so frames that already matched pay
         # nothing extra.
-        if user_id_str and not any(d.get("matched_item") for d in detections):
-            detections.extend(self._scan_tiles_for_enrolled_items(image, user_id_str))
+        # Gate on whether a match would actually SURVIVE dedup, not merely whether
+        # one exists. A Phone matched from a YOLO box and then suppressed as a
+        # repeat used to skip the scan anyway, so the wearer's car keys -- present
+        # and scoring 0.80+ in the same frame -- were never looked for and the
+        # frame produced no event at all. Peeks at the dedup state without
+        # mutating it; the real gate below still owns that.
+        if user_id_str:
+            now_peek = time.monotonic()
+            has_fresh_match = False
+            for d in detections:
+                if not d.get("matched_item"):
+                    continue
+                k = (user_id_str, d.get("enrolled_item_id") or d["class_id"])
+                last = self._last_item_seen.get(k)
+                if last is None or (now_peek - last) >= ITEM_DEDUP_SECONDS:
+                    has_fresh_match = True
+                    break
+            if not has_fresh_match:
+                detections.extend(self._scan_tiles_for_enrolled_items(image, user_id_str))
 
         if not detections:
             return
