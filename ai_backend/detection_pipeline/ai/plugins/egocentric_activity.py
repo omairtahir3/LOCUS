@@ -96,7 +96,16 @@ class EgocentricActivityPlugin(DetectorPlugin):
     action_type = ActionType.ACTIVITY
     model_name = "yolov8n-egocentric"
 
-    def __init__(self, model_path: str = "yolov8n.pt"):
+    # yolov8s, not yolov8n. The wearer was holding a water bottle in both hands,
+    # filling ~15% of the frame, and yolov8n detected NO bottle at all -- leaving
+    # only the background laptop, which was logged as "Typing." On the two frames
+    # where that happened:
+    #     yolov8n  bottle: NONE        NONE
+    #     yolov8s  bottle: 0.37 @7.9%  0.74 @13.2%
+    # Both clear HANDHELD_MIN_AREA_FRAC, so the drink now outranks the laptop.
+    # Costs ~1.9x yolov8n inference, which is affordable at roughly one activity
+    # keyframe every 20-30s.
+    def __init__(self, model_path: str = "yolov8s.pt"):
         import time
         t0 = time.time()
         print(f"[{self.model_name}] Initializing...")
@@ -312,11 +321,21 @@ class EgocentricActivityPlugin(DetectorPlugin):
         for cls_name, obj_bbox in activity_candidates:
             iou = _max_person_iou(obj_bbox)
             in_center = self._is_center_frame(obj_bbox, frame_w, frame_h, margin=0.20)
-            if iou > 0.05:
+            obj_area = (float(obj_bbox[2]) - float(obj_bbox[0])) *                        (float(obj_bbox[3]) - float(obj_bbox[1])) / float(frame_w * frame_h)
+            # A large, close object that overlaps a person box is the WEARER's own
+            # hands, not a bystander's. In egocentric view the wearer's forearms are
+            # themselves detected as 'person', so a bottle held in both hands
+            # overlapped that box and was filed as a bystander's object -- handing
+            # the activity to the background laptop and logging "Typing." while the
+            # wearer drank. A bystander's drink is far away and small; it cannot
+            # occupy this much of a chest-cam frame.
+            held_by_wearer = obj_area >= HANDHELD_MIN_AREA_FRAC
+            if iou > 0.05 and not held_by_wearer:
                 # Object is on/near the bystander's body
                 bystander_candidates.append((cls_name, obj_bbox, iou))
-            elif in_center:
-                # Object is center-frame but NOT on the bystander → likely wearer's
+            elif in_center or held_by_wearer:
+                # Object is center-frame or close enough to be in the wearer's
+                # hands, and not attributable to a bystander → wearer's activity
                 wearer_candidates.append((cls_name, obj_bbox))
 
         # Prefer wearer activity (center-frame, not overlapping bystander)
