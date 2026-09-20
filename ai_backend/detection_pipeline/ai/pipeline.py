@@ -86,6 +86,14 @@ class MedicationDetectionPipeline:
         # ── Medicine counter ──────────────────────────────────────────
         self.medicines_taken_count = 0
         self.medicines_detected_this_session = []  # list of detection events
+        # Highest-confidence needs_verification already logged this session, or
+        # None if there is none. The 'taken' branch is guarded by remaining<=0,
+        # but needs_verification had no equivalent: every analysis pass that
+        # found the same 3-phase sequence logged it again. One real intake was
+        # analysed in two overlapping passes and wrote 5 evidence frames
+        # (phase2+phase3 at 20:29:40, then phase1+phase2+phase3 at 20:31:15)
+        # instead of the intended 3, one per phase.
+        self.needs_verification_conf = None
         self.expected_medicine_count = expected_medicine_count  # how many meds scheduled
         self._analyzing = False  # prevents overlapping analysis runs
         self.medication_ids = medication_ids or []
@@ -1753,6 +1761,20 @@ class MedicationDetectionPipeline:
                                 elif phases_passed == 3 and confidence >= self.event_policy.confirmation_threshold:
                                     # 3-phase with moderate confidence → needs_verification
                                     # Log for ALL remaining medicines so they all appear
+                                    #
+                                    # Overlapping analysis passes re-detect the same
+                                    # intake, so only log it once. A later pass that is
+                                    # MORE confident still logs, since it supersedes the
+                                    # earlier evidence; an equal or weaker repeat is
+                                    # dropped. Without this the same swallow accumulated
+                                    # a fresh set of evidence frames per pass.
+                                    if self.needs_verification_conf is not None and                                             confidence <= self.needs_verification_conf:
+                                        print(f"[Pipeline] Sequence #{seq_idx+1}: 3-phase detection "
+                                              f"(conf={confidence:.2f}) already logged as "
+                                              f"needs_verification at conf="
+                                              f"{self.needs_verification_conf:.2f} — skipping duplicate")
+                                        continue
+                                    self.needs_verification_conf = confidence
                                     remaining_nv = max(1, self.expected_medicine_count - self.medicines_taken_count)
                                     print(f"[Pipeline] Sequence #{seq_idx+1}: 3-phase detection "
                                           f"(conf={confidence:.2f}). Logging {remaining_nv} as needs_verification.")
