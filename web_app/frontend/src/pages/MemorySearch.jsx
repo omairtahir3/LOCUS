@@ -66,17 +66,21 @@ export default function MemorySearch() {
 
     if (ev.event_type === 'medication_intake' || ev.event_type === 'medication') {
       const conf = ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '';
+      // A camera detection below the 0.85 auto-verify bar is logged as pending
+      // rather than confirmed. It is a real detection and belongs on the
+      // timeline, but must not claim to be verified.
+      const pending = ev.verification_status === 'pending';
       return {
         id: ev._id,
         keyframe_id: ev.keyframe_id,
-        title: `Took ${ev.details?.medication_name || 'medication'}`,
+        title: `${pending ? 'Likely took' : 'Took'} ${ev.details?.medication_name || 'medication'}`,
         time: timeLabel,
         icon: Pill,
-        color: 'var(--success)',
+        color: pending ? 'var(--warning)' : 'var(--success)',
         group: groupLabel,
         category: 'Medicine',
         confidence: conf,
-        status: '✓ Verified',
+        status: pending ? '⏳ Needs confirmation' : '✓ Verified',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null,

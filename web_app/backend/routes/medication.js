@@ -254,13 +254,23 @@ router.post('/logs', async (req, res) => {
         const { notifyCaregiversMissedDose } = require('../utils/notifications');
         await notifyCaregiversMissedDose(patient, med, log._id);
       }
-    } else if (status === 'taken') {
-      const User = require('../models/User');
-      const patient = await User.findById(targetUserId);
-      if (patient) {
-        const { notifyCaregiversTakenDose, notifyUserTakenDose } = require('../utils/notifications');
-        await notifyCaregiversTakenDose(patient, med, log._id);
-        await notifyUserTakenDose(patient, med, log._id);
+    } else if (status === 'taken' || status === 'needs_verification') {
+      // needs_verification means the camera DID detect an intake, just below the
+      // 0.85 auto-verify bar (a real 3-phase detection scored 0.832 and vanished
+      // from the timeline entirely). Previously only 'taken' wrote an EventLog,
+      // so those doses left no memory record at all and Memory Search showed
+      // nothing under Medicine. Log them too, marked pending rather than
+      // confirmed, so the dose is visible and can be confirmed or rejected.
+      // Caregiver/user push notifications stay exclusive to 'taken' -- an
+      // unconfirmed detection should not announce itself as a completed dose.
+      if (status === 'taken') {
+        const User = require('../models/User');
+        const patient = await User.findById(targetUserId);
+        if (patient) {
+          const { notifyCaregiversTakenDose, notifyUserTakenDose } = require('../utils/notifications');
+          await notifyCaregiversTakenDose(patient, med, log._id);
+          await notifyUserTakenDose(patient, med, log._id);
+        }
       }
       // Fetch latest location
       const LocationLog = require('../models/LocationLog');
@@ -283,9 +293,12 @@ router.post('/logs', async (req, res) => {
         event_type: 'medication_intake',
         timestamp: new Date(),
         confidence: confidence_score || 1.0,
-        details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
+        details: {
+          medication_name: med.name, dosage: med.dosage, medication_id: med._id,
+          detection_status: status,
+        },
         keyframe_id: keyframe_id || null,
-        verification_status: 'confirmed',
+        verification_status: status === 'taken' ? 'confirmed' : 'pending',
         location: locationData
       });
     }

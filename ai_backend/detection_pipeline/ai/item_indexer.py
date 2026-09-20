@@ -148,6 +148,16 @@ TIER2_GAP_FILL_ACTIVITY_MAP: dict[int, tuple[str, str]] = {
     351: ("grooming", "bathroom"),          # Comb
 }
 
+# Tier-2 gap-fill activities that describe the wearer EATING or DRINKING assert
+# an action, not a scene. A Plate sitting on a table at conf 0.77 cleared the
+# 0.55 gate and logged "Eating in the dining area." while the wearer was typing.
+# Mirror Tier-1's HANDHELD_REQUIRED rule: these triggers must also be close
+# enough to the camera to plausibly be held. Structural/appliance triggers
+# (stove, kettle, coffee machine) are exempt -- their presence genuinely does
+# describe the scene and they are never held.
+TIER2_HANDHELD_ACTIVITIES = {"eating", "drinking"}
+TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
+
 # Items are persistent in a way activities are not — a wallet left on a desk
 # stays in frame for hours, so a 15-minute (900s) window prevents keyframe flooding
 # while re-indexing items when re-encountered. Suppression is per (user, item identity).
@@ -205,10 +215,20 @@ class DailyItemIndexer:
     ("Omair's silver house keys").
     """
 
-    # Minimum cosine similarity to consider an embedding match
-    # Calibrated to 0.65 based on real-world cross-keyframe re-encounter benchmarks
-    # (True re-encounters: 0.70-0.95; Distractor clutter: 0.10-0.48).
-    EXEMPLAR_MATCH_THRESHOLD = 0.65
+    # Minimum cosine similarity to consider an embedding match.
+    #
+    # Raised 0.65 -> 0.70 from production false positives. Every exemplar match
+    # logged to date, scored against the frame it came from:
+    #     TRUE  0.691 0.735 0.760 0.762 0.812 0.813 0.817 0.825
+    #     FALSE 0.663 (a mouse matched to "Phone")
+    #           0.664 (a patch of sofa and laptop edge matched to "Car Keys",
+    #                  in a frame containing no keys at all)
+    # Both false positives sat 0.013 above the old 0.65 floor while every true
+    # match cleared 0.69, so 0.70 separates the two populations cleanly on all
+    # 10 observed cases. The original 0.65 came from cross-keyframe re-encounter
+    # benchmarks (true 0.70-0.95, clutter 0.10-0.48); real wearable clutter
+    # scores far higher than that benchmark's distractors did.
+    EXEMPLAR_MATCH_THRESHOLD = 0.70
     # How often (seconds) to refresh the user_items cache from MongoDB
     EXEMPLAR_CACHE_TTL = 300  # 5 minutes
 
@@ -396,7 +416,7 @@ class DailyItemIndexer:
             return
 
         # Tier-2 Gap-Filling Activity Enrichment
-        self._check_and_enrich_activity(keyframe_id, detections, metadata)
+        self._check_and_enrich_activity(keyframe_id, detections, metadata, image.shape[:2])
 
         # ── Item Deduplication Gate ──────────────────────────────────────────
         # Design Specification:
@@ -695,7 +715,8 @@ class DailyItemIndexer:
                 d["name"] = best_match_name
                 print(f"[DailyItemIndexer] Exemplar MATCH: '{generic_name}' -> '{best_match_name}' (sim={best_sim:.3f} >= {best_thresh})")
 
-    def _check_and_enrich_activity(self, keyframe_id: str, detections: list[dict], metadata: dict):
+    def _check_and_enrich_activity(self, keyframe_id: str, detections: list[dict], metadata: dict,
+                                   frame_shape: tuple | None = None):
         """
         Tier-2 Activity Gap-Filling:
         If Tier-1 produced no activity or was blind to the object class (e.g. Plate, Toothbrush, Soap),
@@ -714,10 +735,20 @@ class DailyItemIndexer:
         best_conf = 0.0
         for d in detections:
             cid = d["class_id"]
-            if cid in TIER2_GAP_FILL_ACTIVITY_MAP and d["confidence"] > best_conf:
-                best_conf = d["confidence"]
-                act_label, fallback_env = TIER2_GAP_FILL_ACTIVITY_MAP[cid]
-                best_match = (act_label, fallback_env, d["name"], best_conf)
+            if cid not in TIER2_GAP_FILL_ACTIVITY_MAP or d["confidence"] <= best_conf:
+                continue
+            act_label, fallback_env = TIER2_GAP_FILL_ACTIVITY_MAP[cid]
+            if act_label in TIER2_HANDHELD_ACTIVITIES and frame_shape:
+                bb = d.get("bbox") or {}
+                fh, fw = frame_shape[0], frame_shape[1]
+                area_frac = (max(0, bb.get("x2", 0) - bb.get("x1", 0)) *
+                             max(0, bb.get("y2", 0) - bb.get("y1", 0))) / float(fh * fw)
+                if area_frac < TIER2_HANDHELD_MIN_AREA_FRAC:
+                    print(f"[DailyItemIndexer] [Tier-2] Rejected '{act_label}' — "
+                          f"{d['name']} at {area_frac:.2%} of frame is not handheld")
+                    continue
+            best_conf = d["confidence"]
+            best_match = (act_label, fallback_env, d["name"], best_conf)
 
         if not best_match:
             return
