@@ -159,9 +159,22 @@ TIER2_HANDHELD_ACTIVITIES = {"eating", "drinking"}
 TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
 
 # Items are persistent in a way activities are not — a wallet left on a desk
-# stays in frame for hours, so a 15-minute (900s) window prevents keyframe flooding
-# while re-indexing items when re-encountered. Suppression is per (user, item identity).
-ITEM_DEDUP_SECONDS = 900  # 15 minutes
+# stays in frame for hours — so a window prevents keyframe flooding while still
+# re-indexing items when re-encountered. Suppression is per (user, item identity).
+#
+# Reduced 900s -> 120s. The 15-minute window was set when ANY allowlisted class
+# could persist, and the flooding it guarded against (25 events in 3.7 min) came
+# from generic unenrolled objects. Option B now gates persistence to
+# specifically enrolled items, so the flood source is already closed and 900s
+# only hides real re-encounters: the wearer's car keys cleared threshold in 8
+# separate keyframes spanning 268 seconds, and a 900s window allowed exactly ONE
+# of them to be logged. That reads as "the keys were never detected" when in
+# fact they were found 8 times.
+#
+# 120s matches ACTIVITY_DEDUP_SECONDS, so items and activities now collapse
+# repeats on the same timescale. On that 268s sequence it yields roughly 3
+# events instead of 1.
+ITEM_DEDUP_SECONDS = 120  # 2 minutes
 
 # ── Tiled exemplar scan ───────────────────────────────────────────────────────
 # Objects365 cannot box small personal items: across 6 real chest-cam frames it
