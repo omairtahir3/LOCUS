@@ -25,6 +25,32 @@ CLASS_CONF_FLOORS = {
     'cell phone': 0.45,
 }
 
+# Eating and drinking are claims about what the wearer is DOING, not about what
+# happens to be on the table. A bottle across the room is not a drink in
+# progress. These classes therefore additionally require the object to be close
+# enough to the camera to plausibly be held.
+#
+# Measured on the three frames that produced false "Drinking." events while the
+# wearer was typing (fraction of frame area):
+#     false-positive bottles / bowl : 0.60%  0.62%  0.67%  0.82%  0.90%  1.30%
+#     the laptop that should have won: 23.20%  45.47%
+# Every false trigger is under 1.5% of frame. An object actually held to the
+# mouth in egocentric view fills far more than that. 4% leaves a >3x margin
+# above the largest observed false positive while staying well under what a
+# genuinely handled object occupies.
+#
+# This does not make the object "in hand" in a literal sense -- it is a
+# proximity proxy, the same approach used for the Tier-2 interactive zone. A
+# true grasp test would need a hand-keypoint model, which this CPU budget
+# (already 923ms/frame on medication ONNX) cannot absorb.
+HANDHELD_REQUIRED = {
+    'bottle', 'wine glass', 'cup',
+    'fork', 'knife', 'spoon',
+    'banana', 'apple', 'sandwich', 'orange',
+    'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+}
+HANDHELD_MIN_AREA_FRAC = 0.04
+
 # What we actually ask YOLO for. Inference runs once at this lower threshold so
 # near-miss detections are visible in the logs; everything between DEBUG_CONF
 # and DETECT_CONF is logged but excluded from all detection logic below.
@@ -236,6 +262,17 @@ class EgocentricActivityPlugin(DetectorPlugin):
             if cls_name == 'person':
                 person_bboxes.append(bbox)
             elif cls_name in self.ACTIVITY_MAP:
+                # Eat/drink classes must be close enough to be plausibly held.
+                # Candidate selection below ranks purely by distance to frame
+                # centre, so a bottle on a far table at 0.6% of frame area was
+                # beating a laptop at 45% and logging "Drinking." while the
+                # wearer typed. See HANDHELD_REQUIRED for the measurements.
+                if cls_name in HANDHELD_REQUIRED:
+                    area_frac = (float(bbox[2]) - float(bbox[0])) *                                 (float(bbox[3]) - float(bbox[1])) / float(frame_w * frame_h)
+                    if area_frac < HANDHELD_MIN_AREA_FRAC:
+                        print(f"[ACT-DEBUG] {cls_name} rejected as not handheld "
+                              f"({area_frac:.2%} < {HANDHELD_MIN_AREA_FRAC:.0%} of frame)")
+                        continue
                 activity_candidates.append((cls_name, bbox))
 
         if not activity_candidates:
