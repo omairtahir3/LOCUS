@@ -155,6 +155,10 @@ TIER2_GAP_FILL_ACTIVITY_MAP: dict[int, tuple[str, str]] = {
 # enough to the camera to plausibly be held. Structural/appliance triggers
 # (stove, kettle, coffee machine) are exempt -- their presence genuinely does
 # describe the scene and they are never held.
+# Tier-2 gap-fill activity synthesis is retired; environment sessions replace it.
+# Flip to True to restore the old behaviour for comparison.
+EMIT_TIER2_GAP_FILL_ACTIVITY = False
+
 TIER2_HANDHELD_ACTIVITIES = {"eating", "drinking"}
 TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
 
@@ -261,6 +265,7 @@ class DailyItemIndexer:
         # Exemplar Gallery: embedding backbone + user_items cache
         self._embedding_backbone = None
         self._user_items_cache: dict[str, tuple[float, list[dict]]] = {}  # user_id -> (timestamp, items)
+        self._scene_trackers: dict[str, Any] = {}   # user_id -> SceneSessionTracker
         self._db_client = None
 
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name="DailyItemIndexerWorker")
@@ -377,10 +382,17 @@ class DailyItemIndexer:
             return
 
         detections = []
+        scene_detections: dict[str, float] = {}
         orig_h, orig_w = image.shape[:2]
 
         for box in boxes:
             cls_id = int(box.cls[0].item())
+            # Scene classification needs every class, not just personal items:
+            # a Refrigerator identifies a kitchen and is not a belonging.
+            _cn = self._model.names.get(cls_id, "")
+            _cf = float(box.conf[0].item())
+            if _cn and _cf >= 0.25:
+                scene_detections[_cn] = max(scene_detections.get(_cn, 0.0), _cf)
             # Personal belongings & activity objects only
             if cls_id not in PERSONAL_ITEM_CLASS_IDS:
                 continue
@@ -414,8 +426,13 @@ class DailyItemIndexer:
                 }
             })
 
-        # ── Exemplar Embedding Gallery: match detections against enrolled items ──
+        # ── Environment session tracking ─────────────────────────────────────
+        # Runs on every keyframe, before any item-related early return: the room
+        # the wearer is in does not depend on whether they own anything in view.
         user_id_str = str((metadata or {}).get("user_id", ""))
+        self._observe_scene(scene_detections, user_id_str, keyframe_id, metadata)
+
+        # ── Exemplar Embedding Gallery: match detections against enrolled items ──
         if detections and user_id_str:
             self._enrich_with_exemplar_matches(detections, image, user_id_str)
 
@@ -755,6 +772,13 @@ class DailyItemIndexer:
         If Tier-1 produced no activity or was blind to the object class (e.g. Plate, Toothbrush, Soap),
         synthesize the activity from Objects365 detections and log an enriched activity event.
         """
+        # Retired alongside the Tier-1 per-frame activity events. This gap-filler
+        # asserted actions from object presence too -- a Plate resting on a table
+        # at conf 0.77 logged "Eating in the dining area." while the wearer was
+        # typing. Environment sessions (see _observe_scene) replace it.
+        if not EMIT_TIER2_GAP_FILL_ACTIVITY:
+            return
+
         tier1_activity = metadata.get("activity")
         tier1_sentence = metadata.get("sentence")
         tier1_env = metadata.get("environment")
@@ -955,6 +979,92 @@ class DailyItemIndexer:
         except Exception as e:
             print(f"[DailyItemIndexer] DB error during persistence: {e}")
             traceback.print_exc()
+
+    # ── Environment sessions ─────────────────────────────────────────────────
+    def _observe_scene(self, all_detections: dict[str, float], user_id_str: str,
+                       keyframe_id: str, metadata: dict):
+        """Feed one keyframe's raw Objects365 detections to the scene tracker.
+
+        Emits an event only when a session CLOSES, so the feed carries
+        "Kitchen activity for 25 minutes" rather than a label per frame.
+        """
+        if not user_id_str:
+            return
+        try:
+            from ai.scene import classify_scene, SceneSessionTracker
+        except Exception as e:
+            print(f"[DailyItemIndexer] scene module unavailable: {e}")
+            return
+
+        tracker = self._scene_trackers.get(user_id_str)
+        if tracker is None:
+            tracker = SceneSessionTracker()
+            self._scene_trackers[user_id_str] = tracker
+
+        room, score, _ = classify_scene(all_detections)
+        ts = time.time()
+        session = tracker.observe(room, all_detections, ts)
+        if session:
+            self._persist_scene_session(session, user_id_str, keyframe_id)
+
+    def flush_scene_sessions(self, user_id_str: str | None = None):
+        """Close open sessions, e.g. when a stream stops."""
+        targets = [user_id_str] if user_id_str else list(self._scene_trackers)
+        for uid in targets:
+            tracker = self._scene_trackers.get(uid)
+            if not tracker:
+                continue
+            session = tracker.flush()
+            if session:
+                self._persist_scene_session(session, uid, None)
+
+    def _persist_scene_session(self, session: dict, user_id_str: str, keyframe_id: str | None):
+        """Write a completed environment session to EventLog.
+
+        Uses event_type "activity" with details.action "scene_session" so the
+        existing memory-search query and the feed's activity renderer pick it up
+        unchanged -- the renderer shows details.sentence as the title.
+        """
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            from datetime import datetime, timezone
+            if self._db_client is None:
+                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+            db = self._db_client["locusDB"]
+            try:
+                user_oid = ObjectId(user_id_str)
+            except Exception:
+                user_oid = user_id_str
+
+            minutes = max(1, round(session["duration_seconds"] / 60))
+            sentence = f"{session['label']} — {minutes} min"
+            ts_now = datetime.now(timezone.utc)
+            db.eventlogs.insert_one({
+                "user_id": user_oid,
+                "event_type": "activity",
+                "timestamp": datetime.fromtimestamp(session["start_ts"], tz=timezone.utc),
+                "confidence": 0.8,
+                "details": {
+                    "action": "scene_session",
+                    "scene": session["scene"],
+                    "sentence": sentence,
+                    "description": sentence,
+                    "label": session["label"],
+                    "duration_seconds": session["duration_seconds"],
+                    "keyframes": session["keyframes"],
+                    "evidence": session["evidence"],
+                    "source": "scene_sessions",
+                },
+                "keyframe_id": keyframe_id,
+                "verification_status": "confirmed",
+                "createdAt": ts_now,
+                "updatedAt": ts_now,
+            })
+            print(f"[DailyItemIndexer] [Scene] {sentence} "
+                  f"({session['keyframes']} keyframes, evidence {list(session['evidence'])[:3]})")
+        except Exception as e:
+            print(f"[DailyItemIndexer] Error persisting scene session: {e}")
 
     # ── Tiled exemplar scan ──────────────────────────────────────────────────
     def _tile_regions(self, img_w: int, img_h: int) -> list[tuple[int, int, int, int]]:
