@@ -159,22 +159,18 @@ TIER2_HANDHELD_ACTIVITIES = {"eating", "drinking"}
 TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
 
 # Items are persistent in a way activities are not — a wallet left on a desk
-# stays in frame for hours — so a window prevents keyframe flooding while still
-# re-indexing items when re-encountered. Suppression is per (user, item identity).
+# stays in frame for hours, so a 15-minute window prevents keyframe flooding
+# while re-indexing items when re-encountered. Suppression is per (user, item
+# identity), so distinct belongings track independent windows.
 #
-# Reduced 900s -> 120s. The 15-minute window was set when ANY allowlisted class
-# could persist, and the flooding it guarded against (25 events in 3.7 min) came
-# from generic unenrolled objects. Option B now gates persistence to
-# specifically enrolled items, so the flood source is already closed and 900s
-# only hides real re-encounters: the wearer's car keys cleared threshold in 8
-# separate keyframes spanning 268 seconds, and a 900s window allowed exactly ONE
-# of them to be logged. That reads as "the keys were never detected" when in
-# fact they were found 8 times.
-#
-# 120s matches ACTIVITY_DEDUP_SECONDS, so items and activities now collapse
-# repeats on the same timescale. On that 268s sequence it yields roughly 3
-# events instead of 1.
-ITEM_DEDUP_SECONDS = 120  # 2 minutes
+# Briefly reduced to 120s on the theory that the window was hiding repeat
+# sightings of the wearer's car keys. That diagnosis was wrong: the keys were
+# missing because a deduped Phone match skipped the tile scan entirely (see the
+# has_fresh_match gate in _process_keyframe_task), and the gap since the
+# previous keys event was 4205s — far outside any window. With the real cause
+# fixed, 900s is restored; at 120s the same keys logged twice in two minutes,
+# which is the flooding this gate exists to prevent.
+ITEM_DEDUP_SECONDS = 900  # 15 minutes
 
 # ── Tiled exemplar scan ───────────────────────────────────────────────────────
 # Objects365 cannot box small personal items: across 6 real chest-cam frames it
