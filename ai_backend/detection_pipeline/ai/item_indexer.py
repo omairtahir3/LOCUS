@@ -226,18 +226,25 @@ class DailyItemIndexer:
 
     # Minimum cosine similarity to consider an embedding match.
     #
-    # Raised 0.65 -> 0.70 from production false positives. Every exemplar match
-    # logged to date, scored against the frame it came from:
-    #     TRUE  0.691 0.735 0.760 0.762 0.812 0.813 0.817 0.825
-    #     FALSE 0.663 (a mouse matched to "Phone")
-    #           0.664 (a patch of sofa and laptop edge matched to "Car Keys",
-    #                  in a frame containing no keys at all)
-    # Both false positives sat 0.013 above the old 0.65 floor while every true
-    # match cleared 0.69, so 0.70 separates the two populations cleanly on all
-    # 10 observed cases. The original 0.65 came from cross-keyframe re-encounter
-    # benchmarks (true 0.70-0.95, clutter 0.10-0.48); real wearable clutter
-    # scores far higher than that benchmark's distractors did.
-    EXEMPLAR_MATCH_THRESHOLD = 0.70
+    # 0.65 -> 0.70 -> 0.74, each step driven by a production false positive.
+    # Every tile-scan match observed, with the frame checked by eye:
+    #     TRUE  0.752 0.753 0.758 0.758 0.783 0.799 0.800 0.825
+    #           (keys visibly on the sofa or the table)
+    #     FALSE 0.714  a 120px tile of a black office chair, in a bedroom the
+    #                  keys were never in
+    #           0.664  a patch of sofa and laptop edge
+    #           0.663  a mouse matched to "Phone"
+    # 0.74 sits in the gap between the highest false (0.714) and the lowest
+    # true (0.752). Texture was tried first as a discriminator and rejected:
+    # Laplacian variance ran 556-957 on true tiles and 459-1294 on false ones,
+    # fully overlapping.
+    #
+    # The cost is recall on marginal sightings (0.706-0.719 matches are no
+    # longer logged). That is the right trade here: the 15-minute dedup means
+    # only one sighting per window is recorded anyway, so a weak match is
+    # usually redundant with a strong one, while a false "you had your keys"
+    # is actively misleading in a memory aid.
+    EXEMPLAR_MATCH_THRESHOLD = 0.74
     # How often (seconds) to refresh the user_items cache from MongoDB
     EXEMPLAR_CACHE_TTL = 300  # 5 minutes
 
