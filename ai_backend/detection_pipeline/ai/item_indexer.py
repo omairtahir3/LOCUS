@@ -438,29 +438,23 @@ class DailyItemIndexer:
 
         # Objects365 cannot box small personal items -- it boxed the wearer's car
         # keys in 0 of 6 real frames, including one where they filled a third of
-        # the view. When no enrolled item was matched from a YOLO box, scan the
-        # frame directly; the gallery scores correct crops 0.65-0.82. Runs only
-        # when the YOLO path came up empty, so frames that already matched pay
-        # nothing extra.
-        # Gate on whether a match would actually SURVIVE dedup, not merely whether
-        # one exists. A Phone matched from a YOLO box and then suppressed as a
-        # repeat used to skip the scan anyway, so the wearer's car keys -- present
-        # and scoring 0.80+ in the same frame -- were never looked for and the
-        # frame produced no event at all. Peeks at the dedup state without
-        # mutating it; the real gate below still owns that.
+        # the view -- so the frame is scanned directly for anything the YOLO path
+        # did not already find.
+        #
+        # Scanned PER ITEM, not per frame. Two earlier versions gated the whole
+        # scan on the frame as a unit and both lost items: skipping when any
+        # match existed meant a deduped Phone hid the car keys entirely, and
+        # skipping when any FRESH match existed meant a Phone the wearer really
+        # was holding did the same. Each enrolled belonging is independent, so
+        # the scan now looks only for the ones this frame has not accounted for.
         if user_id_str:
-            now_peek = time.monotonic()
-            has_fresh_match = False
-            for d in detections:
-                if not d.get("matched_item"):
-                    continue
-                k = (user_id_str, d.get("enrolled_item_id") or d["class_id"])
-                last = self._last_item_seen.get(k)
-                if last is None or (now_peek - last) >= ITEM_DEDUP_SECONDS:
-                    has_fresh_match = True
-                    break
-            if not has_fresh_match:
-                detections.extend(self._scan_tiles_for_enrolled_items(image, user_id_str))
+            already_matched = {
+                d.get("enrolled_item_id") for d in detections if d.get("matched_item")
+            }
+            enrolled_ids = {it["id"] for it in self._get_user_items_cached(user_id_str)}
+            if enrolled_ids - already_matched:
+                detections.extend(self._scan_tiles_for_enrolled_items(
+                    image, user_id_str, exclude_item_ids=already_matched))
 
         if not detections:
             return
@@ -1081,7 +1075,8 @@ class DailyItemIndexer:
                     regions.append((xx, yy, min(img_w, xx + size), min(img_h, yy + size)))
         return regions
 
-    def _scan_tiles_for_enrolled_items(self, image: np.ndarray, user_id_str: str) -> list[dict]:
+    def _scan_tiles_for_enrolled_items(self, image: np.ndarray, user_id_str: str,
+                                       exclude_item_ids: set | None = None) -> list[dict]:
         """Find enrolled items that YOLO failed to box, by scanning the frame directly.
 
         Decision rule is deliberately winner-take-all per item rather than
@@ -1094,6 +1089,9 @@ class DailyItemIndexer:
         existing dedup and identity-gated persistence path handles them unchanged.
         """
         user_items = self._get_user_items_cached(user_id_str)
+        if exclude_item_ids:
+            # Items already matched from a YOLO box in this frame need no scan.
+            user_items = [it for it in user_items if it["id"] not in exclude_item_ids]
         if not user_items:
             return []
         backbone = self._get_embedding_backbone()

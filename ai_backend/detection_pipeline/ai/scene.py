@@ -85,12 +85,31 @@ DEFINING_OBJECTS: dict[str, set[str]] = {
 MIN_SCENE_SCORE = 0.35     # below this, no room is claimed
 MIN_SCENE_MARGIN = 0.15    # winner must beat the runner-up by this much
 
-# A scene must hold for this many consecutive classified keyframes before the
-# session switches. Without hysteresis the label flaps on a single stray
-# detection, which is the failure this module exists to avoid. Frames that
-# classify as unknown do not break a session -- the wearer looking down at their
-# lap is not a change of room.
+# How much evidence is needed to OVERWRITE an established room. Taking over
+# from an open session needs this many classified observations of the new room;
+# opening the very first session needs only one, since there is nothing to
+# overwrite. Sitting in the living room was being relabelled bedroom off a
+# single stray classification, so a confirmed environment now has to be
+# outvoted, not merely contradicted once. Frames that classify as unknown do
+# not break a session -- the wearer looking down at their lap is not a change
+# of room.
+# 2, not 3: at 3 the real recording lost its bedroom and living-room sessions
+# entirely, since each was confirmed in only two frames. 2 still means a single
+# stray classification cannot displace an established room -- and because
+# classify_scene already requires the winner to beat the runner-up by
+# MIN_SCENE_MARGIN, two agreeing frames are two frames where the new room
+# genuinely out-scored the old one.
 SCENE_SWITCH_FRAMES = 2
+
+# Those observations must also fall within this window of each other. Without
+# it, two stray bedroom frames twenty minutes apart counted as agreement
+# because unknown frames in between neither confirmed nor reset the tally.
+#
+# 300s, not 120s: keyframes are sparse and a room is often only recognised when
+# the camera happens to face it. The real recording's two living-room sightings
+# were 185s apart -- genuinely the same visit -- and a 120s window discarded the
+# session entirely. 300s still rejects the twenty-minutes-apart case.
+SCENE_PENDING_WINDOW = 300
 
 # How long a session may coast on unknown frames before it is closed at its last
 # confirmed sighting. Unknown frames must extend a session -- the wearer looking
@@ -174,13 +193,16 @@ class SceneSessionTracker:
             return None
 
         # A different room — require it to persist before switching.
-        if room == self._pending:
+        if room == self._pending and self._pending_since is not None                 and (ts - self._pending_since) <= SCENE_PENDING_WINDOW:
             self._pending_count += 1
         else:
             self._pending = room
             self._pending_count = 1
             self._pending_since = ts
-        if self._pending_count < SCENE_SWITCH_FRAMES:
+        # Opening the first session needs no hysteresis; there is nothing to
+        # overwrite. Displacing an established room does.
+        needed = 1 if self._current is None else SCENE_SWITCH_FRAMES
+        if self._pending_count < needed:
             return None
 
         # The new session began when the room was FIRST seen, not when
