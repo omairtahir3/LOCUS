@@ -62,3 +62,9 @@ scratch/
 *.bak
 .claudecode-instructions.md
 *.instructions.md
+
+# Secrets and local config - never commit. firebase-service-account.json is a
+# real Admin SDK private key and was tracked from 2026-07-24 until this commit;
+# the key must be rotated regardless, because removal does not undo exposure.
+web_app/backend/firebase-service-account.json
+web_app/backend/.env.example
