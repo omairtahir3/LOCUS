@@ -28,6 +28,12 @@ notificationScheduler.init();
 const eventLogRetention = require('./utils/eventLogRetention');
 eventLogRetention.init();
 
+// Routine learning: nightly per-user profiles, 15-minute deviation monitor.
+const routineLearner = require('./utils/routineLearner');
+routineLearner.init();
+const routineMonitor = require('./utils/routineMonitor');
+routineMonitor.init();
+
 // Middleware
 app.use(cors());
 // Item enrolment posts 3-5 base64 photos in one body; phone-camera frames run
