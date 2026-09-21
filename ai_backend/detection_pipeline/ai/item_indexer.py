@@ -168,15 +168,24 @@ TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
 # the moment of the sighting, not from whenever the phone last reported.
 ITEM_LOCATION_MAX_STALENESS_MIN = 10.0
 
-# Candidate-detection confidence used when the scene tracker says the wearer
-# is outdoors. Variable lighting and busy backgrounds depress YOLO's box
-# confidence on the same object, so the candidate bar drops from 0.30 to 0.25.
-# The EXEMPLAR threshold is deliberately NOT loosened: Option B still requires
-# an identity match at 0.74 for anything to persist, so this widens what gets
-# looked at without widening what gets believed. UNVALIDATED -- no outdoor
-# footage exists yet; 0.25 is the value the earlier candidate sweep showed
-# recovers boxes without a false-positive cost indoors.
+# Candidate-detection confidence used when the wearer is outdoors. Variable
+# lighting and busy backgrounds depress YOLO's box confidence on the same
+# object, so the candidate bar drops from 0.30 to 0.25. The EXEMPLAR threshold
+# is deliberately NOT loosened: Option B still requires an identity match at
+# 0.74 for anything to persist, so this widens what gets looked at without
+# widening what gets believed. UNVALIDATED -- no outdoor footage exists yet;
+# 0.25 is the value the earlier candidate sweep showed recovers boxes without
+# a false-positive cost indoors.
+#
+# "Outdoors" is decided from GPS, not vision: the latest trustworthy fix is
+# further from the user's home_location than GPS noise allows. Same thresholds
+# as the Node monitor (utils/outdoor.js) so both sides agree. Nothing about the
+# environment is classified or logged; this only tunes item detection.
 OUTDOOR_CONF_THRESHOLD = 0.25
+OUTDOOR_HOME_RADIUS_M = 150.0
+OUTDOOR_MAX_FIX_ACCURACY_M = 100.0
+OUTDOOR_MAX_FIX_AGE_MIN = 10.0
+OUTDOOR_STATUS_CACHE_S = 60.0     # one DB lookup per user per minute, not per keyframe
 
 # Items are persistent in a way activities are not — a wallet left on a desk
 # stays in frame for hours, so a 15-minute window prevents keyframe flooding
@@ -386,14 +395,9 @@ class DailyItemIndexer:
             return
 
         t0 = time.perf_counter()
-        # FE-14: loosen the candidate bar when the scene tracker last confirmed
-        # the wearer outdoors. Reads the tracker's current scene; the tracker
-        # is updated later in this same call, so the decision lags by one
-        # keyframe, which is fine at one keyframe per ~15s.
+        # FE-14: loosen the candidate bar when GPS says the wearer is outdoors.
         _uid = str((metadata or {}).get("user_id", ""))
-        _tracker = self._scene_trackers.get(_uid)
-        _outdoors = bool(_tracker and getattr(_tracker, "_current", None) == "outdoor")
-        _conf = OUTDOOR_CONF_THRESHOLD if _outdoors else self.conf_threshold
+        _conf = OUTDOOR_CONF_THRESHOLD if self._is_outdoors_gps(_uid) else self.conf_threshold
         results = self._model(image, conf=_conf, iou=0.45, verbose=False)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
@@ -1002,6 +1006,62 @@ class DailyItemIndexer:
         except Exception as e:
             print(f"[DailyItemIndexer] DB error during persistence: {e}")
             traceback.print_exc()
+
+    # ── Outdoor status from GPS (for FE-14 only) ─────────────────────────────
+    def _is_outdoors_gps(self, user_id_str: str) -> bool:
+        """True when the latest trustworthy GPS fix is > OUTDOOR_HOME_RADIUS_M
+        from the user's home_location. Cached per user for
+        OUTDOOR_STATUS_CACHE_S. Unknown (no home, no recent fix) is False."""
+        if not user_id_str:
+            return False
+        cache = getattr(self, "_outdoor_cache", None)
+        if cache is None:
+            cache = self._outdoor_cache = {}
+        now = time.monotonic()
+        hit = cache.get(user_id_str)
+        if hit and (now - hit[0]) < OUTDOOR_STATUS_CACHE_S:
+            return hit[1]
+
+        result = False
+        try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            from datetime import datetime, timedelta, timezone
+            import math
+            if self._db_client is None:
+                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+            db = self._db_client["locusDB"]
+            try:
+                uid_forms = [user_id_str, ObjectId(user_id_str)]
+            except Exception:
+                uid_forms = [user_id_str]
+            user = db.users.find_one({"_id": {"$in": uid_forms}}, {"home_location": 1})
+            home = (user or {}).get("home_location") or {}
+            if isinstance(home.get("lat"), (int, float)) and isinstance(home.get("lng"), (int, float)):
+                since = datetime.now(timezone.utc) - timedelta(minutes=OUTDOOR_MAX_FIX_AGE_MIN)
+                fixes = db.locationlogs.find(
+                    {"user_id": {"$in": uid_forms}, "timestamp": {"$gte": since}},
+                    {"lat": 1, "lng": 1, "accuracy": 1},
+                ).sort("timestamp", -1).limit(10)
+                for f in fixes:
+                    if (f.get("accuracy") or 0) > OUTDOOR_MAX_FIX_ACCURACY_M:
+                        continue
+                    if not isinstance(f.get("lat"), (int, float)):
+                        continue
+                    # haversine
+                    r = 6371000.0
+                    p1, p2 = math.radians(home["lat"]), math.radians(f["lat"])
+                    dphi = p2 - p1
+                    dlam = math.radians(f["lng"] - home["lng"])
+                    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) ** 2
+                    dist = 2 * r * math.asin(math.sqrt(h))
+                    result = dist > OUTDOOR_HOME_RADIUS_M
+                    break
+        except Exception as e:
+            print(f"[DailyItemIndexer] outdoor status lookup failed: {e}")
+
+        cache[user_id_str] = (now, result)
+        return result
 
     # ── Environment sessions ─────────────────────────────────────────────────
     def _observe_scene(self, all_detections: dict[str, float], user_id_str: str,
