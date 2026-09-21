@@ -1,10 +1,10 @@
-const MedicationLog = require('../models/MedicationLog');
+﻿const MedicationLog = require('../models/MedicationLog');
 const Medication = require('../models/Medication');
 const { 
   generateAIDoseReminder, 
   generateAIMissedDoseAlert, 
   generateAIUserMissedDoseAlert 
-} = require('./geminiAgent');
+} = require('./llmAgent');
 const { analyzeUserThresholds } = require('./thresholdAnalyzer');
 
 const runNightlyBatchSync = async () => {

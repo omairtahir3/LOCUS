@@ -19,6 +19,7 @@
  */
 
 const { createNotification } = require('./notifications');
+const { generateRoutineFindingMessage } = require('./llmAgent');
 const RoutineFinding = require('../models/RoutineFinding');
 
 const KIND_TO_TYPE = {
@@ -54,12 +55,16 @@ async function deliverFinding(finding) {
   const ids = [];
   for (const r of recipients) {
     const prefs = r.notification_prefs || {};
+    // Phrase for THIS recipient: a caregiver reading about their patient and
+    // the patient reading about themself get different wording. Falls back to
+    // the monitor's own text if the LLM is unavailable.
+    const { title, message } = await generateRoutineFindingMessage(finding, r, subject);
     const n = await createNotification({
       recipientId: r._id,
       subjectUserId: subject._id,
       type: KIND_TO_TYPE[finding.kind] || 'system',
-      title: finding.title,
-      message: finding.message,
+      title,
+      message,
       requiresAcknowledgement: urgent,
       sendEmailTo: (email && prefs.email !== false && r.email) ? r.email : null,
       sendPush: prefs.push !== false,
