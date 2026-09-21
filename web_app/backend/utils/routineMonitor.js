@@ -19,6 +19,7 @@ const RoutineFinding = require('../models/RoutineFinding');
 const EventLog = require('../models/EventLog');
 const MedicationLog = require('../models/MedicationLog');
 const { expectation } = require('./routineLearner');
+const { dateWords, timeWords, hourWords, distanceWords, item: itemWords, firstName } = require('./friendly');
 
 const MONITOR_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -135,13 +136,20 @@ async function checkMedicationGap(user, now = new Date()) {
 
   // camera_off is not "missed" -- it needs a different response from the
   // caregiver (check the device) than a genuinely missed dose does (check the person).
-  const verb = cameraOffAll ? 'no verified dose (camera was off at every dose time)'
-             : missedAny   ? 'missed doses'
-                           : 'no verified dose';
-  const title = `${user.name}: ${gapDays.length} days without a verified dose`;
-  const message = `${user.name} has had ${verb} from ${gapStart} to ${gapEnd} — ${gapDays.length} consecutive days. ` +
-    (cameraOffAll ? 'Please check the camera is running at dose times, or confirm doses manually.'
-                  : 'Please check in with them.');
+  const who = firstName(user.name), n = gapDays.length;
+  const sinceWords = dateWords(gapStart);
+  let title, message;
+  if (cameraOffAll) {
+    title = `${who}'s doses haven't been confirmed for ${n} days`;
+    message = `The camera has been off at every dose time since ${sinceWords}, so we can't tell whether ${who} has been taking ` +
+      `medication. This may just be the device. Could you make sure the camera is on for the next dose, or confirm the recent ones by hand?`;
+  } else if (missedAny) {
+    title = `${who} has missed doses for ${n} days`;
+    message = `The camera was on but didn't see ${who} take medication on ${n} days in a row, since ${sinceWords}. It would be worth checking in.`;
+  } else {
+    title = `${who}'s doses haven't been confirmed for ${n} days`;
+    message = `No dose has been confirmed since ${sinceWords}. It would be worth checking in with ${who}.`;
+  }
   return record(user, 'medication_gap', dedup_key, cameraOffAll ? 'warning' : 'urgent', title, message,
     { gap_start: gapStart, gap_end: gapEnd, days: gapDays.length, camera_off_all: cameraOffAll, missed_any: missedAny });
 }
@@ -163,10 +171,12 @@ async function checkInactivityAndCamera(user, now = new Date()) {
     const offHours = lastSeen ? (now - lastSeen) / 3600000 : Infinity;
     if (offHours < CAMERA_OFF_HOURS) return null;
     const dedup_key = `${user._id}:cameraoff:${dayKey(now)}`;
+    const who = firstName(user.name);
+    const hrs = offHours === Infinity ? 'more than a day' : `${Math.floor(offHours)} hours`;
     return record(user, 'camera_off', dedup_key, 'warning',
-      `${user.name}: camera has been off for ${offHours === Infinity ? 'over 24' : Math.floor(offHours)} hours`,
-      `No frames have been received from ${user.name}'s camera since ${lastSeen ? lastSeen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'yesterday'}. ` +
-      `Routine and inactivity monitoring are paused until it is back.`,
+      `${who}'s camera has been off for ${hrs}`,
+      `Nothing has come through from ${who}'s camera since ${lastSeen ? timeWords(lastSeen) : 'yesterday'}. ` +
+      `Until it's back on, we can't watch for inactivity or keep track of their routine.`,
       { last_frame: lastSeen });
   }
 
@@ -178,10 +188,13 @@ async function checkInactivityAndCamera(user, now = new Date()) {
 
   const windowStart = new Date(Math.min(...window.map(e => +new Date(e.timestamp))));
   const dedup_key = `${user._id}:inactive:${dayKey(now)}:${windowStart.getHours()}`;
+  const who = firstName(user.name);
+  // Motion scores and frame counts stay in `evidence` for the audit trail; the
+  // caregiver just needs to know how long and since when.
   return record(user, 'inactivity', dedup_key, 'urgent',
-    `${user.name}: no movement for ${INACTIVITY_HOURS} hours`,
-    `${user.name}'s camera has been running since ${windowStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ` +
-    `with almost no movement (peak motion ${peak.toFixed(1)}, ${window.length} frames). Please check on them.`,
+    `${who} hasn't moved much for ${INACTIVITY_HOURS} hours`,
+    `${who}'s camera has been on since ${timeWords(windowStart)}, but there's been almost no movement in that time. ` +
+    `It's probably worth checking in on ${who} now.`,
     { peak_motion: peak, frames: window.length, window_start: windowStart });
 }
 
@@ -199,10 +212,11 @@ async function checkDeviation(user, profile, now = new Date()) {
     });
     if (seen) continue;
     const dedup_key = `${user._id}:deviation:${sig.key}:${dayKey(now)}:${now.getHours()}`;
+    const who = firstName(user.name);
     const f = await record(user, 'deviation', dedup_key, 'info',
-      `${user.name}: not in the ${room} at the usual time`,
-      `${user.name} is usually in the ${room} around ${now.getHours()}:00 ` +
-      `(${Math.round(exp.ratio * 100)}% of the last ${exp.support} days) but hasn't been seen there in the last ${DEVIATION_GRACE_HOURS} hours.`,
+      `${who} hasn't been in the ${room} yet today`,
+      `${who} is usually in the ${room} around ${hourWords(now.getHours())}, but hasn't been seen there in the last ` +
+      `${DEVIATION_GRACE_HOURS} hours. Nothing urgent — just a change from the usual pattern.`,
       { signal: sig.key, ratio: exp.ratio, support: exp.support });
     if (f) out.push(f);
   }
@@ -239,9 +253,11 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
       });
       if (seenSince) continue;
       const dedup_key = `${user._id}:leftbehind:${itemId}:${Math.floor(+end / 1000)}`;
+      const w = itemWords(name);
       const f = await record(user, 'left_behind', dedup_key, 'info',
-        `You left your ${name} in the ${room}`,
-        `Your ${name} was last seen in the ${room} at ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, just before you left.`,
+        `Your ${w.name} ${w.were} left in the ${room}`,
+        `Looks like your ${w.name} ${w.were} still in the ${room} when you left at ${timeWords(end)}. ` +
+        `${w.they === 'they' ? 'They' : 'It'} should still be there.`,
         { item_id: itemId, room, session_end: end });
       if (f) out.push(f);
     }
@@ -264,10 +280,11 @@ async function checkHabitualItems(user, profile, now = new Date()) {
     if (seen) continue;
     const usualRoom = Object.entries(sig.rooms || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
     const dedup_key = `${user._id}:habitual:${itemId}:${dayKey(now)}:${now.getHours()}`;
+    const w = itemWords(sig.label);
     const f = await record(user, 'habitual_item', dedup_key, 'info',
-      `Do you have your ${sig.label}?`,
-      `You usually have your ${sig.label} with you around this time` +
-      (usualRoom ? ` — it's most often in the ${usualRoom}.` : '.'),
+      `Got your ${w.name}?`,
+      `You usually have your ${w.name} with you around now` +
+      (usualRoom ? `. ${w.they === 'they' ? "They're" : "It's"} most often in the ${usualRoom}.` : '.'),
       { signal: sig.key, ratio: exp.ratio, usual_room: usualRoom });
     if (f) out.push(f);
   }
@@ -312,10 +329,11 @@ async function checkOutdoorItemLost(user, now = new Date()) {
     const moved = haversineM(s.where, here);
     if (moved <= ITEM_LOST_MOVE_RADIUS_M) continue;
     const dedup_key = `${user._id}:itemlost:${itemId}:${Math.floor(+s.at / 1000)}`;
+    const w = itemWords(s.name);
     const f = await record(user, 'item_lost', dedup_key, 'urgent',
-      `Did you leave your ${s.name} behind?`,
-      `Your ${s.name} was last seen at ${s.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, ` +
-      `about ${Math.round(moved)} m back from where you are now, and hasn't been seen since.`,
+      `Did you leave your ${w.name} behind?`,
+      `Your ${w.name} ${w.were} last seen at ${timeWords(s.at)}, ${distanceWords(moved)} back the way you came, ` +
+      `and ${w.they} ${w.have}n't been seen since. Worth a quick look back.`,
       { item_id: itemId, item_name: s.name, last_seen_at: s.at, last_seen_location: s.where,
         keyframe_id: s.keyframe_id, moved_m: Math.round(moved), current_location: here });
     if (f) out.push(f);

@@ -21,6 +21,7 @@
 const { createNotification } = require('./notifications');
 const { generateRoutineFindingMessage } = require('./llmAgent');
 const RoutineFinding = require('../models/RoutineFinding');
+const { firstName, item, timeWords } = require('./friendly');
 
 const KIND_TO_TYPE = {
   medication_gap: 'routine_medication_gap',
@@ -62,12 +63,16 @@ async function deliverEscalation(finding, subject, now = new Date()) {
   const when = ev.last_seen_at ? new Date(ev.last_seen_at) : null;
   const loc = ev.last_seen_location;
   const mapLink = loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : null;
-  const title = `${subject.name} may have lost their ${ev.item_name || 'item'}`;
+  const who = firstName(subject.name);
+  const w = item(ev.item_name);
+  const title = `${who} may have left their ${w.name} behind`;
+  // Coordinates and the keyframe id stay in finding.evidence for the app; the
+  // person reading this needs a time, a place they can tap, and what to do.
   const message =
-    `${subject.name} was alerted ${ITEM_LOST_ESCALATE_LABEL} ago that their ${ev.item_name || 'item'} was left behind and has not responded. ` +
-    (when ? `Last seen ${when.toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}` : 'Last seen time unknown') +
-    (loc ? ` at ${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)} (${mapLink}).` : '.') +
-    (ev.keyframe_id ? ` Keyframe: ${ev.keyframe_id}.` : '');
+    `We told ${who} ${ITEM_LOST_ESCALATE_LABEL} ago that their ${w.name} ${w.were} left behind, but they haven't responded. ` +
+    (when ? `${w.they === 'they' ? 'They were' : 'It was'} last seen at ${timeWords(when)}` : `We don't have a time for when ${w.they} ${w.were} last seen`) +
+    (loc ? ` — here's the spot on a map: ${mapLink}. ` : '. ') +
+    `Could you give ${who} a call?`;
   const ids = [];
   for (const cg of caregivers) {
     const prefs = cg.notification_prefs || {};

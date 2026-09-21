@@ -59,8 +59,17 @@ const PROVIDERS = {
   groq: {
     url: 'https://api.groq.com/openai/v1/chat/completions',
     defaultModel: 'openai/gpt-oss-20b',   // on the free tier; llama-3.3-70b-versatile is enterprise-only since Aug 2026
-    rpm: 30,
+    // Published RPM is 30, but the free tier's 6K tokens/min binds first: a
+    // notification prompt is ~500 tokens, so ~12/min is what actually clears.
+    // Measured 22 Sep 2026: 429s began at the 15th call in a minute. Raise
+    // LLM_RPM on a paid tier.
+    rpm: 12,
     jsonMode: true,
+    // gpt-oss is a reasoning model: hidden reasoning tokens count against
+    // max_tokens. At the default effort it burned all 250 on reasoning, emitted
+    // no content, and JSON mode 400'd with an empty failed_generation on every
+    // call (seen 22 Sep 2026). A two-sentence notification needs no deliberation.
+    extra: { reasoning_effort: 'low' },
   },
   openrouter: {
     url: 'https://openrouter.ai/api/v1/chat/completions',
@@ -157,7 +166,11 @@ class ProviderClient {
     return !!this.apiKey && Date.now() >= this.breakerOpenUntil;
   }
 
-  async complete(systemInstruction, prompt, { maxTokens = 250, temperature = 0.5 } = {}) {
+  // maxTokens is generous on purpose: the output is ~80 tokens, but reasoning
+  // models (gpt-oss on Groq, several of OpenRouter's free upstreams) spend
+  // hidden reasoning tokens from the same budget and return NOTHING when it
+  // runs out. Cost is what is generated, not the cap.
+  async complete(systemInstruction, prompt, { maxTokens = 1024, temperature = 0.5 } = {}) {
     if (!this.available) return { ok: false, reason: 'unavailable' };
     this.stats.calls++;
 
@@ -169,6 +182,7 @@ class ProviderClient {
       ],
       max_tokens: maxTokens,
       temperature,
+      ...(this.cfg.extra || {}),
     };
     if (this.cfg.jsonMode) body.response_format = { type: 'json_object' };
 
