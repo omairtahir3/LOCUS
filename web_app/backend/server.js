@@ -25,6 +25,9 @@ connectDB();
 const notificationScheduler = require('./utils/notificationScheduler');
 notificationScheduler.init();
 
+const eventLogRetention = require('./utils/eventLogRetention');
+eventLogRetention.init();
+
 // Middleware
 app.use(cors());
 // Item enrolment posts 3-5 base64 photos in one body; phone-camera frames run
