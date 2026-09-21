@@ -136,6 +136,45 @@ router.put('/:id', auth, async (req, res) => {
 
 // DELETE /api/user-items/:id
 // Soft-delete an item (set is_active = false)
+// GET /api/user-items/:id/last-seen
+// Core FE-13: where and when this item was last sighted, with the frame that
+// saw it. Location is the GPS fix attached at sighting time (<=10 min old).
+// Also returns the most recent sightings so a map can draw a trail.
+router.get('/:id/last-seen', auth, async (req, res) => {
+  try {
+    const userId = await resolveUserId(req);
+    const item = await UserItem.findOne({ _id: req.params.id, user_id: userId });
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    const EventLog = require('../models/EventLog');
+    const limit = Math.min(50, Number(req.query.limit) || 10);
+    const events = await EventLog.find({
+      user_id: { $in: [userId, String(userId)] }, event_type: 'object',
+      'details.items.enrolled_item_id': String(item._id),
+    }).sort({ timestamp: -1 }).limit(limit).lean();
+
+    const sightings = events.map(ev => {
+      const hit = (ev.details?.items || []).find(i => String(i.enrolled_item_id) === String(item._id)) || {};
+      return {
+        timestamp: ev.timestamp,
+        keyframe_id: ev.keyframe_id,
+        image_url: ev.keyframe_id ? `/api/detection/keyframes/${ev.keyframe_id}/image` : null,
+        location: ev.location || null,           // null when no fresh GPS fix existed at sighting
+        similarity: hit.exemplar_similarity ?? null,
+        source: hit.generic_name ?? null,        // "tile_scan" or the YOLO class that boxed it
+      };
+    });
+    const lastWithLocation = sightings.find(s => s.location);
+
+    res.json({
+      item: { id: item._id, name: item.item_name },
+      last_seen: sightings[0] || null,
+      last_seen_location: lastWithLocation ? { ...lastWithLocation.location, timestamp: lastWithLocation.timestamp } : null,
+      sightings,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.delete('/:id', auth, async (req, res) => {
   try {
     const userId = await resolveUserId(req);

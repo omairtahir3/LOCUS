@@ -75,6 +75,25 @@ SCENE_WEIGHTS: dict[str, dict[str, float]] = {
         "Board Eraser": 0.8, "Globe": 0.6, "Stapler": 0.6, "Folder": 0.4,
         "Calculator": 0.4, "Notepaper": 0.3,
     },
+    # Outdoors. UNVALIDATED: no outdoor keyframes exist in this deployment yet
+    # (every GPS log is within 59 m of home). Built from the Objects365 class
+    # list on the principle that street furniture and vehicles do not occur
+    # indoors. The defining-object rule means it cannot fire on a plant in a
+    # living room -- it needs a traffic light, a street light, or a vehicle in
+    # view. Calibrate against a real walk before trusting the supporting
+    # weights. Vehicles are 0.9 not 1.0 because a car is visible through a
+    # window from indoors; two vehicle sightings or one piece of street
+    # furniture is the intended bar.
+    "outdoor": {
+        "Traffic Light": 1.0, "Street Lights": 1.0, "Traffic Sign": 1.0,
+        "Fire Hydrant": 1.0, "Crosswalk Sign": 1.0, "Parking meter": 1.0,
+        "Stop Sign": 1.0, "Speed Limit Sign": 1.0,
+        "Car": 0.9, "Bus": 0.9, "Truck": 0.9, "Van": 0.9, "SUV": 0.9,
+        "Motorcycle": 0.8, "Bicycle": 0.8,
+        "Bench": 0.4, "Awning": 0.4, "Tent": 0.4, "Trash bin Can": 0.2,
+        # No "Tree" class exists in Objects365; verified against the model's
+        # own names so a typo here cannot silently make the scene unreachable.
+    },
 }
 
 DEFINING_OBJECTS: dict[str, set[str]] = {

@@ -25,6 +25,8 @@ const NotificationSchema = new mongoose.Schema({
       'routine_deviation',       // expected scene not seen at its usual time  (to caregivers)
       'routine_left_behind',     // enrolled item left in the room just exited (to user)
       'routine_habitual_item',   // item usually carried at this hour, absent  (to user)
+      'routine_item_lost',           // enrolled item left behind outdoors        (to user, ack required)
+      'routine_item_lost_escalated', // user did not acknowledge; GPS + keyframe   (to caregivers)
     ],
     required: true
   },

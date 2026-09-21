@@ -162,6 +162,22 @@ EMIT_TIER2_GAP_FILL_ACTIVITY = False
 TIER2_HANDHELD_ACTIVITIES = {"eating", "drinking"}
 TIER2_HANDHELD_MIN_AREA_FRAC = 0.04
 
+# ── Outdoor handling ──────────────────────────────────────────────────────────
+# Age limit on the GPS fix attached to an item sighting. That fix is what
+# "last seen at" shows if the item goes missing, so it has to be from roughly
+# the moment of the sighting, not from whenever the phone last reported.
+ITEM_LOCATION_MAX_STALENESS_MIN = 10.0
+
+# Candidate-detection confidence used when the scene tracker says the wearer
+# is outdoors. Variable lighting and busy backgrounds depress YOLO's box
+# confidence on the same object, so the candidate bar drops from 0.30 to 0.25.
+# The EXEMPLAR threshold is deliberately NOT loosened: Option B still requires
+# an identity match at 0.74 for anything to persist, so this widens what gets
+# looked at without widening what gets believed. UNVALIDATED -- no outdoor
+# footage exists yet; 0.25 is the value the earlier candidate sweep showed
+# recovers boxes without a false-positive cost indoors.
+OUTDOOR_CONF_THRESHOLD = 0.25
+
 # Items are persistent in a way activities are not — a wallet left on a desk
 # stays in frame for hours, so a 15-minute window prevents keyframe flooding
 # while re-indexing items when re-encountered. Suppression is per (user, item
@@ -370,7 +386,15 @@ class DailyItemIndexer:
             return
 
         t0 = time.perf_counter()
-        results = self._model(image, conf=self.conf_threshold, iou=0.45, verbose=False)
+        # FE-14: loosen the candidate bar when the scene tracker last confirmed
+        # the wearer outdoors. Reads the tracker's current scene; the tracker
+        # is updated later in this same call, so the decision lags by one
+        # keyframe, which is fine at one keyframe per ~15s.
+        _uid = str((metadata or {}).get("user_id", ""))
+        _tracker = self._scene_trackers.get(_uid)
+        _outdoors = bool(_tracker and getattr(_tracker, "_current", None) == "outdoor")
+        _conf = OUTDOOR_CONF_THRESHOLD if _outdoors else self.conf_threshold
+        results = self._model(image, conf=_conf, iou=0.45, verbose=False)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         if not results or len(results) == 0:
@@ -397,7 +421,7 @@ class DailyItemIndexer:
             if cls_id not in PERSONAL_ITEM_CLASS_IDS:
                 continue
             conf = float(box.conf[0].item())
-            if conf < self.conf_threshold:
+            if conf < _conf:   # same bar as the inference call (outdoor-aware)
                 continue
             cls_name = self._model.names.get(cls_id, f"class_{cls_id}")
             xyxy = box.xyxy[0].tolist()
@@ -933,10 +957,15 @@ class DailyItemIndexer:
                     loc_ts = latest_loc.get("timestamp")
                     if loc_ts:
                         staleness_mins = (datetime.utcnow() - loc_ts).total_seconds() / 60.0
-                        if staleness_mins <= 60.0:
+                        # 10 minutes, not 60: this location is what "last seen at"
+                        # shows when an item goes missing outdoors. A fix from an
+                        # hour ago can be a kilometre from where the item is.
+                        if staleness_mins <= ITEM_LOCATION_MAX_STALENESS_MIN:
                             location = {
                                 "lat": latest_loc["lat"],
-                                "lng": latest_loc["lng"]
+                                "lng": latest_loc["lng"],
+                                "accuracy": latest_loc.get("accuracy"),
+                                "fix_age_s": round(staleness_mins * 60)
                             }
             except Exception as e:
                 print(f"[DailyItemIndexer] Location lookup note: {e}")

@@ -19,9 +19,14 @@ const routineFindingSchema = new mongoose.Schema({
   user_id:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   kind: {
     type: String,
-    enum: ['medication_gap', 'inactivity', 'camera_off', 'left_behind', 'deviation', 'habitual_item'],
+    enum: ['medication_gap', 'inactivity', 'camera_off', 'left_behind', 'deviation', 'habitual_item',
+           'item_lost'],   // enrolled item left behind OUTDOORS (Core FE-12); escalates to caregivers (FE-15)
     required: true,
   },
+  // FE-15: set once caregivers have been told because the user did not
+  // acknowledge the alert in time.
+  escalated:    { type: Boolean, default: false },
+  escalated_at: { type: Date, default: null },
   dedup_key:  { type: String, required: true, unique: true },
   severity:   { type: String, enum: ['info', 'warning', 'urgent'], default: 'info' },
   title:      { type: String, required: true },
