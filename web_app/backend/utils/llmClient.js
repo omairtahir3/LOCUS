@@ -25,10 +25,21 @@
  *      can only fill in {title, message} for a finding the monitor already
  *      produced cannot invent a finding.
  *
- * Providers (all OpenAI-compatible chat/completions):
- *   cerebras   30 RPM, 1M tokens/day free, 8K context     https://inference-docs.cerebras.ai/support/rate-limits
- *   groq       30 RPM, 6K TPM, 14.4K req/day free         https://console.groq.com/docs/rate-limits
- *   openrouter free router, limits vary by upstream       https://openrouter.ai/docs/guides/routing/routers/free-router
+ * Providers (all OpenAI-compatible chat/completions). Free-tier status checked
+ * September 2026 -- it changed in August and will change again:
+ *   groq       FREE, no card. 30 RPM, 6K TPM, 14.4K req/day. Llama 3.x left
+ *              the free tier on 16 Aug 2026 (enterprise-only now); the free
+ *              tier runs OpenAI gpt-oss and Qwen. Default is gpt-oss-20b:
+ *              production-grade, ~1000 tok/s, JSON mode. Groq's Qwen
+ *              (qwen/qwen3.8-27b) is PREVIEW, "evaluation only", so it is not
+ *              the default despite being the better model.
+ *              https://console.groq.com/docs/models
+ *   openrouter FREE, no card. The free router picks an available free model.
+ *              https://openrouter.ai/docs/guides/routing/routers/free-router
+ *   cerebras   NO LONGER card-free. Since Aug 2026 new accounts get $5 of
+ *              credit after adding a payment method, expiring in 30 days.
+ *              Kept as an option, not a default.
+ *              https://inference-docs.cerebras.ai/support/rate-limits
  *
  * Env:
  *   LLM_PROVIDER, LLM_API_KEY, LLM_MODEL              primary
@@ -45,15 +56,9 @@ let transport = (url, body, config) => axios.post(url, body, config);
 const _setTransportForTests = fn => { transport = fn || ((u, b, c) => axios.post(u, b, c)); };
 
 const PROVIDERS = {
-  cerebras: {
-    url: 'https://api.cerebras.ai/v1/chat/completions',
-    defaultModel: 'llama-3.3-70b',
-    rpm: 30,
-    jsonMode: true,
-  },
   groq: {
     url: 'https://api.groq.com/openai/v1/chat/completions',
-    defaultModel: 'llama-3.3-70b-versatile',
+    defaultModel: 'openai/gpt-oss-20b',   // on the free tier; llama-3.3-70b-versatile is enterprise-only since Aug 2026
     rpm: 30,
     jsonMode: true,
   },
@@ -62,6 +67,12 @@ const PROVIDERS = {
     defaultModel: 'openrouter/free',
     rpm: 20,
     jsonMode: false,      // not guaranteed across upstreams; we parse defensively anyway
+  },
+  cerebras: {
+    url: 'https://api.cerebras.ai/v1/chat/completions',
+    defaultModel: 'llama3.1-8b',
+    rpm: 30,
+    jsonMode: true,
   },
 };
 
