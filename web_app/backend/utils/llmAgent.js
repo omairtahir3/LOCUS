@@ -29,6 +29,7 @@ Return ONLY a JSON object: {"title": "...", "message": "..."}.
 How to write:
 - Plain, warm, everyday language, the way a thoughtful friend would text. Never clinical, never alarmist.
 - Title under 60 characters, no colons, no "Alert:" / "Urgent:" prefixes. Message 1-2 short sentences.
+- No dashes of any kind as punctuation (no "—", "–" or " - "). Use a comma or a full stop instead.
 - Use first names. Do not guess anyone's gender: use their name or "they/them", never "he" or "she".
 - Normal capitalisation: sentences start with a capital letter. Item names are lower case ("your car keys"); medicine names keep their own capitalisation ("Panadol").
 - If the title you are given is a question, keep it a question.
@@ -48,6 +49,12 @@ What you must not change:
 const GENDERED = /\b(he|she|him|his|hers?|himself|herself)\b/i;
 // The app cannot chat back and must not sound like it dispenses care.
 const CHATTY = /\b(let me know|tell me|reply|write back|feel better|get well)\b/i;
+// Dashes as punctuation read as machine-written. The model keeps using them
+// whatever the prompt says, so they are rewritten: mid-sentence ones become
+// a comma, ones before a capital letter become a full stop.
+const undash = s => String(s)
+  .replace(/\s*[—–]\s*(?=[A-Z])|\s+-\s+(?=[A-Z])/g, '. ')
+  .replace(/\s*[—–]\s*|\s+-\s+/g, ', ');
 const SECOND_PERSON = /\b(you|your|you're|you've|yourself)\b/i;
 // Every number the model writes (a time, a count, a distance, a dose) must
 // already be in the facts or the template. Seen: "at 3:00 pm" invented for a
@@ -74,16 +81,17 @@ async function phrase(instruction, facts, fallback, label, { direct = false } = 
   if (direct && !SECOND_PERSON.test(out.message)) { console.warn(`[LLMAgent] ${label}: not addressed to the recipient, using template`); return fallback; }
   const bad = inventedNumber(out.message, allowedNumbers(`${facts} ${fallback.title} ${fallback.message}`));
   if (bad) { console.warn(`[LLMAgent] ${label}: invented "${bad}", using template`); return fallback; }
-  console.log(`[LLMAgent] ${label}: "${out.message}"`);
-  return { title: fallback.title, message: out.message.slice(0, 400) };
+  const message = undash(out.message).slice(0, 400);
+  console.log(`[LLMAgent] ${label}: "${message}"`);
+  return { title: fallback.title, message };
 }
 
 // ── Hardcoded vault (unchanged from the original agent) ─────────────────────
 const vault = {
   taken_patient: [
-    "Nicely done — that one's taken care of.",
+    "Nicely done, that one's taken care of.",
     "All done, thank you. Keep it up!",
-    "Got it — your dose is confirmed.",
+    "Got it, your dose is confirmed.",
   ],
 };
 
@@ -98,7 +106,7 @@ const generateAIDoseReminder = async (user, medication, log) => {
   const nth = log.reminder_count || 1;
   const fallback = {
     title: nth > 1 ? `Still time for your ${med}` : `Time for your ${med}`,
-    message: t ? `Hi ${who}, it's ${t} — time for your ${med}${dose ? ` (${dose})` : ''}.` : `Hi ${who}, time for your ${med}${dose ? ` (${dose})` : ''}.`,
+    message: t ? `Hi ${who}, it's ${t}, time for your ${med}${dose ? ` (${dose})` : ''}.` : `Hi ${who}, time for your ${med}${dose ? ` (${dose})` : ''}.`,
   };
   return phrase(
     isElderly ? `You are writing to ${who}, an older adult. Be warm, gentle and encouraging.`
@@ -122,7 +130,7 @@ const generateAIMissedDoseAlert = async (user, medication, log, caregiver) => {
   return phrase(
     `You are writing to ${cg}, who looks after ${who}. Be calm and practical.`,
     cameraOff
-      ? `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. The camera was off the whole time, so the dose is NOT CONFIRMED — we do not know whether it was taken. ${reminders} ${n === 1 ? 'was' : 'were'} sent. Suggest checking in or confirming it by hand.`
+      ? `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. The camera was off the whole time, so the dose is NOT CONFIRMED. We do not know whether it was taken. ${reminders} ${n === 1 ? 'was' : 'were'} sent. Suggest checking in or confirming it by hand.`
       : `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. The camera was on and did not see it taken after ${reminders}, so it appears MISSED. Suggest checking in.`,
     fallback, `missed-dose alert for ${cg}`);
 };
@@ -132,7 +140,7 @@ const generateAITakenDoseAlert = async (user, medication, log, caregiver) => {
   const med = medication?.name || 'their medication', t = timeOf(log?.scheduled_time);
   const fallback = {
     title: `${who} took the ${med}`,
-    message: `Good news — ${who} took the ${med}${t ? ` due at ${t}` : ''} and the camera confirmed it. Nothing to do.`,
+    message: `Good news, ${who} took the ${med}${t ? ` due at ${t}` : ''} and the camera confirmed it. Nothing to do.`,
   };
   return phrase(`You are writing to ${cg}, who looks after ${who}. Be reassuring; make clear nothing needs doing.`,
     `${who} took the ${med}${t ? ` due at ${t}` : ''}; the camera confirmed it.`, fallback, `taken-dose notice for ${cg}`);
@@ -140,7 +148,7 @@ const generateAITakenDoseAlert = async (user, medication, log, caregiver) => {
 
 const generateAIUserTakenDoseAlert = async (user, medication) => {
   const who = firstName(user?.name) || 'there', med = medication?.name || 'your medication';
-  const fallback = { title: `${med} — done`, message: pick(vault.taken_patient) };
+  const fallback = { title: `${med} taken`, message: pick(vault.taken_patient) };
   return phrase(`You are writing to ${who} directly. Be short, warm and encouraging.`,
     `${who} just took ${med} and the camera confirmed it.`, fallback, `taken confirmation for ${who}`, { direct: true });
 };
@@ -178,11 +186,11 @@ const generateAIEscalatedAlert = async (notification, caregiver) => {
   const cg = firstName(caregiver?.name) || 'there';
   const title0 = notification.title || 'an earlier alert', msg0 = notification.message || '';
   const fallback = {
-    title: `Still waiting — ${title0.charAt(0).toLowerCase()}${title0.slice(1)}`.slice(0, 80),
-    message: `Hi ${cg}, this one has been waiting 15 minutes: ${msg0} Could you take a look now?`.slice(0, 400),
+    title: `Still waiting, ${title0.charAt(0).toLowerCase()}${title0.slice(1)}`.slice(0, 80),
+    message: `Hi ${cg}, this one has been waiting 15 minutes. ${msg0} Could you take a look now?`.slice(0, 400),
   };
   return phrase(`You are writing to ${cg}. An earlier alert has gone unanswered for 15 minutes; ask them to look at it now, firmly but kindly. Keep the original facts.`,
-    `Earlier alert, still unanswered after 15 minutes: "${title0}" — ${msg0}`, fallback, `escalation for ${cg}`);
+    `Earlier alert, still unanswered after 15 minutes: "${title0}". ${msg0}`, fallback, `escalation for ${cg}`);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

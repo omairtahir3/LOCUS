@@ -216,7 +216,7 @@ async function checkDeviation(user, profile, now = new Date()) {
     const f = await record(user, 'deviation', dedup_key, 'info',
       `${who} hasn't been in the ${room} yet today`,
       `${who} is usually in the ${room} around ${hourWords(now.getHours())}, but hasn't been seen there in the last ` +
-      `${DEVIATION_GRACE_HOURS} hours. Nothing urgent — just a change from the usual pattern.`,
+      `${DEVIATION_GRACE_HOURS} hours. Nothing urgent, just a change from the usual pattern.`,
       { signal: sig.key, ratio: exp.ratio, support: exp.support });
     if (f) out.push(f);
   }
