@@ -71,7 +71,7 @@ async function deliverEscalation(finding, subject, now = new Date()) {
   const message =
     `We told ${who} ${ITEM_LOST_ESCALATE_LABEL} ago that their ${w.name} ${w.were} left behind, but they haven't responded. ` +
     (when ? `${w.they === 'they' ? 'They were' : 'It was'} last seen at ${timeWords(when)}` : `We don't have a time for when ${w.they} ${w.were} last seen`) +
-    (loc ? ` — here's the spot on a map: ${mapLink}. ` : '. ') +
+    (loc ? `, here's the spot on a map: ${mapLink}. ` : '. ') +
     `Could you give ${who} a call?`;
   const ids = [];
   for (const cg of caregivers) {

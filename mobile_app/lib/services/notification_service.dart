@@ -43,7 +43,7 @@ class NotificationService {
       await _plugin.show(
         id: id,
         title: '💊 Time to take $medicationName',
-        body: '$dosage — Tap to open LOCUS',
+        body: '$dosage. Tap to open LOCUS',
         notificationDetails: const NotificationDetails(
           android: AndroidNotificationDetails(
             'medication_reminders',
