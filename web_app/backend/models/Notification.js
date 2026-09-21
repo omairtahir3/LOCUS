@@ -18,6 +18,13 @@ const NotificationSchema = new mongoose.Schema({
       'caregiver_message',  // message from caregiver
       'system',             // general system alert
       'camera_off_alert',   // camera turned off during medication window
+      // routine learning (see utils/routineMonitor.js)
+      'routine_medication_gap',  // N consecutive days with no verified dose   (to caregivers)
+      'routine_inactivity',      // camera on, no movement for hours           (to caregivers)
+      'routine_camera_off',      // no frames for hours during waking time     (to caregivers)
+      'routine_deviation',       // expected scene not seen at its usual time  (to caregivers)
+      'routine_left_behind',     // enrolled item left in the room just exited (to user)
+      'routine_habitual_item',   // item usually carried at this hour, absent  (to user)
     ],
     required: true
   },
