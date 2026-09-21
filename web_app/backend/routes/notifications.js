@@ -1,13 +1,13 @@
-const express = require('express');
+﻿const express = require('express');
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
-const { generateAISkippedMedicineAlert } = require('../utils/geminiAgent');
+const { generateAISkippedMedicineAlert } = require('../utils/llmAgent');
 const { createNotification } = require('../utils/notifications');
 
 const router = express.Router();
 
-// ─── Internal endpoints (no auth required, called by Python AI pipeline) ─────
+// â”€â”€â”€ Internal endpoints (no auth required, called by Python AI pipeline) â”€â”€â”€â”€â”€
 
 // POST /api/notifications/system-alert (Internal Python API endpoint)
 router.post('/system-alert', async (req, res) => {
@@ -63,7 +63,7 @@ router.post('/system-alert', async (req, res) => {
   }
 });
 
-// POST /api/notifications/skip  — create a skip notification
+// POST /api/notifications/skip  â€” create a skip notification
 router.post('/skip', async (req, res) => {
   try {
     const {
@@ -75,7 +75,7 @@ router.post('/skip', async (req, res) => {
       detection_events = []
     } = req.body;
 
-    // Resolve the user — use provided user_id or find default
+    // Resolve the user â€” use provided user_id or find default
     let recipientId = user_id;
     if (!recipientId) {
       const defaultUser = await User.findOne({ role: { $ne: 'caregiver' } });
@@ -136,9 +136,9 @@ router.post('/skip', async (req, res) => {
   }
 });
 
-// ─── Protected endpoints (require user authentication) ───────────────────────
+// â”€â”€â”€ Protected endpoints (require user authentication) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.use(protect);
-// GET /api/notifications  — get all notifications for current user
+// GET /api/notifications  â€” get all notifications for current user
 router.get('/', async (req, res) => {
   try {
     const { unread_only, limit = 30 } = req.query;
@@ -154,7 +154,7 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PATCH /api/notifications/:id/read  — mark as read
+// PATCH /api/notifications/:id/read  â€” mark as read
 router.patch('/:id/read', async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(
@@ -167,7 +167,7 @@ router.patch('/:id/read', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PATCH /api/notifications/read-all  — mark all as read
+// PATCH /api/notifications/read-all  â€” mark all as read
 router.patch('/read-all', async (req, res) => {
   try {
     await Notification.updateMany(
@@ -178,7 +178,7 @@ router.patch('/read-all', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PATCH /api/notifications/:id/acknowledge  — acknowledge an alert
+// PATCH /api/notifications/:id/acknowledge  â€” acknowledge an alert
 router.patch('/:id/acknowledge', async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(
@@ -191,7 +191,7 @@ router.patch('/:id/acknowledge', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/notifications/clear-all  — dismiss all notifications for current user
+// DELETE /api/notifications/clear-all  â€” dismiss all notifications for current user
 router.delete('/clear-all', async (req, res) => {
   try {
     await Notification.updateMany(
@@ -202,7 +202,7 @@ router.delete('/clear-all', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/notifications/:id  — dismiss
+// DELETE /api/notifications/:id  â€” dismiss
 router.delete('/:id', async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(
@@ -215,7 +215,7 @@ router.delete('/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/notifications/:id/respond — respond to a status check or message
+// POST /api/notifications/:id/respond â€” respond to a status check or message
 router.post('/:id/respond', async (req, res) => {
   try {
     const { message } = req.body;
@@ -237,7 +237,7 @@ router.post('/:id/respond', async (req, res) => {
         recipientId: cg._id,
         subjectUserId: req.user._id,
         type: 'caregiver_message',
-        title: `💬 Response from ${senderUser.name}`,
+        title: `ðŸ’¬ Response from ${senderUser.name}`,
         message: `${senderUser.name} responded to your check-in: "${message}"`,
         sendEmailTo: cg.notification_prefs?.email ? cg.email : null,
       });
@@ -247,7 +247,7 @@ router.post('/:id/respond', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/notifications/:id/snooze — snooze a dose reminder from the notification card
+// POST /api/notifications/:id/snooze â€” snooze a dose reminder from the notification card
 router.post('/:id/snooze', async (req, res) => {
   try {
     const durationMinutes = parseInt(req.body.snooze_duration_minutes) || 10;

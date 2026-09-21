@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 const Notification = require('../models/Notification');
-const { generateAIDoseReminder, generateAIMissedDoseAlert, generateAITakenDoseAlert, generateAIUserTakenDoseAlert, generateAIEscalatedAlert, generateAIUserMissedDoseAlert } = require('./geminiAgent');
+const { generateAIDoseReminder, generateAIMissedDoseAlert, generateAITakenDoseAlert, generateAIUserTakenDoseAlert, generateAIEscalatedAlert, generateAIUserMissedDoseAlert } = require('./llmAgent');
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
 const fs = require('fs');
@@ -31,12 +31,38 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Check SMTP once at boot and say so loudly. Caregiver emails had been failing
+// on every send with "535 Username and Password not accepted" for weeks, and
+// the only trace was a one-line warning per email buried in the log while the
+// delivery record claimed success. A configuration problem should announce
+// itself at startup, not per notification.
+const emailConfigured = !!process.env.EMAIL_USER && !process.env.EMAIL_USER.includes('your_email');
+let smtpVerified = false;
+if (emailConfigured) {
+  transporter.verify()
+    .then(() => { smtpVerified = true; console.log(`[Email] SMTP OK — ${process.env.EMAIL_HOST} as ${process.env.EMAIL_USER}`); })
+    .catch(err => {
+      const gmail = /gmail/i.test(process.env.EMAIL_HOST || '');
+      console.error(`[Email] SMTP verification FAILED: ${err.message.split('\n')[0]}`);
+      if (gmail && /535|invalid login|not accepted/i.test(err.message)) {
+        console.error('[Email] Gmail rejected the password. Gmail SMTP requires a 16-character App Password '
+          + '(Google Account → Security → 2-Step Verification → App passwords), not the account password. '
+          + 'App passwords are revoked when the account password changes. '
+          + 'Until EMAIL_PASS is a valid app password, NO caregiver emails will be delivered.');
+      }
+    });
+} else {
+  console.log('[Email] EMAIL_USER not configured — emails will be simulated (logged, not sent).');
+}
+
 // Send an email notification via Nodemailer
 const sendEmail = async ({ to, subject, html }) => {
   try {
-    if (!process.env.EMAIL_USER || process.env.EMAIL_USER.includes('your_email')) {
-      console.log(`[Nodemailer Simulation] To: ${to} | Subject: "${subject}"`);
-      return true;
+    if (!emailConfigured) {
+      // Simulated: log it, but do NOT report it as sent. Reporting simulated
+      // sends as delivered is how a broken mail setup stays invisible.
+      console.log(`[Email Simulation] To: ${to} | Subject: "${subject}"`);
+      return false;
     }
 
     const mailOptions = {
@@ -507,25 +533,30 @@ const escalateAlert = async (notification) => {
   const escTitle = aiContent.title;
   const escMsg = aiContent.message;
 
+  // Record what ACTUALLY happened. This used to stamp email.sent = true
+  // unconditionally, so every caregiver email that failed at SMTP was recorded
+  // as delivered fifteen minutes later -- the delivery records read
+  // {sent: true, failed: true} -- and the failure was invisible from the UI.
+  let emailSent = false;
   if (recipient.email) {
-    await sendEmail({
+    emailSent = await sendEmail({
       to: recipient.email,
       subject: escTitle,
       html: getLocusEmailHtml({ title: escTitle, message: escMsg, type: 'escalated', notificationId: notification._id }),
     });
   }
-  await sendPushNotification({ userId: recipient._id, title: escTitle, body: escMsg });
+  const pushSent = await sendPushNotification({ userId: recipient._id, title: escTitle, body: escMsg });
 
-  await Notification.findByIdAndUpdate(notification._id, {
-    $set: {
-      escalated: true,
-      escalated_at: new Date(),
-      'delivery.email.sent': true,
-      'delivery.email.sent_at': new Date(),
-      'delivery.push.sent': true,
-      'delivery.push.sent_at': new Date(),
-    }
-  });
+  const set = { escalated: true, escalated_at: new Date() };
+  if (recipient.email) {
+    set['delivery.email.sent'] = emailSent;
+    set['delivery.email.failed'] = !emailSent;
+    if (emailSent) set['delivery.email.sent_at'] = new Date();
+  }
+  set['delivery.push.sent'] = pushSent;
+  set['delivery.push.failed'] = !pushSent;
+  if (pushSent) set['delivery.push.sent_at'] = new Date();
+  await Notification.findByIdAndUpdate(notification._id, { $set: set });
 
   return true;
 };
