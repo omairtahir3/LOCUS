@@ -10,38 +10,80 @@
  * The model is only ever asked to phrase facts the caller already established
  * (which medication, which time, how many days, which room). It is not asked
  * what happened. That is what keeps hallucination out of a caregiver alert.
+ *
+ * Titles are never the model's: every template title is written for its exact
+ * case and the model rewrites only the message body, which is then checked for
+ * guessed pronouns and for actually addressing the recipient (see phrase()).
  */
 
 const { completeJSON, isConfigured } = require('./llmClient');
+const { timeWords, firstName } = require('./friendly');
 
 const SCHEMA = { title: { type: 'string', max: 80 }, message: { type: 'string', max: 400 } };
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-const timeOf = d => d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+const timeOf = d => d ? timeWords(d) : null;
 
-const BASE_RULES = `You write short in-app and email notifications for LOCUS, an assistive-care app.
+const BASE_RULES = `You write short notifications for LOCUS, an app that helps older adults and the people who care for them.
 Return ONLY a JSON object: {"title": "...", "message": "..."}.
-Rules: title under 60 characters; message 1-2 sentences; never invent medical advice, dosages, or facts not given; never change the times or counts you are given.`;
 
-async function phrase(instruction, facts, fallback, label) {
+How to write:
+- Plain, warm, everyday language, the way a thoughtful friend would text. Never clinical, never alarmist.
+- Title under 60 characters, no colons, no "Alert:" / "Urgent:" prefixes. Message 1-2 short sentences.
+- Use first names. Do not guess anyone's gender: use their name or "they/them", never "he" or "she".
+- Normal capitalisation: sentences start with a capital letter. Item names are lower case ("your car keys"); medicine names keep their own capitalisation ("Panadol").
+- If the title you are given is a question, keep it a question.
+- Say what happened and, if there is one, the single most useful thing to do next.
+- You are an app, not a person: never offer to help, never ask them to reply or "let me know".
+- Never include technical values: no confidence scores, motion scores, frame counts, percentages, coordinates or ISO dates. Dates and times are given to you already in words; use them as given.
+
+What you must not change:
+- Never invent medical advice, dosages, or anything not in the facts.
+- Never change a time, date, count, or distance you are given.
+- "not confirmed" / "camera was off" means the app could not SEE the dose. It does NOT mean the dose was missed. Never write "missed" unless the facts say the camera saw the dose being skipped.`;
+
+// Guards the model cannot be trusted to keep on its own (seen with the 20b
+// free-tier model even with the rule spelled out): guessing a gender from a
+// name, and writing ABOUT the person it was told to write TO. Either one
+// reads as a stranger's message, so the template ships instead.
+const GENDERED = /\b(he|she|him|his|hers?|himself|herself)\b/i;
+// The app cannot chat back and must not sound like it dispenses care.
+const CHATTY = /\b(let me know|tell me|reply|write back|feel better|get well)\b/i;
+const SECOND_PERSON = /\b(you|your|you're|you've|yourself)\b/i;
+// Every number the model writes (a time, a count, a distance, a dose) must
+// already be in the facts or the template. Seen: "at 3:00 pm" invented for a
+// confirmation whose facts carried no time at all.
+const numbersIn = s => new Set((String(s).match(/\d+(?:[:.]\d+)?/g) || []));
+// "2:00 PM" may legitimately come back as "2 PM", so the parts count too.
+const allowedNumbers = s => { const out = new Set(); for (const n of numbersIn(s)) { out.add(n); n.split(/[:.]/).forEach(p => out.add(p)); } return out; };
+const inventedNumber = (text, allowed) => [...numbersIn(text)].find(n => !allowed.has(n) && !n.split(/[:.]/).every(p => allowed.has(p)));
+
+/**
+ * Ask the model to reword `facts` for the audience in `instruction`. The
+ * TITLE is always the template's: it was written for that exact finding, and
+ * the model's titles were consistently weaker ("Check Your Car Keys", or a
+ * title that dropped the one number that mattered). The model rewrites the
+ * message body only.
+ *   direct: true when the recipient is the person the message is about.
+ */
+async function phrase(instruction, facts, fallback, label, { direct = false } = {}) {
   if (!isConfigured()) return fallback;
   const out = await completeJSON(`${BASE_RULES}\n${instruction}`, facts, SCHEMA);
-  if (out) { console.log(`[LLMAgent] ${label}: "${out.title}"`); return out; }
-  return fallback;
+  if (!out) return fallback;
+  if (GENDERED.test(out.message)) { console.warn(`[LLMAgent] ${label}: guessed a gender, using template`); return fallback; }
+  if (CHATTY.test(out.message)) { console.warn(`[LLMAgent] ${label}: chatty, using template`); return fallback; }
+  if (direct && !SECOND_PERSON.test(out.message)) { console.warn(`[LLMAgent] ${label}: not addressed to the recipient, using template`); return fallback; }
+  const bad = inventedNumber(out.message, allowedNumbers(`${facts} ${fallback.title} ${fallback.message}`));
+  if (bad) { console.warn(`[LLMAgent] ${label}: invented "${bad}", using template`); return fallback; }
+  console.log(`[LLMAgent] ${label}: "${out.message}"`);
+  return { title: fallback.title, message: out.message.slice(0, 400) };
 }
 
 // ── Hardcoded vault (unchanged from the original agent) ─────────────────────
 const vault = {
-  dose_reminder: [
-    "It's time for your scheduled medication.",
-    "Please take your medication now.",
-    "Time for your daily medication routine.",
-    "Your health is important! It's time for your medication.",
-    "Friendly reminder: your medicine is due.",
-  ],
   taken_patient: [
-    "Great job taking your medication on time!",
-    "Dose confirmed. Keep up the good work!",
-    "Medication verified successfully.",
+    "Nicely done — that one's taken care of.",
+    "All done, thank you. Keep it up!",
+    "Got it — your dose is confirmed.",
   ],
 };
 
@@ -51,96 +93,96 @@ const vault = {
 
 const generateAIDoseReminder = async (user, medication, log) => {
   const isElderly = user.role === 'elderly';
-  const name = user.name || 'Friend', med = medication.name || 'Medication', dose = medication.dosage || '';
-  const t = timeOf(log.scheduled_time) || 'scheduled window';
+  const who = firstName(user.name) || 'there', med = medication.name || 'your medication', dose = medication.dosage || '';
+  const t = timeOf(log.scheduled_time);
+  const nth = log.reminder_count || 1;
   const fallback = {
-    title: isElderly ? `Hello ${name} — Medication Reminder` : `[Reminder] ${med} ${dose}`,
-    message: pick(vault.dose_reminder),
+    title: nth > 1 ? `Still time for your ${med}` : `Time for your ${med}`,
+    message: t ? `Hi ${who}, it's ${t} — time for your ${med}${dose ? ` (${dose})` : ''}.` : `Hi ${who}, time for your ${med}${dose ? ` (${dose})` : ''}.`,
   };
   return phrase(
-    isElderly ? 'Tone: warm, respectful, gentle, encouraging — for an elderly patient.'
-              : 'Tone: clean, supportive, motivational — for a self-managing adult.',
-    `Reminder for ${name}: ${med} ${dose}, scheduled ${t}. Reminder attempt ${log.reminder_count || 1}.`,
-    fallback, `dose reminder for ${name}`);
+    isElderly ? `You are writing to ${who}, an older adult. Be warm, gentle and encouraging.`
+              : `You are writing to ${who}. Be friendly and brief.`,
+    `It is time for ${who} to take ${med}${dose ? ` (${dose})` : ''}${t ? `, due at ${t}` : ''}.` +
+    (nth > 1 ? ` They have already been reminded ${nth - 1 === 1 ? 'once' : `${nth - 1} times`} and have not confirmed it yet; nudge again kindly, but do not mention counts or say "reminder number".` : ''),
+    fallback, `dose reminder for ${who}`, { direct: true });
 };
 
 const generateAIMissedDoseAlert = async (user, medication, log, caregiver) => {
-  const patient = user.name || 'Patient', cg = caregiver?.name || 'Caregiver';
-  const med = medication.name || 'Medication', dose = medication.dosage || '';
-  const t = timeOf(log.scheduled_time) || 'scheduled time', n = log.reminder_count || 3;
+  const who = firstName(user.name) || 'they', cg = firstName(caregiver?.name) || 'there';
+  const med = medication.name || 'medication', dose = medication.dosage || '';
+  const t = timeOf(log.scheduled_time) || 'the scheduled time', n = log.reminder_count || 3;
+  const reminders = `${n} reminder${n === 1 ? '' : 's'}`;
   const cameraOff = log.status === 'camera_off';
-  const fallback = {
-    title: cameraOff ? `[Camera Off Alert] ${patient} did not verify ${med}` : `[Missed Dose Alert] ${patient} missed ${med}`,
-    message: cameraOff
-      ? `${patient} did not turn on their camera to verify the ${med} (${dose}) dose scheduled for ${t} after ${n} reminders. Please check in with them or mark it manually if you can verify it.`
-      : `${patient} has missed their ${med} (${dose}) dose scheduled for ${t} after ${n} reminders. Please check in with them.`,
-  };
+  const fallback = cameraOff
+    ? { title: `Couldn't confirm ${who}'s ${med}`,
+        message: `The camera was off around ${t}, so we couldn't see whether ${who} took the ${med}${dose ? ` (${dose})` : ''} after ${reminders}. Could you check in, or mark it taken if you know it was?` }
+    : { title: `${who} seems to have missed the ${med}`,
+        message: `The camera was on at ${t} but didn't see ${who} take the ${med}${dose ? ` (${dose})` : ''}, even after ${reminders}. It would be worth checking in.` };
   return phrase(
-    'Audience: a caregiver. Tone: professional, urgent, concise, actionable.',
-    `Patient ${patient}, medication ${med} ${dose}, scheduled ${t}, ${n} reminders sent. ` +
-    (cameraOff ? 'The camera was OFF for the whole window, so the dose is UNVERIFIED (not confirmed missed) — say the caregiver should check the device or confirm manually.'
-               : 'The camera was on and the dose was NOT detected — it is MISSED; say the caregiver should check on the patient.'),
+    `You are writing to ${cg}, who looks after ${who}. Be calm and practical.`,
+    cameraOff
+      ? `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. The camera was off the whole time, so the dose is NOT CONFIRMED — we do not know whether it was taken. ${reminders} ${n === 1 ? 'was' : 'were'} sent. Suggest checking in or confirming it by hand.`
+      : `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. The camera was on and did not see it taken after ${reminders}, so it appears MISSED. Suggest checking in.`,
     fallback, `missed-dose alert for ${cg}`);
 };
 
 const generateAITakenDoseAlert = async (user, medication, log, caregiver) => {
-  const patient = user?.name || 'Your patient', cg = caregiver?.name || 'Caregiver';
-  const med = medication?.name || 'their medication', dose = medication?.dosage || '';
-  const t = timeOf(log?.scheduled_time) || 'their scheduled time';
+  const who = firstName(user?.name) || 'they', cg = firstName(caregiver?.name) || 'there';
+  const med = medication?.name || 'their medication', t = timeOf(log?.scheduled_time);
   const fallback = {
-    title: `[Dose Taken] ${patient} took ${med}`,
-    message: `${patient} has taken their ${med} (${dose}) scheduled for ${t}. No action needed.`,
+    title: `${who} took the ${med}`,
+    message: `Good news — ${who} took the ${med}${t ? ` due at ${t}` : ''} and the camera confirmed it. Nothing to do.`,
   };
-  return phrase('Audience: a caregiver. Tone: positive, reassuring; make clear no action is required.',
-    `Patient ${patient} took ${med} ${dose} scheduled ${t}; verified by camera.`, fallback, `taken-dose notice for ${cg}`);
+  return phrase(`You are writing to ${cg}, who looks after ${who}. Be reassuring; make clear nothing needs doing.`,
+    `${who} took the ${med}${t ? ` due at ${t}` : ''}; the camera confirmed it.`, fallback, `taken-dose notice for ${cg}`);
 };
 
 const generateAIUserTakenDoseAlert = async (user, medication) => {
-  const name = user?.name || 'there', med = medication?.name || 'your medication';
-  const fallback = { title: `[Confirmed] ${med} Taken`, message: pick(vault.taken_patient) };
-  return phrase('Audience: the patient themself. Tone: short, warm, congratulatory.',
-    `${name} just took ${med}, verified by camera.`, fallback, `taken confirmation for ${name}`);
+  const who = firstName(user?.name) || 'there', med = medication?.name || 'your medication';
+  const fallback = { title: `${med} — done`, message: pick(vault.taken_patient) };
+  return phrase(`You are writing to ${who} directly. Be short, warm and encouraging.`,
+    `${who} just took ${med} and the camera confirmed it.`, fallback, `taken confirmation for ${who}`, { direct: true });
 };
 
 const generateAIUserMissedDoseAlert = async (user, medication, log) => {
   const isElderly = user.role === 'elderly';
-  const name = user.name || 'Friend', med = medication.name || 'Medication', dose = medication.dosage || '';
-  const t = timeOf(log.scheduled_time) || 'scheduled time';
+  const who = firstName(user.name) || 'there', med = medication.name || 'your medication', dose = medication.dosage || '';
+  const t = timeOf(log.scheduled_time) || 'the scheduled time';
   const cameraOff = log.status === 'camera_off';
-  const fallback = {
-    title: cameraOff ? `Camera Off: ${med} Verification Incomplete` : `Missed Dose: ${med}`,
-    message: cameraOff
-      ? `Your camera was not on during the window for ${med} (${dose}) at ${t}. This is marked 'Camera Off' and your caregiver has been notified.`
-      : `We could not detect your ${med} (${dose}) dose at ${t}. This is marked 'Missed' and your caregiver has been notified.`,
-  };
+  const fallback = cameraOff
+    ? { title: `We couldn't see your ${med}`,
+        message: `Your camera was off around ${t}, so we couldn't confirm your ${med}${dose ? ` (${dose})` : ''}. We've let your caregiver know, just in case.` }
+    : { title: `Did you take your ${med}?`,
+        message: `We didn't see you take your ${med}${dose ? ` (${dose})` : ''} at ${t}. We've let your caregiver know so they can check in.` };
   return phrase(
-    (isElderly ? 'Audience: an elderly patient. Tone: warm, gentle, respectful.' : 'Audience: a self-managing adult. Tone: direct, motivational.') +
-    ' Do not tell them to take a dose now; say their caregiver has been notified.',
-    `${name}, ${med} ${dose} at ${t}. ` + (cameraOff ? 'Camera was off for the whole window; marked Camera Off.' : 'Camera was on, dose not detected; marked Missed.'),
-    fallback, `user missed-dose alert for ${name}`);
+    (isElderly ? `You are writing to ${who}, an older adult. Be warm and gentle, never scolding.` : `You are writing to ${who}. Be friendly and direct.`) +
+    ' Do not tell them to take a dose now. Mention their caregiver has been told.',
+    `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. ` + (cameraOff ? 'The camera was off, so it could not be confirmed.' : 'The camera was on and did not see it taken.') + ' The caregiver has been notified.',
+    fallback, `user missed-dose alert for ${who}`, { direct: true });
 };
 
 const generateAISkippedMedicineAlert = async (patientName, caregiverName, scheduledTime, expected, taken, skipped, isCaregiver) => {
-  const fallback = {
-    title: `⚠ Skipped ${skipped} Medicine${skipped > 1 ? 's' : ''}`,
-    message: isCaregiver
-      ? `${patientName} was scheduled to take ${expected} medicine(s) at ${scheduledTime}, but only ${taken} were detected. ${skipped} skipped.`
-      : `You were scheduled to take ${expected} medicine(s) at ${scheduledTime}, but only ${taken} were detected. ${skipped} skipped.`,
-  };
-  return phrase(`Audience: ${isCaregiver ? 'a caregiver' : 'the patient'}. Tone: urgent, concise, actionable.`,
-    `Patient ${patientName}, ${scheduledTime}: ${expected} medicines scheduled, ${taken} detected taken, ${skipped} skipped.`,
-    fallback, `skipped-medicine alert`);
+  const who = firstName(patientName) || 'they';
+  const fallback = isCaregiver
+    ? { title: `${who} may have skipped ${skipped} medicine${skipped > 1 ? 's' : ''}`,
+        message: `At ${scheduledTime} ${who} was due ${expected} medicine${expected > 1 ? 's' : ''}, but the camera only saw ${taken} taken. Worth a quick check.` }
+    : { title: `Did you get all your medicines?`,
+        message: `You were due ${expected} at ${scheduledTime}, but we only saw ${taken} taken. Please check you haven't missed one.` };
+  return phrase(`You are writing to ${isCaregiver ? `${firstName(caregiverName)}, who looks after ${who}` : `${who} directly`}. Be calm and clear.`,
+    `At ${scheduledTime}, ${expected} medicines were due; the camera saw ${taken} taken and ${skipped} not taken.`,
+    fallback, `skipped-medicine alert`, { direct: !isCaregiver });
 };
 
 const generateAIEscalatedAlert = async (notification, caregiver) => {
-  const cg = caregiver?.name || 'Caregiver';
-  const title0 = notification.title || 'Safety Alert', msg0 = notification.message || 'An alert requires your attention.';
+  const cg = firstName(caregiver?.name) || 'there';
+  const title0 = notification.title || 'an earlier alert', msg0 = notification.message || '';
   const fallback = {
-    title: `[ESCALATED] ${title0}`.slice(0, 80),
-    message: `Unacknowledged for over 15 minutes: "${msg0}". Please act now.`.slice(0, 400),
+    title: `Still waiting — ${title0.charAt(0).toLowerCase()}${title0.slice(1)}`.slice(0, 80),
+    message: `Hi ${cg}, this one has been waiting 15 minutes: ${msg0} Could you take a look now?`.slice(0, 400),
   };
-  return phrase('Audience: a caregiver. Tone: urgent. The earlier alert has gone unacknowledged for 15+ minutes; say intervention is needed now.',
-    `Original alert: "${title0}" — "${msg0}".`, fallback, `escalation for ${cg}`);
+  return phrase(`You are writing to ${cg}. An earlier alert has gone unanswered for 15 minutes; ask them to look at it now, firmly but kindly. Keep the original facts.`,
+    `Earlier alert, still unanswered after 15 minutes: "${title0}" — ${msg0}`, fallback, `escalation for ${cg}`);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -155,18 +197,22 @@ const generateAIEscalatedAlert = async (notification, caregiver) => {
 const generateRoutineFindingMessage = async (finding, recipient, subject) => {
   const fallback = { title: finding.title.slice(0, 80), message: finding.message.slice(0, 400) };
   const toCaregiver = recipient._id?.toString() !== subject._id?.toString();
+  const who = firstName(subject.name);
   const audience = toCaregiver
-    ? `Audience: ${recipient.name}, a caregiver for ${subject.name}.`
-    : `Audience: ${subject.name} themself, a ${subject.role === 'elderly' ? 'elderly patient' : 'self-managing adult'}.`;
+    ? `You are writing to ${firstName(recipient.name)}, who looks after ${who}. Refer to ${who} by first name.`
+    : `You are writing to ${who} directly. Address them as "you".`;
   const tone = {
-    urgent: 'Tone: urgent and clear; say what to do now.',
-    warning: 'Tone: concerned but calm; say what to check.',
-    info: 'Tone: light, friendly, helpful; this is a gentle reminder, not an alarm.',
-  }[finding.severity] || 'Tone: calm and clear.';
-  const ev = finding.evidence || {};
+    urgent: 'This matters now: be clear and direct about what to do, without being frightening.',
+    warning: 'Something is worth checking; be calm and practical.',
+    info: 'This is a gentle heads-up, not an alarm; keep it light.',
+  }[finding.severity] || 'Be calm and clear.';
+  // The finding's message was already composed from real counts in plain
+  // words by the monitor. It IS the fact sheet. Raw evidence (motion scores,
+  // frame counts, ratios) is deliberately not passed: the model can only
+  // parrot numbers it is shown, and a caregiver should never see them.
   return phrase(`${audience} ${tone}`,
-    `Finding type: ${finding.kind}. Facts: ${finding.message} Evidence: ${JSON.stringify(ev)}.`,
-    fallback, `${finding.kind} for ${recipient.name}`);
+    `Rewrite this in your own words, keeping every fact exactly as stated:\n${finding.message}`,
+    fallback, `${finding.kind} for ${recipient.name}`, { direct: !toCaregiver });
 };
 
 module.exports = {
