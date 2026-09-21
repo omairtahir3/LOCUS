@@ -48,6 +48,20 @@ const WAKING_END_HOUR = 23;
 // seen in that room during the session and not seen since is left behind.
 const LEFT_BEHIND_WINDOW_MIN = 10;
 
+// ── Outdoor item loss (both roles) — Core FE-12, FE-15 ──────────────────────
+// A chest camera cannot see an item in a pocket or a bag, so "not seen for N
+// minutes outdoors" would fire constantly and is NOT the rule. The detectable
+// event is: the item was sighted at GPS point S while outdoors, the wearer has
+// since moved further from S than GPS noise allows, and the item has not been
+// seen since. That is "you left it there", and S is where to send them back to.
+const ITEM_LOST_LOOKBACK_HOURS = 3;
+// 75 m: above the worst accepted GPS accuracy (100 m fixes are rejected; the
+// average is 20 m), so two fixes from the same bench cannot read as "walked away".
+const ITEM_LOST_MOVE_RADIUS_M = 75;
+// FE-15: if the wearer has not acknowledged the loss alert within this window,
+// caregivers are told, with the last-seen GPS, keyframe and timestamp.
+const ITEM_LOST_ESCALATE_MIN = 10;
+
 // ── Routine deviation (elderly, gated on profile support) ──────────────────
 // If a scene is expected at this hour and has not been seen since this many
 // hours before, the routine has slipped. Two hours absorbs ordinary variation.
@@ -261,6 +275,82 @@ async function checkHabitualItems(user, profile, now = new Date()) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Outdoor item tracking (both roles)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function checkOutdoorItemLost(user, now = new Date()) {
+  const { outdoorStatus, haversineM } = require('./outdoor');
+  const status = await outdoorStatus(user, now);
+  if (!status || !status.outdoors) return [];          // unknown or indoors: nothing to do
+  const here = { lat: status.fix.lat, lng: status.fix.lng };
+
+  // Last outdoor sighting of each enrolled item, with the GPS attached at the
+  // moment of sighting (FE-13). Only sightings that carry a location count:
+  // without one there is nowhere to point the wearer back to.
+  const sightings = await EventLog.find({
+    user_id: { $in: idForms(user._id) }, event_type: 'object',
+    timestamp: { $gte: hoursAgo(ITEM_LOST_LOOKBACK_HOURS, now), $lte: now },
+    'location.lat': { $exists: true },
+  }).sort({ timestamp: -1 }).lean();
+
+  const lastSeen = new Map();   // itemId -> {name, at, where, keyframe_id}
+  for (const ev of sightings) {
+    for (const it of (ev.details?.items || [])) {
+      if (!it.enrolled_item_id || !it.matched_item || lastSeen.has(it.enrolled_item_id)) continue;
+      lastSeen.set(it.enrolled_item_id, {
+        name: it.matched_item, at: new Date(ev.timestamp),
+        where: { lat: ev.location.lat, lng: ev.location.lng }, keyframe_id: ev.keyframe_id,
+      });
+    }
+  }
+
+  const out = [];
+  for (const [itemId, s] of lastSeen) {
+    // Was that sighting itself outdoors? A sighting at home followed by a walk
+    // is the wearer carrying it out, not leaving it behind.
+    if (user.home_location && haversineM(user.home_location, s.where) <= require('./outdoor').HOME_RADIUS_M) continue;
+    const moved = haversineM(s.where, here);
+    if (moved <= ITEM_LOST_MOVE_RADIUS_M) continue;
+    const dedup_key = `${user._id}:itemlost:${itemId}:${Math.floor(+s.at / 1000)}`;
+    const f = await record(user, 'item_lost', dedup_key, 'urgent',
+      `Did you leave your ${s.name} behind?`,
+      `Your ${s.name} was last seen at ${s.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, ` +
+      `about ${Math.round(moved)} m back from where you are now, and hasn't been seen since.`,
+      { item_id: itemId, item_name: s.name, last_seen_at: s.at, last_seen_location: s.where,
+        keyframe_id: s.keyframe_id, moved_m: Math.round(moved), current_location: here });
+    if (f) out.push(f);
+  }
+  return out;
+}
+
+/**
+ * FE-15. For item_lost findings older than ITEM_LOST_ESCALATE_MIN whose user
+ * notification has not been acknowledged, tell the caregivers, with the
+ * last-seen GPS, keyframe and timestamp. Returns the findings escalated.
+ */
+async function escalateUnacknowledgedItemLoss(user, now = new Date()) {
+  if (!user.caregiver_ids || !user.caregiver_ids.length) return [];
+  const Notification = require('../models/Notification');
+  const stale = await RoutineFinding.find({
+    user_id: user._id, kind: 'item_lost', escalated: false, notified: true,
+    createdAt: { $lte: minutesAgo(ITEM_LOST_ESCALATE_MIN, now) },
+  }).lean();
+  const out = [];
+  for (const f of stale) {
+    const acked = await Notification.exists({ _id: { $in: f.notification_ids || [] }, acknowledged_at: { $ne: null } });
+    if (acked) {
+      await RoutineFinding.findByIdAndUpdate(f._id, { $set: { escalated: true, escalated_at: now } }); // resolved by user; close it
+      continue;
+    }
+    const { deliverEscalation } = require('./routineNotifier');
+    await deliverEscalation(f, user, now);
+    await RoutineFinding.findByIdAndUpdate(f._id, { $set: { escalated: true, escalated_at: now } });
+    out.push(f);
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 
 let lastRunAt = new Date(Date.now() - MONITOR_INTERVAL_MS);
 
@@ -281,6 +371,10 @@ async function runOnce(now = new Date()) {
         findings.push(...await checkLeftBehind(user, sinceRun, now));
         if (profile) findings.push(...await checkHabitualItems(user, profile, now));
       }
+      // Outdoor item tracking applies to both roles: a lost wallet is a lost
+      // wallet. Escalation only has somewhere to go when caregivers exist.
+      findings.push(...await checkOutdoorItemLost(user, now));
+      await escalateUnacknowledgedItemLoss(user, now);
     } catch (e) {
       console.error(`[RoutineMonitor] ${user.name}: ${e.message}`);
     }
@@ -303,5 +397,7 @@ function init() {
 module.exports = {
   init, runOnce,
   checkMedicationGap, checkInactivityAndCamera, checkDeviation, checkLeftBehind, checkHabitualItems,
+  checkOutdoorItemLost, escalateUnacknowledgedItemLoss,
   MED_GAP_DAYS, INACTIVITY_HOURS, MOTION_FLOOR, STREAM_ALIVE_MIN, CAMERA_OFF_HOURS, LEFT_BEHIND_WINDOW_MIN,
+  ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN,
 };
