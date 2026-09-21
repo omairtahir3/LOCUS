@@ -74,6 +74,24 @@ const PROVIDERS = {
     rpm: 30,
     jsonMode: true,
   },
+  // Production-tier providers. Paid, with published availability and rate
+  // limits in the hundreds-to-thousands of RPM. Same OpenAI-compatible wire
+  // format, so they are a config change. rpm here is a conservative floor for
+  // the throttle; raise LLM_RPM to match the tier you are actually on.
+  openai: {
+    url: 'https://api.openai.com/v1/chat/completions',
+    defaultModel: 'gpt-4o-mini',
+    rpm: 500,
+    jsonMode: true,
+  },
+  gemini: {
+    // Google's OpenAI-compatible endpoint. On the PAID tier the 10 RPM free
+    // cap that broke the original integration becomes 1000+ RPM.
+    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    defaultModel: 'gemini-2.5-flash-lite',
+    rpm: 300,
+    jsonMode: true,
+  },
 };
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -120,14 +138,16 @@ class TokenBucket {
 
 // ── Per-provider state ──────────────────────────────────────────────────────
 class ProviderClient {
-  constructor(name, apiKey, model) {
+  constructor(name, apiKey, model, rpm) {
     const cfg = PROVIDERS[name];
     if (!cfg) throw new Error(`unknown LLM provider "${name}"`);
     this.name = name;
     this.cfg = cfg;
     this.apiKey = apiKey;
     this.model = model || cfg.defaultModel;
-    this.bucket = new TokenBucket(cfg.rpm);
+    // A paid tier raises the RPM by 10-30x; the throttle must follow it or the
+    // client caps itself at free-tier speed no matter what you pay for.
+    this.bucket = new TokenBucket(Number(rpm) > 0 ? Number(rpm) : cfg.rpm);
     this.consecutiveFailures = 0;
     this.breakerOpenUntil = 0;
     this.stats = { calls: 0, ok: 0, rate_limited: 0, failed: 0, breaker_trips: 0 };
@@ -202,9 +222,9 @@ class ProviderClient {
 function buildClients() {
   const out = [];
   const p = (process.env.LLM_PROVIDER || 'none').toLowerCase();
-  if (p !== 'none' && PROVIDERS[p]) out.push(new ProviderClient(p, process.env.LLM_API_KEY, process.env.LLM_MODEL));
+  if (p !== 'none' && PROVIDERS[p]) out.push(new ProviderClient(p, process.env.LLM_API_KEY, process.env.LLM_MODEL, process.env.LLM_RPM));
   const f = (process.env.LLM_FALLBACK_PROVIDER || 'none').toLowerCase();
-  if (f !== 'none' && PROVIDERS[f] && f !== p) out.push(new ProviderClient(f, process.env.LLM_FALLBACK_API_KEY, process.env.LLM_FALLBACK_MODEL));
+  if (f !== 'none' && PROVIDERS[f] && f !== p) out.push(new ProviderClient(f, process.env.LLM_FALLBACK_API_KEY, process.env.LLM_FALLBACK_MODEL, process.env.LLM_FALLBACK_RPM));
   return out;
 }
 
