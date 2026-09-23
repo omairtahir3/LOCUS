@@ -2025,3 +2025,13 @@ class MedicationDetectionPipeline:
 
     def stop(self):
         self.is_running = False
+        # Close the environment session that is still open (Core FE-2).
+        # A session is only written when the room CHANGES, so whichever room
+        # the wearer is in when the camera stops was never persisted -- and
+        # flush_scene_sessions() existed with no caller anywhere, so the last
+        # session of every run was silently discarded.
+        try:
+            from .item_indexer import DailyItemIndexer
+            DailyItemIndexer.get_instance().flush_scene_sessions(str(self.user_id) if self.user_id else None)
+        except Exception as e:
+            print(f"[Pipeline] Could not flush environment sessions: {e}")

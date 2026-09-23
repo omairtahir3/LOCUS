@@ -1,71 +1,115 @@
-import { Activity, Brain, Moon, Footprints, Shield, Coffee, Clock, TrendingUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Activity, Brain, Home, Package, AlertTriangle, Pill, Clock, CalendarDays } from 'lucide-react';
 import UserSelector from '../components/Layout/UserSelector';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import { eventLogsAPI } from '../services/api';
 
-// Mock data for the activity feed
-const mockActivities = [
-  { time: '08:15 AM', type: 'routine', title: 'Morning routine started', detail: 'Woke up and left bedroom', icon: Coffee },
-  { time: '08:30 AM', type: 'medication', title: 'Medication taken', detail: 'Morning dose confirmed by camera', icon: Activity },
-  { time: '09:00 AM', type: 'social', title: 'Social interaction', detail: 'Met with neighbor Mrs. Johnson', icon: Brain },
-  { time: '10:30 AM', type: 'movement', title: 'Walk detected', detail: '~2,400 steps in the garden', icon: Footprints },
-  { time: '12:00 PM', type: 'routine', title: 'Lunch preparation', detail: 'Kitchen activity for 25 minutes', icon: Coffee },
-  { time: '02:00 PM', type: 'rest', title: 'Afternoon rest', detail: 'Resting period - 1.5 hours', icon: Moon },
-  { time: '04:00 PM', type: 'anomaly', title: '⚠ Anomaly detected', detail: 'Unusual inactivity period', icon: Activity },
-];
+// The page used to render a hard-coded array: a plausible-looking day with
+// "Met with neighbor Mrs. Johnson" and "~2,400 steps" that came from nowhere
+// and never changed. Everything below is what the Core Module actually
+// recorded, from /api/event-logs/timeline.
 
-const typeColors = {
-  routine: 'var(--primary)',
-  medication: 'var(--success)',
-  social: 'var(--accent)',
-  movement: 'var(--info)',
-  rest: 'var(--text-muted)',
-  anomaly: 'var(--warning)',
+const KIND = {
+  routine:    { icon: Home,          color: 'var(--primary)' },
+  medication: { icon: Pill,          color: 'var(--success)' },
+  social:     { icon: Brain,         color: 'var(--accent)' },
+  items:      { icon: Package,       color: 'var(--info)' },
+  anomaly:    { icon: AlertTriangle, color: 'var(--warning)' },
 };
 
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
 export default function ActivityFeed() {
+  const { selectedUser } = useSelectedUser() || {};
+  const [date, setDate] = useState(today());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    eventLogsAPI
+      .timeline({ date, ...(selectedUser?._id ? { userId: selectedUser._id } : {}) })
+      .then(({ data }) => { if (!cancelled) setData(data); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.error || 'Could not load the timeline'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [date, selectedUser?._id]);
+
+  const items = data?.items || [];
+  const s = data?.summary;
+
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 className="page-title">Activity Feed</h2>
-          <p className="page-description">Behavioral monitoring and routine analysis</p>
+          <p className="page-description">What the camera recorded, hour by hour</p>
         </div>
-        <UserSelector />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CalendarDays size={16} style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="date" value={date} max={today()}
+              onChange={(e) => setDate(e.target.value)}
+              className="form-input"
+              style={{ padding: '6px 10px', fontSize: '0.9rem', height: 32, borderRadius: 8 }}
+            />
+          </label>
+          <UserSelector />
+        </div>
       </div>
 
       <div className="grid-2">
-        {/* Timeline */}
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Today's Activity Timeline</div>
-              <div className="card-subtitle">Sample data — Module 1 backend required</div>
+              <div className="card-title">Timeline</div>
+              <div className="card-subtitle">
+                {loading ? 'Loading…' : `${items.length} ${items.length === 1 ? 'entry' : 'entries'} on ${new Date(date).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`}
+              </div>
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {mockActivities.map((act, i) => {
-              const Icon = act.icon;
+
+          {error && <div className="text-sm" style={{ color: 'var(--warning)' }}>{error}</div>}
+
+          {!loading && !error && items.length === 0 && (
+            <div style={{ padding: '28px 4px', textAlign: 'center' }}>
+              <Activity size={28} style={{ color: 'var(--text-muted)', marginBottom: 10 }} />
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Nothing recorded on this day</div>
+              <div className="text-sm text-muted" style={{ maxWidth: 380, margin: '0 auto', lineHeight: 1.6 }}>
+                The feed fills as the camera runs. Room sessions, medication, familiar
+                faces and tracked items all appear here. Pick another date, or check the
+                camera was on.
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {items.map((act, i) => {
+              const meta = KIND[act.kind] || KIND.routine;
+              const Icon = meta.icon;
               return (
-                <div key={i} style={{ display: 'flex', gap: 14, padding: '12px 0', position: 'relative' }}>
-                  {/* Timeline line */}
-                  {i < mockActivities.length - 1 && (
-                    <div style={{
-                      position: 'absolute', left: 17, top: 44, bottom: -12,
-                      width: 2, background: 'var(--border)', zIndex: 0,
-                    }} />
+                <div key={`${act.at}-${i}`} style={{ display: 'flex', gap: 14, padding: '12px 0', position: 'relative' }}>
+                  {i < items.length - 1 && (
+                    <div style={{ position: 'absolute', left: 17, top: 44, bottom: -12, width: 2, background: 'var(--border)', zIndex: 0 }} />
                   )}
-                  {/* Dot */}
                   <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: typeColors[act.type] + '20',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, zIndex: 1,
+                    width: 36, height: 36, borderRadius: '50%', background: meta.color + '20',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, zIndex: 1,
                   }}>
-                    <Icon size={16} style={{ color: typeColors[act.type] }} />
+                    <Icon size={16} style={{ color: meta.color }} />
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{act.title}</span>
-                      <span className="text-xs text-muted">{act.time}</span>
+                      <span className="text-xs text-muted" style={{ flexShrink: 0 }}>{timeOf(act.at)}</span>
                     </div>
                     <div className="text-sm text-muted">{act.detail}</div>
                   </div>
@@ -75,64 +119,67 @@ export default function ActivityFeed() {
           </div>
         </div>
 
-        {/* Insights */}
         <div>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
             <div className="stat-card">
-              <div className="stat-icon primary"><Footprints size={18} /></div>
+              <div className="stat-icon success"><Pill size={18} /></div>
               <div>
-                <div className="stat-value">4,200</div>
-                <div className="stat-label">Steps Today</div>
+                <div className="stat-value">{s ? s.medication : '—'}</div>
+                <div className="stat-label">Doses Seen</div>
               </div>
             </div>
             <div className="stat-card">
               <div className="stat-icon accent"><Brain size={18} /></div>
               <div>
-                <div className="stat-value">3</div>
-                <div className="stat-label">Social Interactions</div>
+                <div className="stat-value">{s ? s.social : '—'}</div>
+                <div className="stat-label">Social Moments</div>
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon success"><Clock size={18} /></div>
+              <div className="stat-icon primary"><Clock size={18} /></div>
               <div>
-                <div className="stat-value">6.5h</div>
-                <div className="stat-label">Active Time</div>
+                <div className="stat-value">{s ? `${Math.floor(s.tracked_minutes / 60)}h ${s.tracked_minutes % 60}m` : '—'}</div>
+                <div className="stat-label">Time In Rooms</div>
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon warning"><TrendingUp size={18} /></div>
+              <div className="stat-icon warning"><AlertTriangle size={18} /></div>
               <div>
-                <div className="stat-value">1</div>
-                <div className="stat-label">Anomalies</div>
+                <div className="stat-value">{s ? s.anomalies : '—'}</div>
+                <div className="stat-label">Things To Check</div>
               </div>
             </div>
           </div>
 
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>Behavioral Insights</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { label: 'Routine Adherence', value: 85, color: 'var(--primary)' },
-                { label: 'Social Activity', value: 60, color: 'var(--accent)' },
-                { label: 'Physical Activity', value: 72, color: 'var(--success)' },
-                { label: 'Sleep Quality', value: 90, color: 'var(--info)' },
-              ].map((item, i) => (
-                <div key={i}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span className="text-sm">{item.label}</span>
-                    <span className="text-sm font-bold">{item.value}%</span>
-                  </div>
-                  <div style={{ height: 8, background: 'var(--border-light)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${item.value}%`, height: '100%',
-                      background: item.color, borderRadius: 4,
-                      transition: 'width 0.5s ease',
-                    }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="card-title" style={{ marginBottom: 4 }}>Where the day was spent</div>
+            <div className="card-subtitle" style={{ marginBottom: 12 }}>Rooms the camera recognised</div>
+            {s?.rooms?.length ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {s.rooms.map((room) => (
+                  <span key={room} style={{
+                    padding: '6px 12px', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600,
+                    background: 'var(--primary)20', color: 'var(--primary)', textTransform: 'capitalize',
+                  }}>{room}</span>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
+                No room sessions yet for this day. A room is recorded once the camera
+                has seen enough of it to be sure, so short passes through a hallway
+                will not appear.
+              </div>
+            )}
           </div>
+
+          {s && s.items_seen > 0 && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-title" style={{ marginBottom: 4 }}>Tracked belongings</div>
+              <div className="text-sm text-muted">
+                {s.items_seen} sighting{s.items_seen === 1 ? '' : 's'} of items you asked LOCUS to keep an eye on.
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
