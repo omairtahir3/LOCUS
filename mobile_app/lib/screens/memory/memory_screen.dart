@@ -28,6 +28,32 @@ class _MemoryScreenState extends State<MemoryScreen> {
   
   List<dynamic> _events = [];
   bool _isLoading = false;
+  /// One day at a time, like the Activity Feed. null means "all days", the
+  /// old behaviour of showing the most recent memories regardless of date.
+  DateTime? _date = DateTime.now();
+
+  bool get _isToday => _date != null && DateUtils.isSameDay(_date!, DateTime.now());
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date ?? DateTime.now(),
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() => _date = picked);
+      _loadEvents();
+    }
+  }
+
+  void _shiftDay(int days) {
+    final base = _date ?? DateTime.now();
+    final next = base.add(Duration(days: days));
+    if (next.isAfter(DateTime.now())) return;
+    setState(() => _date = next);
+    _loadEvents();
+  }
 
   @override
   void initState() {
@@ -58,7 +84,12 @@ class _MemoryScreenState extends State<MemoryScreen> {
       if (selectedId == null && ApiService.userRole == 'caregiver') {
         selectedId = SelectedUserService().selectedUser?['_id']?.toString();
       }
-      final res = await ApiService.getMemorySearchEvents(userId: selectedId, limit: 50);
+      // A chosen day returns EVERY memory from it. The old limit of 50 hid
+      // whole afternoons, which is the opposite of what a memory aid is for.
+      final res = await ApiService.getMemorySearchEvents(
+        userId: selectedId,
+        date: _date == null ? null : DateFormat('yyyy-MM-dd').format(_date!),
+      );
       setState(() => _events = res);
     } catch (e) {
       debugPrint('Error loading memories: $e');
@@ -139,7 +170,12 @@ class _MemoryScreenState extends State<MemoryScreen> {
         
         String groupLabel = 'Earlier';
         
-        if (now.year == localDt.year && now.month == localDt.month && now.day == localDt.day) {
+        if (_date != null) {
+          // Viewing one day: a single "Today" heading is just a wall of cards,
+          // so split it into the parts of the day instead.
+          final h = localDt.hour;
+          groupLabel = h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night';
+        } else if (now.year == localDt.year && now.month == localDt.month && now.day == localDt.day) {
           groupLabel = 'Today';
         } else if (now.year == localDt.year && now.month == localDt.month && now.day - 1 == localDt.day) {
           groupLabel = 'Yesterday';
@@ -315,6 +351,67 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 ],
               ),
               const SizedBox(height: 12),
+              // Day selector, matching the Activity Feed.
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: () => _shiftDay(-1),
+                    icon: const Icon(Icons.chevron_left),
+                    tooltip: 'Previous day',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _pickDate,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          border: Border.all(color: AppColors.border),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.calendar_today_outlined, size: 15, color: AppColors.textMuted),
+                            const SizedBox(width: 7),
+                            Flexible(
+                              child: Text(
+                                _date == null
+                                    ? 'All days'
+                                    : _isToday ? 'Today' : DateFormat('EEE d MMM').format(_date!),
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: (_date == null || _isToday) ? null : () => _shiftDay(1),
+                    icon: const Icon(Icons.chevron_right),
+                    tooltip: 'Next day',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _date = _date == null ? DateTime.now() : null);
+                      _loadEvents();
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(_date == null ? 'By day' : 'All days',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(

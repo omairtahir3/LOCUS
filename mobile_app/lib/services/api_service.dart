@@ -595,13 +595,19 @@ class ApiService {
 
   // ── Event Logs / Memory Search ──────────────────────────────────────────────
 
-  static Future<List<dynamic>> getMemorySearchEvents({String? userId, int limit = 50}) async {
+  /// Memories, optionally for one LOCAL day.
+  ///
+  /// With a date the server returns everything from that day; the old
+  /// limit of 50 hid whole afternoons, which defeats the point of a memory
+  /// aid. Without a date it returns the most recent, as before.
+  static Future<List<dynamic>> getMemorySearchEvents({String? userId, String? date, int? limit}) async {
     final params = [
-      'limit=$limit',
+      if (date != null && date.isNotEmpty) 'date=$date',
+      if (limit != null) 'limit=$limit',
       if (userId != null) 'userId=$userId',
     ].join('&');
     final res = await http.get(
-      Uri.parse('$baseUrl/event-logs/memory-search?$params'),
+      Uri.parse('$baseUrl/event-logs/memory-search${params.isEmpty ? '' : '?$params'}'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -609,6 +615,24 @@ class ApiService {
       return data is List ? data : [];
     }
     return [];
+  }
+
+  /// One day of the Core Module's output: timeline, anomalies, insights and
+  /// the six summary figures. Same endpoint the web Activity Feed uses.
+  static Future<Map<String, dynamic>?> getActivityTimeline({String? userId, String? date}) async {
+    final params = [
+      if (date != null && date.isNotEmpty) 'date=$date',
+      if (userId != null) 'userId=$userId',
+    ].join('&');
+    final res = await http.get(
+      Uri.parse('$baseUrl/event-logs/timeline${params.isEmpty ? '' : '?$params'}'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is Map<String, dynamic> ? data : null;
+    }
+    return null;
   }
 
   static Future<List<dynamic>> getEventLogKeyframes({int limit = 50, String type = ''}) async {
