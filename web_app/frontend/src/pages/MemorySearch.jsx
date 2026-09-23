@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
+import { formatClockTime } from '../utils/dateUtils';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
 
@@ -74,7 +75,7 @@ export default function MemorySearch() {
     let groupLabel = 'Earlier';
 
     if (dt) {
-      timeLabel = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      timeLabel = formatClockTime(dt);
       
       const isToday = now.toDateString() === dt.toDateString();
       const yesterday = new Date(now);

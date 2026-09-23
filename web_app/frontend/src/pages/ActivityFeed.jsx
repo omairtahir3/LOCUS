@@ -3,6 +3,7 @@ import { Activity, Brain, Home, Package, AlertTriangle, Pill, Footprints, Clock,
 import UserSelector from '../components/Layout/UserSelector';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { eventLogsAPI } from '../services/api';
+import { formatClockTime } from '../utils/dateUtils';
 
 // The page used to render a hard-coded array: a plausible-looking day with
 // "Met with neighbor Mrs. Johnson" and "~2,400 steps" that came from nowhere
@@ -21,7 +22,7 @@ const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const timeOf = (iso) => formatClockTime(iso);
 
 /** Green when the day looks healthy, amber when it is low enough to notice. */
 const barColour = (v) =>
@@ -196,8 +197,12 @@ export default function ActivityFeed() {
         <div className="stat-card">
           <div className="stat-icon primary"><Clock size={18} /></div>
           <div>
+            {/* Time the CAMERA observed, not time spent moving. Sitting still
+                in the kitchen counts toward it, so calling it "Active Time"
+                overstated what is measured. Steps Today is the movement
+                figure. */}
             <div className="stat-value">{s ? durationOf(s.tracked_minutes) : '—'}</div>
-            <div className="stat-label">Active Time</div>
+            <div className="stat-label">Camera Time</div>
           </div>
         </div>
       </div>

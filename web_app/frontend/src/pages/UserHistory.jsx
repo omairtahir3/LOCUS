@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { userAPI } from '../services/api';
 import { Clock, CheckCircle, XCircle, AlertTriangle, TrendingUp, Calendar, Filter } from 'lucide-react';
+import { formatClockTime } from '../utils/dateUtils';
 
 export default function UserHistory() {
   const [history, setHistory] = useState([]);
@@ -199,7 +200,7 @@ export default function UserHistory() {
                         if (!log.scheduled_time) return '-';
                         const iso = log.scheduled_time.endsWith('Z') ? log.scheduled_time : log.scheduled_time + 'Z';
                         const d = new Date(iso);
-                        return isNaN(d.getTime()) ? log.scheduled_time : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        return isNaN(d.getTime()) ? log.scheduled_time : formatClockTime(d);
                     })()}
                   </div>
                   <div style={{ flex: 1 }}>

@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { caregiverAPI, notificationAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { 
-  Users, Pill, AlertTriangle, Bell, CheckCircle, 
+import { formatClockTime } from '../utils/dateUtils';
+import {
+  Users, Pill, AlertTriangle, Bell, CheckCircle,
   Clock, ChevronRight, Activity, TrendingUp, Calendar,
   ArrowUpRight, MoreHorizontal
 } from 'lucide-react';
@@ -424,7 +425,7 @@ export default function Dashboard() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <h5 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0 }}>{n.title}</h5>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {formatClockTime(n.createdAt)}
                         </span>
                       </div>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2, marginBottom: 0 }}>{n.message}</p>
