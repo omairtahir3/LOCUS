@@ -121,13 +121,17 @@ async function flush(to) {
 
   let sent;
   if (items.length === 1) {
-    const { parts } = items[0];
+    const { parts, attachments } = items[0];
     sent = await deps.sendEmail({
       to, subject: parts.title,
       html: deps.getLocusEmailHtml(parts),
       text: deps.getLocusEmailText(parts),
+      attachments: attachments || [],
     });
   } else {
+    // In a digest the images are dropped: several inline frames would make the
+    // message heavy, and each item keeps its own alert to open. The one that
+    // matters most (a lost item) is urgent and rarely arrives in a burst.
     console.log(`[Email] coalesced ${items.length} emails to ${to} into one`);
     sent = await deps.sendEmail({ to, subject: digestSubject(items), html: digestHtml(items), text: digestText(items) });
   }
@@ -139,10 +143,10 @@ async function flush(to) {
  * Queue one email. Returns immediately; the send happens on flush.
  * With EMAIL_COALESCE_MS=0 it sends inline and returns whether it went.
  */
-async function queueEmail({ to, parts, notificationId }) {
+async function queueEmail({ to, parts, notificationId, attachments = [] }) {
   if (!to) return false;
   const entry = pending.get(to) || { items: [], timer: null };
-  entry.items.push({ parts, notificationId });
+  entry.items.push({ parts, notificationId, attachments });
   pending.set(to, entry);
 
   if (COALESCE_MS <= 0) return await flush(to);
