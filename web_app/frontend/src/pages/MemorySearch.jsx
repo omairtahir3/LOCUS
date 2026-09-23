@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X } from 'lucide-react';
+import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
+
+/** Local YYYY-MM-DD. toISOString() would shift the day by the UTC offset. */
+const localDay = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayStr = localDay();
+const shiftDay = (iso, days) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const x = new Date(y, m - 1, d);
+  x.setDate(x.getDate() + days);
+  return localDay(x);
+};
 
 export default function MemorySearch() {
   const [query, setQuery] = useState('');
@@ -23,10 +34,16 @@ export default function MemorySearch() {
   const markImageBroken = (id) =>
     setBrokenImages((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
 
+  // A day at a time, like the Activity Feed. "All days" keeps the old
+  // behaviour of showing the most recent memories regardless of date.
+  const [date, setDate] = useState(todayStr);
+
   const fetchEvents = async () => {
     setLoading(true);
     try {
-      const res = await eventLogsAPI.getMemorySearch({ limit: 50 });
+      // No limit when a day is chosen: every memory from that day is the
+      // point of asking for the day.
+      const res = await eventLogsAPI.getMemorySearch(date ? { date } : {});
       setEvents(res.data || []);
     } catch (e) {
       console.error('Failed to load events:', e);
@@ -37,7 +54,7 @@ export default function MemorySearch() {
 
   useEffect(() => {
     fetchEvents();
-  }, []);
+  }, [date]);
 
   const handleToggleFlag = async (eventId, currentFlag) => {
     if (!eventId) return;
@@ -64,7 +81,13 @@ export default function MemorySearch() {
       yesterday.setDate(now.getDate() - 1);
       const isYesterday = yesterday.toDateString() === dt.toDateString();
       
-      if (isToday) {
+      if (date) {
+        // Viewing one day: grouping everything under "Today" is a single wall
+        // of cards. Split it into the parts of the day instead, so a whole
+        // day's memories stay scannable.
+        const h = dt.getHours();
+        groupLabel = h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night';
+      } else if (isToday) {
         groupLabel = 'Today';
       } else if (isYesterday) {
         groupLabel = 'Yesterday';
@@ -176,10 +199,50 @@ export default function MemorySearch() {
 
   return (
     <div>
-      <div className="page-header" style={{ marginBottom: 16 }}>
+      <div className="page-header" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 className="page-title">Memory Search</h2>
-          <p className="page-description">Search your memories using AI</p>
+          <p className="page-description">
+            {date
+              ? `Everything recorded on ${new Date(`${date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`
+              : 'Your most recent memories'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            className="btn"
+            onClick={() => setDate(d => shiftDay(d || todayStr, -1))}
+            title="Previous day"
+            style={{ width: 32, height: 32, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <input
+            type="date"
+            value={date}
+            max={todayStr}
+            onChange={(e) => setDate(e.target.value)}
+            className="form-input"
+            style={{ padding: '6px 10px', fontSize: '0.9rem', height: 32, borderRadius: 8 }}
+          />
+          <button
+            className="btn"
+            onClick={() => setDate(d => shiftDay(d || todayStr, 1))}
+            disabled={!date || date >= todayStr}
+            title="Next day"
+            style={{ width: 32, height: 32, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                     opacity: (!date || date >= todayStr) ? 0.4 : 1 }}
+          >
+            <ChevronRight size={16} />
+          </button>
+          <button
+            onClick={() => setDate(date ? '' : todayStr)}
+            className="btn"
+            style={{ height: 32, padding: '0 12px', fontSize: '0.8rem', fontWeight: 600 }}
+            title={date ? 'Show recent memories from any day' : 'Go back to a single day'}
+          >
+            {date ? 'All days' : 'By day'}
+          </button>
         </div>
       </div>
 
