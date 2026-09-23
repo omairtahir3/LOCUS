@@ -49,6 +49,112 @@ router.get('/memory-search', auth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/event-logs/timeline?date=YYYY-MM-DD&userId=
+ *
+ * One day of the Core Module's output, assembled for the Activity Feed:
+ * environment sessions (FE-2), medication intakes (FE-4), social interactions
+ * (FE-4), item sightings (FE-12/13) and routine findings as anomalies.
+ *
+ * Replaces the hard-coded mockActivities array the page used to render, which
+ * showed a plausible-looking day ("Met with neighbor Mrs. Johnson", "~2,400
+ * steps") that came from nowhere and never changed.
+ */
+router.get('/timeline', auth, async (req, res) => {
+  try {
+    let userId = req.user.id;
+    if (req.user.role === 'caregiver') {
+      if (req.query.userId) userId = req.query.userId;
+      else {
+        const User = require('../models/User');
+        const cg = await User.findById(req.user.id);
+        if (cg?.monitoring_users?.length) userId = cg.monitoring_users[0];
+      }
+    }
+
+    const day = req.query.date ? new Date(req.query.date) : new Date();
+    if (Number.isNaN(day.getTime())) return res.status(400).json({ error: 'invalid date' });
+    const start = new Date(day); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+
+    const mongoose = require('mongoose');
+    // Events are written with a string user id by some paths and an ObjectId by
+    // others; match both rather than silently returning an empty day.
+    const idForms = [userId, String(userId)];
+    if (mongoose.Types.ObjectId.isValid(userId)) idForms.push(new mongoose.Types.ObjectId(String(userId)));
+
+    const events = await EventLog.find({
+      user_id: { $in: idForms },
+      timestamp: { $gte: start, $lt: end },
+      verification_status: { $ne: 'rejected' },
+      'details.action': { $ne: 'scene_change' },   // raw motion bursts, not activity
+    }).sort({ timestamp: 1 }).lean();
+
+    const RoutineFinding = require('../models/RoutineFinding');
+    const findings = await RoutineFinding.find({
+      user_id: { $in: idForms }, createdAt: { $gte: start, $lt: end },
+    }).sort({ createdAt: 1 }).lean();
+
+    const items = [];
+    for (const e of events) {
+      const d = e.details || {};
+      if (e.event_type === 'activity' && d.action === 'scene_session') {
+        const mins = Math.round((d.duration_seconds || 0) / 60);
+        items.push({ at: e.timestamp, kind: 'routine',
+          title: `${d.scene ? d.scene[0].toUpperCase() + d.scene.slice(1) : 'Room'} activity`,
+          detail: mins ? `${mins} minute${mins === 1 ? '' : 's'}` : 'Brief visit',
+          keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'medication_intake') {
+        items.push({ at: e.timestamp, kind: 'medication',
+          title: d.medication_name ? `${d.medication_name} taken` : 'Medication taken',
+          detail: e.verification_status === 'pending' ? 'Waiting for your confirmation' : 'Confirmed by the camera',
+          confidence: e.confidence, keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'social_interaction') {
+        items.push({ at: e.timestamp, kind: 'social',
+          title: d.person_name ? `Time with ${d.person_name}` : 'Someone familiar nearby',
+          detail: d.relationship_type || 'Recognised face',
+          keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'unknown_face') {
+        items.push({ at: e.timestamp, kind: 'social', title: 'An unfamiliar face',
+          detail: 'Not matched to anyone you know', keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'object' && d.action === 'item_seen') {
+        const named = (d.items || []).filter(i => i.matched_item).map(i => i.matched_item);
+        if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
+        items.push({ at: e.timestamp, kind: 'items',
+          title: `Spotted ${[...new Set(named)].slice(0, 3).join(', ')}`,
+          detail: e.location ? 'Seen while out' : 'Seen at home',
+          keyframe_id: e.keyframe_id || null });
+      }
+    }
+    for (const f of findings) {
+      items.push({ at: f.createdAt, kind: 'anomaly', title: f.title, detail: f.message,
+        severity: f.severity, finding_kind: f.kind });
+    }
+    items.sort((a, b) => new Date(a.at) - new Date(b.at));
+
+    // Summary counts, all derived -- nothing invented.
+    const minutesIndoors = events
+      .filter(e => e.details?.action === 'scene_session')
+      .reduce((n, e) => n + (e.details.duration_seconds || 0), 0) / 60;
+
+    res.json({
+      date: start.toISOString().slice(0, 10),
+      items,
+      summary: {
+        medication: items.filter(i => i.kind === 'medication').length,
+        social: items.filter(i => i.kind === 'social').length,
+        items_seen: items.filter(i => i.kind === 'items').length,
+        anomalies: items.filter(i => i.kind === 'anomaly').length,
+        tracked_minutes: Math.round(minutesIndoors),
+        rooms: [...new Set(events.filter(e => e.details?.action === 'scene_session').map(e => e.details.scene).filter(Boolean))],
+      },
+    });
+  } catch (error) {
+    console.error('Error building activity timeline:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/event-logs/keyframes
 // For Keyframe Audit screen (includes unknown_face and medication_intake)
 router.get('/keyframes', auth, async (req, res) => {

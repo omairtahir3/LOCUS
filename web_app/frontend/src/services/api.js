@@ -120,7 +120,9 @@ export default api;
 export const eventLogsAPI = {
   getMemorySearch: (params) => api.get('/event-logs/memory-search', { params }),
   getKeyframes: (params) => api.get('/event-logs/keyframes', { params }),
-  toggleFlag: (id, is_flagged) => api.patch(`/event-logs/${id}/flag`, { is_flagged })
+  toggleFlag: (id, is_flagged) => api.patch(`/event-logs/${id}/flag`, { is_flagged }),
+  // One day of the Core Module's output for the Activity Feed.
+  timeline: (params) => api.get('/event-logs/timeline', { params })
 };
 
 // ── Relationships ────────────────────────────────────────────────────────────
