@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Brain, Home, Package, AlertTriangle, Pill, Footprints, CalendarDays, ShieldCheck } from 'lucide-react';
+import { Activity, Brain, Home, Package, AlertTriangle, Pill, Footprints, Clock, CalendarDays, ShieldCheck } from 'lucide-react';
 import UserSelector from '../components/Layout/UserSelector';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { eventLogsAPI } from '../services/api';
@@ -22,6 +22,13 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** 95 -> "1h 35m", 42 -> "42m". "0h 0m" reads like a broken widget. */
+const durationOf = (mins) => {
+  if (!mins) return '0m';
+  const h = Math.floor(mins / 60), m = Math.round(mins % 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+};
 
 export default function ActivityFeed() {
   const { selectedUser } = useSelectedUser() || {};
@@ -75,6 +82,58 @@ export default function ActivityFeed() {
             />
           </label>
           <UserSelector />
+        </div>
+      </div>
+
+      {/* Six across the full width, the same pattern the Dashboard uses.
+          Inside the half-width column they stacked three rows deep and
+          dwarfed the timeline beside them. */}
+      <div className="stat-grid">
+        <div className="stat-card">
+          <div className="stat-icon success"><Pill size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.medication : '—'}</div>
+            <div className="stat-label">Doses Seen</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon accent"><Brain size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.social : '—'}</div>
+            <div className="stat-label">Social Interactions</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon primary"><Footprints size={18} /></div>
+          <div>
+            <div className="stat-value">{steps == null ? '—' : steps.toLocaleString()}</div>
+            <div className="stat-label">Steps Today</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon info"><Package size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.items_seen : '—'}</div>
+            <div className="stat-label">Items Found</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          {/* Green when there is nothing wrong: a zero here is good news, and
+              an amber badge on it would read as a problem. */}
+          <div className={`stat-icon ${s?.anomalies ? 'warning' : 'success'}`}>
+            {s?.anomalies ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+          </div>
+          <div>
+            <div className="stat-value">{s ? s.anomalies : '—'}</div>
+            <div className="stat-label">Anomalies</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon primary"><Clock size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? durationOf(s.tracked_minutes) : '—'}</div>
+            <div className="stat-label">Active Time</div>
+          </div>
         </div>
       </div>
 
@@ -132,37 +191,6 @@ export default function ActivityFeed() {
         </div>
 
         <div>
-          <div className="stat-grid" style={{ marginBottom: 16 }}>
-            <div className="stat-card">
-              <div className="stat-icon success"><Pill size={18} /></div>
-              <div>
-                <div className="stat-value">{s ? s.medication : '—'}</div>
-                <div className="stat-label">Doses Seen</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon accent"><Brain size={18} /></div>
-              <div>
-                <div className="stat-value">{s ? s.social : '—'}</div>
-                <div className="stat-label">Social Interactions</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon primary"><Footprints size={18} /></div>
-              <div>
-                <div className="stat-value">{steps == null ? '—' : steps.toLocaleString()}</div>
-                <div className="stat-label">Steps Today</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon info"><Package size={18} /></div>
-              <div>
-                <div className="stat-value">{s ? s.items_seen : '—'}</div>
-                <div className="stat-label">Items Found</div>
-              </div>
-            </div>
-          </div>
-
           {/* Anomalies: the routine monitor's findings for this day, listed
               rather than only counted. */}
           <div className="card" style={{ marginBottom: 16 }}>
@@ -208,11 +236,7 @@ export default function ActivityFeed() {
 
           <div className="card">
             <div className="card-title" style={{ marginBottom: 4 }}>Where the day was spent</div>
-            <div className="card-subtitle" style={{ marginBottom: 12 }}>
-              {s?.tracked_minutes
-                ? `${Math.floor(s.tracked_minutes / 60)}h ${s.tracked_minutes % 60}m across the rooms the camera recognised`
-                : 'Rooms the camera recognised'}
-            </div>
+            <div className="card-subtitle" style={{ marginBottom: 12 }}>Rooms the camera recognised</div>
             {s?.rooms?.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {s.rooms.map((room) => (
