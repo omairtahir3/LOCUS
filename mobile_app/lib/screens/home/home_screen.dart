@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,6 +7,7 @@ import '../chat/chat_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/location_service.dart';
+import '../../services/step_service.dart';
 import '../../services/socket_service.dart';
 import '../caregiver/location_map_screen.dart';
 
@@ -41,6 +43,14 @@ class HomeScreenState extends State<HomeScreen> {
       LocationService().startTracking().catchError((e) {
         print("Failed to start location tracking: $e");
       });
+      // Step counting, for the Activity Feed. A phone with no step sensor, or
+      // a denied activity-recognition permission, simply reports nothing; it
+      // is not an error worth interrupting the user for.
+      if (!kIsWeb) {
+        StepService().start().catchError((e) {
+          debugPrint("Failed to start step counting: $e");
+        });
+      }
     }
   }
 

@@ -5,6 +5,64 @@ const { protect: auth } = require('../middleware/auth');
 const { getIO } = require('../utils/socket');
 const { createNotification } = require('../utils/notifications');
 
+/**
+ * PUT /api/users/me/steps   { date: 'YYYY-MM-DD', steps: 4213, raw_device_total?: 998123 }
+ *
+ * The phone reports the day's step count. The pedometer counts from the last
+ * reboot, so the device does the arithmetic and sends the daily figure; see
+ * models/StepCount.js.
+ *
+ * Idempotent: the app re-sends a growing total for the same day, so this
+ * upserts and takes the HIGHER value. Taking the newer value instead would
+ * let a fresh install, whose baseline restarts at zero, wipe out a day that
+ * was already counted.
+ */
+router.put('/me/steps', auth, async (req, res) => {
+  try {
+    const StepCount = require('../models/StepCount');
+    const { date, steps, raw_device_total = null, source = 'pedometer' } = req.body;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+      return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    }
+    const n = Number(steps);
+    if (!Number.isFinite(n) || n < 0) {
+      return res.status(400).json({ error: 'steps must be a non-negative number' });
+    }
+    // A day has 86400 seconds; nobody takes a step every third of a second for
+    // all of them. A figure above this is a sensor fault, not a walk.
+    if (n > 200000) return res.status(400).json({ error: 'steps out of plausible range' });
+
+    const existing = await StepCount.findOne({ user_id: req.user._id, date });
+    const best = Math.max(Math.round(n), existing?.steps || 0);
+
+    const doc = await StepCount.findOneAndUpdate(
+      { user_id: req.user._id, date },
+      { $set: { steps: best, source, raw_device_total } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    res.json({ date: doc.date, steps: doc.steps });
+  } catch (error) {
+    console.error('[User] Error recording steps:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/** GET /api/users/me/steps?date=YYYY-MM-DD (caregivers may pass ?userId=). */
+router.get('/me/steps', auth, async (req, res) => {
+  try {
+    const StepCount = require('../models/StepCount');
+    let userId = req.user._id;
+    if (req.user.role === 'caregiver' && req.query.userId) userId = req.query.userId;
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const doc = await StepCount.findOne({ user_id: userId, date }).lean();
+    res.json({ date, steps: doc ? doc.steps : null });
+  } catch (error) {
+    console.error('[User] Error reading steps:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /api/users/me/emergency
 // Trigger SOS
 router.post('/me/emergency', auth, async (req, res) => {

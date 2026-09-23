@@ -51,6 +51,13 @@ dependencies:
   socket_io_client: ^3.1.6
   sensors_plus: ^7.1.0
   image_picker: ^1.2.2
+  # Hardware step counter for the daily step count shown in the Activity Feed.
+  # Reports steps since the last reboot, not steps today; see
+  # lib/services/step_service.dart for how the daily figure is derived.
+  pedometer: ^4.0.2
+  # Android 10+ gates the step sensor behind ACTIVITY_RECOGNITION, and without
+  # the grant the stream never emits and never errors.
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

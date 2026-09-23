@@ -137,14 +137,28 @@ router.get('/timeline', auth, async (req, res) => {
       .filter(e => e.details?.action === 'scene_session')
       .reduce((n, e) => n + (e.details.duration_seconds || 0), 0) / 60;
 
+    // Steps come from the phone's pedometer, not from the camera, so they are
+    // read from their own collection rather than derived from events. null
+    // (not 0) when the phone has not reported: "no data" and "did not move"
+    // are different answers and must not look the same on the dashboard.
+    const StepCount = require('../models/StepCount');
+    const localDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    const stepDoc = await StepCount.findOne({ user_id: { $in: idForms }, date: localDate }).lean();
+
+    // The anomalies again on their own, so the page can list them rather than
+    // only count them. Same objects as the timeline entries.
+    const anomalies = items.filter(i => i.kind === 'anomaly');
+
     res.json({
-      date: start.toISOString().slice(0, 10),
+      date: localDate,
       items,
+      anomalies,
       summary: {
         medication: items.filter(i => i.kind === 'medication').length,
         social: items.filter(i => i.kind === 'social').length,
         items_seen: items.filter(i => i.kind === 'items').length,
-        anomalies: items.filter(i => i.kind === 'anomaly').length,
+        anomalies: anomalies.length,
+        steps: stepDoc ? stepDoc.steps : null,
         tracked_minutes: Math.round(minutesIndoors),
         rooms: [...new Set(events.filter(e => e.details?.action === 'scene_session').map(e => e.details.scene).filter(Boolean))],
       },
