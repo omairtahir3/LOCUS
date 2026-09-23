@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 import os
 
 from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR, ItemStorage
+from db_config import get_client, get_db_name
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
 
@@ -67,8 +68,8 @@ async def list_keyframes(limit: int = 50, user_id: str = ""):
     if keyframes:
         try:
             from pymongo import MongoClient
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             k_ids = [k.get("keyframe_id") for k in keyframes if k.get("keyframe_id")]
             # Fetch ALL matching eventlogs to get _id and is_flagged
             events = db.eventlogs.find({"keyframe_id": {"$in": k_ids}}, {"keyframe_id": 1, "_id": 1, "is_flagged": 1})
@@ -182,8 +183,8 @@ async def list_medication_frames(limit: int = 100, user_id: str = ""):
     if evidence:
         try:
             from pymongo import MongoClient
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             # ID is sometimes stored as 'evidence_id' or 'id' in the json, or 'keyframe_id' in eventlogs
             e_ids = [e.get("evidence_id") for e in evidence if e.get("evidence_id")]
             events = db.eventlogs.find({"keyframe_id": {"$in": e_ids}}, {"keyframe_id": 1, "_id": 1, "is_flagged": 1})

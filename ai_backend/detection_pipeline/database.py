@@ -2,10 +2,17 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+from db_config import get_mongo_uri, get_db_name
+
 
 class Settings(BaseSettings):
-    mongo_uri: str = "mongodb://localhost:27017"
-    db_name: str = "locusDB"
+    # Defaults come from db_config so the async (Motor) side and every
+    # synchronous MongoClient in the pipeline resolve to the SAME database.
+    # They used to be two independent literals, which is how a deployment ends
+    # up half-migrated: the API on a hosted cluster, the pipeline still writing
+    # events to a local mongod nobody reads.
+    mongo_uri: str = get_mongo_uri()
+    db_name: str = get_db_name()
     app_name: str = "MemoryAssist API"
     app_version: str = "1.0.0"
     debug: bool = True
