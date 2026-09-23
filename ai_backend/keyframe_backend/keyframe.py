@@ -16,8 +16,12 @@ KEYFRAME_STORAGE_DIR = os.path.join(
     "keyframe_storage"
 )
 
-# Time-to-live: frames are auto-deleted after this many hours
-KEYFRAME_TTL_HOURS = 72  # 3 days
+# Time-to-live: frames are auto-deleted after this many hours.
+# FE-8 specifies 24-42 hours; 36 sits in the middle, so a frame captured at
+# any hour survives at least a full day and night before it is swept.
+# Flagged frames, and frames referenced by a relationship or an enrolled item,
+# are kept regardless of age (see cleanup_expired).
+KEYFRAME_TTL_HOURS = int(os.environ.get("KEYFRAME_TTL_HOURS", 36))
 
 
 class KeyframeStorage:
@@ -756,8 +760,16 @@ class KeyframeExtractor:
 
                  max_buffer_frames=300, user_id=""):
 
+        # FE-1: the CEILING, in frames per second. The pipeline throttles to
+        # this, and should_capture() then reduces below it when there is no
+        # motion, so the effective rate rises and falls between roughly
+        # target_fps/6 (idle) and target_fps (motion). Read through the
+        # current_fps property, which is what the pipeline asks for.
         self.target_fps = target_fps
 
+        # FE-3: how much history the rolling buffer holds. The deque is sized
+        # from this and target_fps rather than from a raw frame count, so the
+        # window stays the same length in SECONDS if the rate changes.
         self.buffer_seconds = buffer_seconds
 
         self.user_id = user_id
@@ -770,9 +782,12 @@ class KeyframeExtractor:
 
         # 300 frames â‰ˆ 10 seconds at 30fps â€” plenty for phase analysis.
 
-        self.max_buffer_frames = max_buffer_frames
+        # Derived from seconds so the window cannot silently drift when the
+        # rate changes. max_buffer_frames, if passed, is only an upper bound
+        # for memory safety on a long session.
+        self.max_buffer_frames = min(max_buffer_frames, int(buffer_seconds * target_fps))
 
-        self.buffer = deque(maxlen=max_buffer_frames)
+        self.buffer = deque(maxlen=self.max_buffer_frames)
 
         self._lock = threading.Lock()
 
@@ -799,6 +814,17 @@ class KeyframeExtractor:
         # Local storage
         self.save_locally = save_locally
         self.storage = KeyframeStorage() if save_locally else None
+
+    @property
+    def current_fps(self):
+        """The rate the pipeline should throttle to (FE-1's ceiling).
+
+        This used to be read with getattr(self.extractor, "current_fps",
+        getattr(self, "max_processing_fps", 5.0)) -- and NEITHER name existed,
+        so the throttle silently fell back to the literal 5.0 and target_fps
+        was dead code. The ceiling is a real, configurable value now.
+        """
+        return float(self.target_fps)
 
     def compute_motion_score(self, frame):
 

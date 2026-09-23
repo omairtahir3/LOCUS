@@ -18,7 +18,7 @@
  *   info    -> push only                                (deviations, left-behind, habits)
  */
 
-const { createNotification } = require('./notifications');
+const { createNotification, keyframeAttachment } = require('./notifications');
 const { generateRoutineFindingMessage } = require('./llmAgent');
 const RoutineFinding = require('../models/RoutineFinding');
 const { firstName, item, timeWords } = require('./friendly');
@@ -66,8 +66,13 @@ async function deliverEscalation(finding, subject, now = new Date()) {
   const who = firstName(subject.name);
   const w = item(ev.item_name);
   const title = `${who} may have left their ${w.name} behind`;
-  // Coordinates and the keyframe id stay in finding.evidence for the app; the
-  // person reading this needs a time, a place they can tap, and what to do.
+  // FE-15 wants GPS, the keyframe IMAGE and a timestamp. The first and last go
+  // in the text; the frame is attached to the email so the caregiver can see
+  // whether it is really the item they are thinking of. It may have aged out
+  // under KEYFRAME_TTL_HOURS, in which case the alert goes without it.
+  const keyframe = await keyframeAttachment(ev.keyframe_id, 'lastseen');
+  // Raw coordinates and the keyframe id stay in finding.evidence for the app;
+  // the person reading this needs a time, a place they can tap, and what to do.
   const message =
     `We told ${who} ${ITEM_LOST_ESCALATE_LABEL} ago that their ${w.name} ${w.were} left behind, but they haven't responded. ` +
     (when ? `${w.they === 'they' ? 'They were' : 'It was'} last seen at ${timeWords(when)}` : `We don't have a time for when ${w.they} ${w.were} last seen`) +
@@ -84,6 +89,9 @@ async function deliverEscalation(finding, subject, now = new Date()) {
       requiresAcknowledgement: true,
       sendEmailTo: (prefs.email !== false && cg.email) ? cg.email : null,
       sendPush: prefs.push !== false,
+      attachments: keyframe ? [keyframe] : [],
+      imageCid: keyframe ? 'lastseen' : null,
+      imageCaption: keyframe ? `The last frame that saw the ${w.name}${when ? `, at ${timeWords(when)}` : ''}` : null,
     });
     ids.push(n._id);
   }

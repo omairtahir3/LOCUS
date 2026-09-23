@@ -31,6 +31,7 @@ class CoreAnalysisEngine:
         pre_event_seconds: int = 3,
         post_event_seconds: int = 3,
         motion_threshold: float = 10.0,
+        capture_fps: float = 5.0,
     ) -> None:
         self.registry = registry
         self.policy = policy
@@ -40,9 +41,14 @@ class CoreAnalysisEngine:
         self.pre_event_seconds = pre_event_seconds
         self.post_event_seconds = post_event_seconds
         self.motion_threshold = motion_threshold
-        
+        self.capture_fps = capture_fps
+
         self.state = EventState.IDLE
-        self.pre_event_buffer = deque(maxlen=pre_event_seconds * 10) # 10 FPS max
+        # FE-3: 3 s before the trigger plus 3 s after it, a 6 s event window
+        # inside the 5-10 s the spec asks for. Sized from the real capture
+        # ceiling (FE-1 is 5 FPS); this used to hardcode 10 FPS and so held
+        # twice the intended span.
+        self.pre_event_buffer = deque(maxlen=int(pre_event_seconds * capture_fps))
         self.active_buffer = []
         
         self.last_motion_time = 0.0

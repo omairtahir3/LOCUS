@@ -112,7 +112,31 @@ async function ensureDedupIndex() {
 }
 
 // Send an email notification via Nodemailer
-const sendEmail = async ({ to, subject, html, text }) => {
+/**
+ * FE-15: fetch a keyframe so it can be embedded in an email.
+ *
+ * A caregiver told an item is lost needs to SEE it: a name and a map pin do
+ * not tell them whether it is the right set of keys. The id was being carried
+ * in finding.evidence and shown nowhere. Returns a nodemailer attachment, or
+ * null if the frame has already aged out under KEYFRAME_TTL_HOURS.
+ */
+async function keyframeAttachment(keyframeId, cid = 'keyframe') {
+  if (!keyframeId) return null;
+  try {
+    const axios = require('axios');
+    const base = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+    const res = await axios.get(`${base}/api/keyframes/${keyframeId}/image`, {
+      responseType: 'arraybuffer', timeout: 10000,
+    });
+    return { filename: 'last-seen.jpg', content: Buffer.from(res.data), cid,
+             contentType: res.headers['content-type'] || 'image/jpeg' };
+  } catch (e) {
+    console.warn(`[Email] keyframe ${keyframeId} unavailable (${e.response?.status || e.code || e.message}); sending without it`);
+    return null;
+  }
+}
+
+const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
   try {
     if (!emailConfigured) {
       // Simulated: log it, but do NOT report it as sent. Reporting simulated
@@ -138,13 +162,10 @@ const sendEmail = async ({ to, subject, html, text }) => {
     const logoPath = path.join(__dirname, '../assets/logo-email.png');
     const fallbackLogo = path.join(__dirname, '../../frontend/public/logo.png');
     const logo = fs.existsSync(logoPath) ? logoPath : (fs.existsSync(fallbackLogo) ? fallbackLogo : null);
-    if (logo) {
-      mailOptions.attachments = [{
-        filename: 'logo.png',
-        path: logo,
-        cid: 'locuslogo',
-      }];
-    }
+    mailOptions.attachments = [
+      ...(logo ? [{ filename: 'logo.png', path: logo, cid: 'locuslogo' }] : []),
+      ...attachments,
+    ];
 
     await transporter.sendMail(mailOptions);
     return true;
@@ -249,8 +270,10 @@ const EMAIL_TYPES = {
  * @param {string}  [ctaLabel]     overrides the type's button, for one-off
  * @param {string}  [ctaUrl]       emails such as a password reset
  * @param {string}  [footNote]     replaces the standard footer sentence
+ * @param {string}  [imageCid]     cid of an attached image to show (FE-15)
+ * @param {string}  [imageCaption] one line under it
  */
-const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, linkLabel, linkUrl, kicker, ctaLabel, ctaUrl, footNote }) => {
+const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, linkLabel, linkUrl, kicker, ctaLabel, ctaUrl, footNote, imageCid, imageCaption }) => {
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
   const base = EMAIL_TYPES[type] || EMAIL_TYPES.system;
   const t = {
@@ -269,6 +292,16 @@ const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, lin
                       </td>
                     </tr>
                   </table>
+                </td>
+              </tr>` : '';
+
+  // FE-15: the frame the camera last saw the item in. Bounded so a portrait
+  // frame cannot push the button off the screen.
+  const imageRow = imageCid ? `
+              <tr>
+                <td style="padding: 18px 32px 0 32px;">
+                  <img src="cid:${escapeHtml(imageCid)}" alt="${escapeHtml(imageCaption || 'Last seen')}" width="496" style="display: block; width: 100%; max-width: 496px; height: auto; border: 1px solid #D1FAE5; border-radius: 10px;" />
+                  ${imageCaption ? `<p style="margin: 8px 0 0 0; font-size: 13px; color: #047857;">${escapeHtml(imageCaption)}</p>` : ''}
                 </td>
               </tr>` : '';
 
@@ -306,7 +339,7 @@ const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, lin
               ${paragraphs(message, 'margin: 0 0 14px 0; font-size: 16px; color: #1F2937; line-height: 1.65;')}
             </td>
           </tr>
-${detailRow}${linkRow}
+${imageRow}${detailRow}${linkRow}
           <tr>
             <td style="padding: 22px 32px 32px 32px;">
               <a href="${escapeHtml(t.href)}" style="display: inline-block; background-color: #10B981; color: #FFFFFF; font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 9px; text-decoration: none;">${escapeHtml(t.cta)}</a>
@@ -354,6 +387,9 @@ const createNotification = async ({
   sendEmailTo = null,
   sendPush = true,
   dedupKey = null,
+  attachments = [],
+  imageCid = null,
+  imageCaption = null,
 }) => {
   // The scheduled time used to be glued onto the message as
   // "\n\n(Scheduled for: ...)". Those newlines collapse in HTML, so both the
@@ -417,8 +453,9 @@ const createNotification = async ({
   if (sendEmailTo) {
     const sent = await queueEmail({
       to: sendEmailTo,
-      parts: { title, message, type, detailLabel, detailValue },
+      parts: { title, message, type, detailLabel, detailValue, imageCid, imageCaption },
       notificationId: notification._id,
+      attachments,
     });
     if (sent !== null) {
       updates['delivery.email.sent'] = sent;
@@ -676,6 +713,7 @@ module.exports = {
   queueEmail,
   flushEmails: flushAll,
   ensureDedupIndex,
+  keyframeAttachment,
 };
 
 // emailDigest needs to send and to record delivery, but notifications.js is

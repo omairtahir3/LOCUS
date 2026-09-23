@@ -50,7 +50,14 @@ const analyzeUserThresholds = async () => {
           event_type: eventType,
           confidence: { $gte: lowerBound, $lt: upperBound },
           timestamp: { $gt: lastAdjustedAt },
-          verification_status: { $in: ['verified', 'rejected'] } // Only events that were actually reviewed
+          // 'confirmed', not 'verified'. EventLog's enum is
+          // ['pending','confirmed','rejected'] -- 'verified' is not a value it
+          // can ever hold, so this filter matched only rejected events. With
+          // 114 confirmed and 47 rejected in the database, every user still
+          // read analysed=0, lastAdjusted=never: FE-11 had never once run. And
+          // had it ever reached MIN_SAMPLE_SIZE, rejectionRate would have been
+          // rejected/rejected = 1.0, ratcheting thresholds up for ever.
+          verification_status: { $in: ['confirmed', 'rejected'] } // Only events the user actually reviewed
         });
 
         const totalAnalyzed = borderlineEvents.length;

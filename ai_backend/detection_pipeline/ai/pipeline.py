@@ -35,6 +35,17 @@ def _get_mongo_db():
 from .core.policy import ConfidencePolicy
 EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
 
+# ── Capture timing (Core FE-1, FE-3) ────────────────────────────────────────
+# CAPTURE_FPS is the ceiling; KeyframeExtractor.should_capture() reduces below
+# it when nothing is moving, which is the "increasing during motion, reducing
+# during inactivity" half of FE-1.
+CAPTURE_FPS = float(os.environ.get("CAPTURE_FPS", 5.0))
+# History held for batch analysis. BATCH_ANALYSIS_FRAMES is deliberately equal
+# to BUFFER_SECONDS * CAPTURE_FPS: analyse exactly the window captured since
+# the last pass, so no frame is skipped and none is examined twice.
+BUFFER_SECONDS = float(os.environ.get("BUFFER_SECONDS", 30.0))
+BATCH_ANALYSIS_FRAMES = int(BUFFER_SECONDS * CAPTURE_FPS)
+
 # Per-frame activity events are retired in favour of Tier-2 environment
 # sessions. Flip to True to restore the old behaviour for comparison.
 EMIT_PER_FRAME_ACTIVITY_EVENTS = False
@@ -69,7 +80,17 @@ class MedicationDetectionPipeline:
         print(f"[Profiling] Pipeline init start at {t0}")
         self.detector  = PillDetector(model_path="ai/best_model.onnx")
         self.gesture   = GestureDetector()
-        self.extractor = KeyframeExtractor(target_fps=3, buffer_seconds=5, user_id=user_id, save_locally=True,
+        # FE-1: 5 FPS ceiling. FE-3: the rolling buffer holds BUFFER_SECONDS of
+        # history. It is sized to exactly the batch interval below (150 frames
+        # = 30 s at 5 FPS) so every captured frame is analysed once, with no
+        # gap and no rework. 5-10 s would be too short here: the three-phase
+        # pill sequence (medicine visible -> grip -> medicine gone) routinely
+        # spans longer than that, and a window shorter than the action defeats
+        # the point of buffering at all. The 5-10 s figure in FE-3 is the
+        # per-EVENT window, which core/engine.py implements as 3 s before plus
+        # 3 s after the motion that triggered it.
+        self.extractor = KeyframeExtractor(target_fps=CAPTURE_FPS, buffer_seconds=BUFFER_SECONDS,
+                                               user_id=user_id, save_locally=True,
                                                window_duration=1.0, top_n_per_window=1)
         self.extractor.on_scene_saved = self._log_scene_to_db
         from .core.policy import ConfidencePolicy
@@ -1672,8 +1693,10 @@ class MedicationDetectionPipeline:
                 if not hasattr(self, '_last_process_time'):
                     self._last_process_time = 0
                 
-                # Fetch dynamically changing FPS from extractor
-                fps_limit = getattr(self.extractor, "current_fps", getattr(self, "max_processing_fps", 5.0))
+                # FE-1 ceiling, from the extractor (a real property now: both
+                # names in the old getattr chain were undefined, so this
+                # silently pinned itself to the literal 5.0 fallback).
+                fps_limit = self.extractor.current_fps
                 _min_interval = 1.0 / max(1.0, float(fps_limit))
                 
                 if (_now - self._last_process_time) < _min_interval:
@@ -1700,8 +1723,9 @@ class MedicationDetectionPipeline:
                     self._batch_last_analysis = 0
                     self._batch_busy = False
 
-                # Run batch analysis every ~150 frames (30 seconds at 5 FPS)
-                # Enough time for the full pill-taking action to manifest
+                # Run batch analysis every BATCH_ANALYSIS_FRAMES (30 s at 5 FPS),
+                # which is exactly what the rolling buffer holds, so each pass
+                # sees the whole window since the last one.
                 # Skip entirely if all expected medicines are already verified
                 # Skip if no medication is scheduled (no medication_ids or scheduled_time)
                 all_meds_verified = (
@@ -1709,7 +1733,7 @@ class MedicationDetectionPipeline:
                     and self.medicines_taken_count >= self.expected_medicine_count
                 )
                 has_active_medication = bool(self.medication_ids) and bool(self.scheduled_time)
-                if (frame_count - self._batch_last_analysis >= 150
+                if (frame_count - self._batch_last_analysis >= BATCH_ANALYSIS_FRAMES
                         and not self._batch_busy
                         and not all_meds_verified
                         and has_active_medication):
