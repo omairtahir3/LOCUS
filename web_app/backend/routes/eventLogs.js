@@ -21,10 +21,17 @@ router.get('/memory-search', auth, async (req, res) => {
       }
     }
 
-    const { type, limit = 50, q } = req.query;
+    const { type, limit, date } = req.query;
+
+    // Same id-form problem as the timeline: some writers store user_id as a
+    // string and others as an ObjectId, and matching only one form returns an
+    // empty page rather than an error.
+    const mongoose = require('mongoose');
+    const idForms = [userId, String(userId)];
+    if (mongoose.Types.ObjectId.isValid(userId)) idForms.push(new mongoose.Types.ObjectId(String(userId)));
 
     const query = {
-      user_id: userId,
+      user_id: { $in: idForms },
       event_type: { $in: ['medication_intake', 'social_interaction', 'activity', 'object'] },
       // scene_change events share event_type 'activity' but are raw motion-burst
       // captures with no classification — they belong in Keyframe Audit, not a
@@ -37,10 +44,29 @@ router.get('/memory-search', auth, async (req, res) => {
       query.event_type = type; // override with specific filter
     }
 
+    // A day at a time, bounded by the LOCAL day so "the 24th" means the same
+    // thing to the person reading it as to their clock. Without a date this
+    // still returns the most recent events, as it always did.
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+      const [y, mo, d] = date.split('-').map(Number);
+      const start = new Date(y, mo - 1, d, 0, 0, 0, 0);
+      const end = new Date(start); end.setDate(end.getDate() + 1);
+      query.timestamp = { $gte: start, $lt: end };
+    }
+
+    // When a day is asked for, everything that happened that day is returned:
+    // a memory aid that hides the afternoon behind a page-50 cut-off is not
+    // answering the question. The cap is only a guard against an
+    // unbounded payload, and is far above any real day (the busiest on record
+    // here is 264 events).
+    const HARD_CAP = 5000;
+    const cap = limit ? Math.min(Number(limit) || HARD_CAP, HARD_CAP) : (date ? HARD_CAP : 200);
+
     const events = await EventLog.find(query)
       .populate('person_id', 'person_name relationship_type face_embedding')
       .sort({ timestamp: -1 })
-      .limit(Number(limit));
+      .limit(cap);
 
     res.json(events);
   } catch (error) {
