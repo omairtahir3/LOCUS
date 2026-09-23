@@ -23,6 +23,18 @@ const today = () => {
 };
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
+/** Green when the day looks healthy, amber when it is low enough to notice. */
+const barColour = (v) =>
+  v >= 70 ? 'var(--success)' : v >= 40 ? 'var(--warning)' : 'var(--danger, #dc2626)';
+
+/** Shown only while the first request is in flight, so the panel has shape. */
+const PLACEHOLDER_INSIGHTS = [
+  { key: 'routine', label: 'Routine Adherence', value: null, detail: '' },
+  { key: 'social', label: 'Social Activity', value: null, detail: '' },
+  { key: 'physical', label: 'Physical Activity', value: null, detail: '' },
+  { key: 'coverage', label: 'Camera Coverage', value: null, detail: '' },
+];
+
 /** 95 -> "1h 35m", 42 -> "42m". "0h 0m" reads like a broken widget. */
 const durationOf = (mins) => {
   if (!mins) return '0m';
@@ -51,6 +63,7 @@ export default function ActivityFeed() {
 
   const items = data?.items || [];
   const anomalies = data?.anomalies || [];
+  const insights = data?.insights || [];
   const s = data?.summary;
 
   // Steps come from the phone, everything else from the camera. null means
@@ -82,58 +95,6 @@ export default function ActivityFeed() {
             />
           </label>
           <UserSelector />
-        </div>
-      </div>
-
-      {/* Six across the full width, the same pattern the Dashboard uses.
-          Inside the half-width column they stacked three rows deep and
-          dwarfed the timeline beside them. */}
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-icon success"><Pill size={18} /></div>
-          <div>
-            <div className="stat-value">{s ? s.medication : '—'}</div>
-            <div className="stat-label">Doses Seen</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon accent"><Brain size={18} /></div>
-          <div>
-            <div className="stat-value">{s ? s.social : '—'}</div>
-            <div className="stat-label">Social Interactions</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon primary"><Footprints size={18} /></div>
-          <div>
-            <div className="stat-value">{steps == null ? '—' : steps.toLocaleString()}</div>
-            <div className="stat-label">Steps Today</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon info"><Package size={18} /></div>
-          <div>
-            <div className="stat-value">{s ? s.items_seen : '—'}</div>
-            <div className="stat-label">Items Found</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          {/* Green when there is nothing wrong: a zero here is good news, and
-              an amber badge on it would read as a problem. */}
-          <div className={`stat-icon ${s?.anomalies ? 'warning' : 'success'}`}>
-            {s?.anomalies ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
-          </div>
-          <div>
-            <div className="stat-value">{s ? s.anomalies : '—'}</div>
-            <div className="stat-label">Anomalies</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon primary"><Clock size={18} /></div>
-          <div>
-            <div className="stat-value">{s ? durationOf(s.tracked_minutes) : '—'}</div>
-            <div className="stat-label">Active Time</div>
-          </div>
         </div>
       </div>
 
@@ -191,6 +152,55 @@ export default function ActivityFeed() {
         </div>
 
         <div>
+          {/* Six boxes, two per row in this column. */}
+          <div className="stat-grid" style={{ marginBottom: 16 }}>
+        <div className="stat-card">
+          <div className="stat-icon success"><Pill size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.medication : '—'}</div>
+            <div className="stat-label">Doses Seen</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon accent"><Brain size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.social : '—'}</div>
+            <div className="stat-label">Social Interactions</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon primary"><Footprints size={18} /></div>
+          <div>
+            <div className="stat-value">{steps == null ? '—' : steps.toLocaleString()}</div>
+            <div className="stat-label">Steps Today</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon info"><Package size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? s.items_seen : '—'}</div>
+            <div className="stat-label">Items Found</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          {/* Green when there is nothing wrong: a zero here is good news, and
+              an amber badge on it would read as a problem. */}
+          <div className={`stat-icon ${s?.anomalies ? 'warning' : 'success'}`}>
+            {s?.anomalies ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+          </div>
+          <div>
+            <div className="stat-value">{s ? s.anomalies : '—'}</div>
+            <div className="stat-label">Anomalies</div>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon primary"><Clock size={18} /></div>
+          <div>
+            <div className="stat-value">{s ? durationOf(s.tracked_minutes) : '—'}</div>
+            <div className="stat-label">Active Time</div>
+          </div>
+        </div>
+      </div>
           {/* Anomalies: the routine monitor's findings for this day, listed
               rather than only counted. */}
           <div className="card" style={{ marginBottom: 16 }}>
@@ -255,16 +265,39 @@ export default function ActivityFeed() {
             )}
           </div>
 
-          {steps == null && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-title" style={{ marginBottom: 4 }}>No step count for this day</div>
-              <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
-                Steps are counted by the phone, not the camera. Open the LOCUS app on the
-                phone and allow physical activity access. Phones without a step sensor
-                will not report one.
-              </div>
+          {/* Behavioural Insights. Every bar is computed from recorded data
+              (see buildInsights in routes/eventLogs.js). A metric with no data
+              shows "Not enough data" instead of a bar, because a plausible bar
+              standing in for a missing measurement is worse than a gap. */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>Behavioural Insights</div>
+            <div className="card-subtitle" style={{ marginBottom: 14 }}>
+              How the day compares with what is expected
             </div>
-          )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {(insights.length ? insights : PLACEHOLDER_INSIGHTS).map((m) => (
+                <div key={m.key} title={m.detail}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                    <span className="text-sm">{m.label}</span>
+                    <span className="text-sm font-bold" style={{ flexShrink: 0, color: m.value == null ? 'var(--text-muted)' : undefined }}>
+                      {m.value == null ? 'No data' : `${m.value}%`}
+                    </span>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--border-light)', borderRadius: 4, overflow: 'hidden' }}>
+                    {m.value != null && (
+                      <div style={{
+                        width: `${m.value}%`, height: '100%', borderRadius: 4,
+                        background: barColour(m.value), transition: 'width 0.5s ease',
+                      }} />
+                    )}
+                  </div>
+                  {m.detail && (
+                    <div className="text-xs text-muted" style={{ marginTop: 4, lineHeight: 1.5 }}>{m.detail}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

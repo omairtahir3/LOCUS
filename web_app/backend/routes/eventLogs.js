@@ -49,6 +49,83 @@ router.get('/memory-search', auth, async (req, res) => {
   }
 });
 
+/** Steps that count as a full day's walking. Overridable per deployment. */
+const STEP_GOAL = Number(process.env.DAILY_STEP_GOAL || 5000);
+/** Hours a camera would have to cover to call the day fully observed. */
+const OBSERVABLE_HOURS = 14;   // roughly 08:00-22:00
+const SOCIAL_BASELINE_DAYS = 14;
+
+/**
+ * The four Behavioural Insights bars.
+ *
+ * Every one is computed from something the system actually recorded. Where
+ * there is no data the score is null and the UI says so, rather than showing a
+ * plausible-looking bar. A care dashboard that invents a number is worse than
+ * one that admits it does not know.
+ *
+ * Note on "Sleep Quality": LOCUS has no sleep sensor, no wearable and no
+ * overnight camera guarantee, so it cannot be measured and is not shown.
+ * Camera Coverage takes its place: how much of the day was actually observed,
+ * which is the figure that tells a caregiver how much to trust the others.
+ */
+async function buildInsights({ idForms, start, end, items, anomalies, steps, minutesIndoors }) {
+  const pct = (n, d) => (d > 0 ? Math.max(0, Math.min(100, Math.round((n / d) * 100))) : null);
+
+  // ── Routine adherence: did the scheduled doses actually happen? ──────────
+  const MedicationLog = require('../models/MedicationLog');
+  const logs = await MedicationLog.find({
+    user_id: { $in: idForms }, scheduled_time: { $gte: start, $lt: end },
+  }).lean();
+  const due = logs.filter(l => l.status !== 'scheduled');   // still pending is not yet a miss
+  const taken = due.filter(l => l.status === 'taken' || l.taken_at);
+  // A routine deviation (not in the usual room at the usual time) costs 10
+  // points each, so adherence reflects more than medication alone.
+  const deviations = anomalies.filter(a => a.finding_kind === 'deviation').length;
+  let adherence = due.length ? pct(taken.length, due.length) : null;
+  if (adherence !== null) adherence = Math.max(0, adherence - deviations * 10);
+
+  // ── Social activity: today against this person's own normal ─────────────
+  // Compared with themselves, not a population average: a quiet person having
+  // a normal day should not read as a problem.
+  const socialToday = items.filter(i => i.kind === 'social').length;
+  const since = new Date(start); since.setDate(since.getDate() - SOCIAL_BASELINE_DAYS);
+  const priorSocial = await EventLog.countDocuments({
+    user_id: { $in: idForms },
+    event_type: { $in: ['social_interaction', 'unknown_face'] },
+    timestamp: { $gte: since, $lt: start },
+  });
+  const socialBaseline = priorSocial / SOCIAL_BASELINE_DAYS;
+  const social = socialBaseline > 0 ? pct(socialToday, socialBaseline)
+    : (socialToday > 0 ? 100 : null);
+
+  // ── Physical activity: steps against the daily goal ─────────────────────
+  const physical = steps == null ? null : pct(steps, STEP_GOAL);
+
+  // ── Camera coverage: how much of the day was observed at all ────────────
+  // No sessions at all is null, not 0%. 0% asserts the camera was running and
+  // saw nothing; null admits we cannot tell that apart from it being off.
+  const coverage = minutesIndoors > 0 ? pct(minutesIndoors, OBSERVABLE_HOURS * 60) : null;
+
+  return [
+    { key: 'routine', label: 'Routine Adherence', value: adherence,
+      detail: due.length ? `${taken.length} of ${due.length} doses confirmed`
+                         + (deviations ? `, ${deviations} routine deviation${deviations === 1 ? '' : 's'}` : '')
+                         : 'No doses were due today' },
+    { key: 'social', label: 'Social Activity', value: social,
+      detail: socialBaseline > 0
+        ? `${socialToday} today against a usual ${socialBaseline.toFixed(1)} a day`
+        : (socialToday > 0 ? `${socialToday} today, no history to compare with yet`
+                           : 'No interactions recorded, and no history to compare with') },
+    { key: 'physical', label: 'Physical Activity', value: physical,
+      detail: steps == null ? 'The phone has not reported steps for this day'
+                            : `${steps.toLocaleString()} steps against a ${STEP_GOAL.toLocaleString()} goal` },
+    { key: 'coverage', label: 'Camera Coverage', value: coverage,
+      detail: minutesIndoors
+        ? `${Math.round(minutesIndoors)} minutes observed of about ${OBSERVABLE_HOURS} waking hours`
+        : 'The camera recorded no room sessions for this day' },
+  ];
+}
+
 /**
  * GET /api/event-logs/timeline?date=YYYY-MM-DD&userId=
  *
@@ -149,10 +226,15 @@ router.get('/timeline', auth, async (req, res) => {
     // only count them. Same objects as the timeline entries.
     const anomalies = items.filter(i => i.kind === 'anomaly');
 
+    const insights = await buildInsights({
+      idForms, start, end, items, anomalies, steps: stepDoc ? stepDoc.steps : null, minutesIndoors,
+    });
+
     res.json({
       date: localDate,
       items,
       anomalies,
+      insights,
       summary: {
         medication: items.filter(i => i.kind === 'medication').length,
         social: items.filter(i => i.kind === 'social').length,

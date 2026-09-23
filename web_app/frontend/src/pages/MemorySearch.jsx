@@ -13,6 +13,15 @@ export default function MemorySearch() {
   // Full-image viewer. Thumbnails are cropped to 100px with objectFit:cover,
   // so the evidence frame can't be read without opening it full size.
   const [lightbox, setLightbox] = useState(null);
+  // Keyframes are deleted once they pass their retention window (FE-8), so a
+  // memory routinely outlives its picture. Recording the failures in state and
+  // re-rendering the NO-IMAGE layout keeps those cards identical to ones that
+  // never had a frame. Hiding just the thumbnail in the DOM left the
+  // with-image wrapper behind, and the text sat indented differently from its
+  // neighbours.
+  const [brokenImages, setBrokenImages] = useState(() => new Set());
+  const markImageBroken = (id) =>
+    setBrokenImages((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
 
   const fetchEvents = async () => {
     setLoading(true);
@@ -253,7 +262,7 @@ export default function MemorySearch() {
                       >
                         <Pin size={16} fill={m.is_flagged ? 'currentColor' : 'none'} />
                       </button>
-                      {m.hasImage && m.image_url ? (
+                      {m.hasImage && m.image_url && !brokenImages.has(m.id) ? (
                         <div style={{ display: 'flex' }}>
                           <div
                             className="memory-thumb"
@@ -268,12 +277,10 @@ export default function MemorySearch() {
                               src={m.image_url}
                               alt=""
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={(e) => {
-                                // Hide the entire thumbnail container when the image is gone
-                                e.target.onerror = null;
-                                const thumbDiv = e.target.closest('.memory-thumb');
-                                if (thumbDiv) thumbDiv.style.display = 'none';
-                              }}
+                              // The frame has aged out. Fall back to the layout
+                              // used by memories that never had one, so every
+                              // card lines up the same way.
+                              onError={() => markImageBroken(m.id)}
                             />
                           </div>
                           <div style={{ padding: 14, flex: 1, display: 'flex', alignItems: 'center', gap: 14 }}>
