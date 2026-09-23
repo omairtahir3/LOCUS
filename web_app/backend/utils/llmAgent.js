@@ -72,10 +72,11 @@ const inventedNumber = (text, allowed) => [...numbersIn(text)].find(n => !allowe
  * message body only.
  *   direct: true when the recipient is the person the message is about.
  */
-async function phrase(instruction, facts, fallback, label, { direct = false } = {}) {
+async function phrase(instruction, facts, fallback, label, { direct = false, forbid = null } = {}) {
   if (!isConfigured()) return fallback;
   const out = await completeJSON(`${BASE_RULES}\n${instruction}`, facts, SCHEMA);
   if (!out) return fallback;
+  if (forbid && forbid.test(out.message)) { console.warn(`[LLMAgent] ${label}: mentioned something that did not happen, using template`); return fallback; }
   if (GENDERED.test(out.message)) { console.warn(`[LLMAgent] ${label}: guessed a gender, using template`); return fallback; }
   if (CHATTY.test(out.message)) { console.warn(`[LLMAgent] ${label}: chatty, using template`); return fallback; }
   if (direct && !SECOND_PERSON.test(out.message)) { console.warn(`[LLMAgent] ${label}: not addressed to the recipient, using template`); return fallback; }
@@ -153,21 +154,32 @@ const generateAIUserTakenDoseAlert = async (user, medication) => {
     `${who} just took ${med} and the camera confirmed it.`, fallback, `taken confirmation for ${who}`, { direct: true });
 };
 
-const generateAIUserMissedDoseAlert = async (user, medication, log) => {
+/**
+ * @param {boolean} caregiverNotified whether anyone was actually told. Only an
+ *   elderly user has caregivers (see models/User.js); telling a normal user
+ *   "we've let your caregiver know" describes something that did not happen.
+ */
+const generateAIUserMissedDoseAlert = async (user, medication, log, caregiverNotified = false) => {
   const isElderly = user.role === 'elderly';
   const who = firstName(user.name) || 'there', med = medication.name || 'your medication', dose = medication.dosage || '';
   const t = timeOf(log.scheduled_time) || 'the scheduled time';
   const cameraOff = log.status === 'camera_off';
+  const told = caregiverNotified ? " We've let your caregiver know, just in case." : '';
+  const toldSeen = caregiverNotified ? " We've let your caregiver know so they can check in." : ' If you have taken it, you can mark it as taken.';
   const fallback = cameraOff
     ? { title: `We couldn't see your ${med}`,
-        message: `Your camera was off around ${t}, so we couldn't confirm your ${med}${dose ? ` (${dose})` : ''}. We've let your caregiver know, just in case.` }
+        message: `Your camera was off around ${t}, so we couldn't confirm your ${med}${dose ? ` (${dose})` : ''}.${told || ' If you have taken it, you can mark it as taken.'}` }
     : { title: `Did you take your ${med}?`,
-        message: `We didn't see you take your ${med}${dose ? ` (${dose})` : ''} at ${t}. We've let your caregiver know so they can check in.` };
+        message: `We didn't see you take your ${med}${dose ? ` (${dose})` : ''} at ${t}.${toldSeen}` };
   return phrase(
     (isElderly ? `You are writing to ${who}, an older adult. Be warm and gentle, never scolding.` : `You are writing to ${who}. Be friendly and direct.`) +
-    ' Do not tell them to take a dose now. Mention their caregiver has been told.',
-    `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. ` + (cameraOff ? 'The camera was off, so it could not be confirmed.' : 'The camera was on and did not see it taken.') + ' The caregiver has been notified.',
-    fallback, `user missed-dose alert for ${who}`, { direct: true });
+    ' Do not tell them to take a dose now.' +
+    (caregiverNotified ? ' Mention their caregiver has been told.' : ' They have NO caregiver: never mention a caregiver, or anyone else being told.'),
+    `${who}'s ${med}${dose ? ` (${dose})` : ''} was due at ${t}. ` +
+    (cameraOff ? 'The camera was off, so it could not be confirmed.' : 'The camera was on and did not see it taken.') +
+    (caregiverNotified ? ' The caregiver has been notified.' : ' Nobody else has been notified; they can mark it as taken themselves.'),
+    fallback, `user missed-dose alert for ${who}`,
+    { direct: true, forbid: caregiverNotified ? null : /\b(caregiver|carer|family|next of kin|notified|informed|let .{0,12}know)\b/i });
 };
 
 const generateAISkippedMedicineAlert = async (patientName, caregiverName, scheduledTime, expected, taken, skipped, isCaregiver) => {
@@ -182,11 +194,37 @@ const generateAISkippedMedicineAlert = async (patientName, caregiverName, schedu
     fallback, `skipped-medicine alert`, { direct: !isCaregiver });
 };
 
-const generateAIEscalatedAlert = async (notification, caregiver) => {
+/**
+ * @param {string|null} subjectName set when the unanswered alert belongs to
+ *   somebody ELSE (an elderly user) and is now being passed to their
+ *   caregiver. The original message is written in the second person to that
+ *   person ("your camera was off... we've let your caregiver know"), so
+ *   quoting it at the caregiver addresses the wrong reader and turns "your
+ *   caregiver" into the caregiver themselves. In that case the alert is
+ *   restated in the third person instead of quoted.
+ */
+const generateAIEscalatedAlert = async (notification, caregiver, subjectName = null) => {
   const cg = firstName(caregiver?.name) || 'there';
+  // The title keeps its own capitalisation: lower-casing the first letter
+  // turned "Mohammad seems to have missed the Panadol" into "mohammad ...".
+  // The escalation is already signalled by the badge in the app and the
+  // "Still waiting" label on the email.
   const title0 = notification.title || 'an earlier alert', msg0 = notification.message || '';
+
+  if (subjectName) {
+    const who = firstName(subjectName);
+    const fallback = {
+      title: `${who} hasn't responded`.slice(0, 80),
+      message: `${who} was alerted 15 minutes ago that we couldn't confirm their medication, and hasn't responded. Could you check in with them?`.slice(0, 400),
+    };
+    return phrase(
+      `You are writing to ${cg}, who looks after ${who}. Write about ${who} in the third person, never as "you". Be calm and practical.`,
+      `${who} was sent this alert 15 minutes ago and has not responded to it: "${title0}". Ask ${cg} to check in with ${who}.`,
+      fallback, `escalation about ${who} for ${cg}`);
+  }
+
   const fallback = {
-    title: `Still waiting, ${title0.charAt(0).toLowerCase()}${title0.slice(1)}`.slice(0, 80),
+    title: title0.slice(0, 80),
     message: `Hi ${cg}, this one has been waiting 15 minutes. ${msg0} Could you take a look now?`.slice(0, 400),
   };
   return phrase(`You are writing to ${cg}. An earlier alert has gone unanswered for 15 minutes; ask them to look at it now, firmly but kindly. Keep the original facts.`,

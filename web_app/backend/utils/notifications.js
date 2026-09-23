@@ -57,6 +57,34 @@ if (emailConfigured) {
 }
 
 /**
+ * Who, if anyone, an unanswered alert can be escalated TO.
+ *
+ * caregiver_ids is an ELDERLY-only concept (see models/User.js). A normal
+ * user has nobody watching over them, so for them there is no second person
+ * to chase, nothing to acknowledge to, and no caregiver to mention. Saying
+ * "we've let your caregiver know" to someone with no caregiver is a false
+ * statement about what the app did, and escalating their own alert back to
+ * them is just the same message again with ESCALATED on it (150 of those had
+ * been sent by 23 Sep 2026).
+ *
+ * Returns the caregiver documents, or [] when there is no escalation path.
+ */
+async function escalationTargets(recipientId, subjectUserId) {
+  const User = require('../models/User');
+  const recipient = await User.findById(recipientId).lean();
+  if (!recipient) return [];
+  // A caregiver IS the escalation target: chasing them again is the point.
+  if (recipient.role === 'caregiver') return [recipient];
+  // Otherwise the alert is about the recipient themselves. Only an elderly
+  // user has anyone behind them.
+  const subject = String(subjectUserId || recipientId) === String(recipientId)
+    ? recipient
+    : await User.findById(subjectUserId).lean();
+  if (!subject || !subject.caregiver_ids || !subject.caregiver_ids.length) return [];
+  return User.find({ _id: { $in: subject.caregiver_ids } }).lean();
+}
+
+/**
  * Bring the dedup_key index into line with the model.
  *
  * Mongoose's autoIndex creates a missing index but will not alter one that
@@ -331,6 +359,13 @@ const createNotification = async ({
   // "\n\n(Scheduled for: ...)". Those newlines collapse in HTML, so both the
   // email and the notifications page showed a parenthesis jammed onto the end
   // of the sentence. It travels as its own field now and is laid out as a row.
+  // Requiring acknowledgement is what puts an alert into the escalation queue.
+  // With nobody to escalate to, it can only ever be re-sent to the person who
+  // already has it, so it is downgraded to a plain notification.
+  if (requiresAcknowledgement && !(await escalationTargets(recipientId, subjectUserId)).length) {
+    requiresAcknowledgement = false;
+  }
+
   let detailLabel = null, detailValue = null;
   if (medicationLogId) {
     const MedicationLog = require('../models/MedicationLog');
@@ -546,7 +581,11 @@ const notifyUserMissedDose = async (user, medication, logId) => {
     title = log.pre_generated_missed_title;
     message = log.pre_generated_missed_message;
   } else {
-    const aiContent = await generateAIUserMissedDoseAlert(user, medication, log);
+    // Only claim a caregiver was told if one exists to tell. Normal users have
+    // none (caregiver_ids is elderly-only), and notifyCaregiversMissedDose
+    // returns early for them, so the claim would be false.
+    const caregiverNotified = !!(user.caregiver_ids && user.caregiver_ids.length);
+    const aiContent = await generateAIUserMissedDoseAlert(user, medication, log, caregiverNotified);
     title = aiContent.title;
     message = aiContent.message;
   }
@@ -566,15 +605,31 @@ const notifyUserMissedDose = async (user, medication, logId) => {
   });
 };
 
-// Escalate an unacknowledged alert (re-send via Email & FCM and mark escalated)
+// Escalate an unacknowledged alert. For a caregiver this re-alerts them; for
+// an elderly user it goes to the people looking after them. With nobody to
+// escalate to it does nothing, rather than sending the same person the same
+// message with ESCALATED on it.
 const escalateAlert = async (notification) => {
-  const User = require('../models/User');
-  const recipient = await User.findById(notification.recipient_id);
-  if (!recipient) return false;
+  const targets = await escalationTargets(notification.recipient_id, notification.subject_user_id);
+  if (!targets.length) {
+    console.log(`[Escalation] No caregiver to escalate ${notification._id} to, leaving it`);
+    return false;
+  }
+  const recipient = targets[0];
 
-  console.log(`[Escalation] Escalating alert ${notification._id} (${notification.title}) for caregiver ${recipient.name}`);
+  // When the alert is being passed to somebody else, it has to be restated for
+  // them: the original is addressed to the person who did not answer.
+  const passedOn = String(recipient._id) !== String(notification.recipient_id);
+  let subjectName = null;
+  if (passedOn) {
+    const User = require('../models/User');
+    const subject = await User.findById(notification.subject_user_id || notification.recipient_id).lean();
+    subjectName = subject?.name || null;
+  }
 
-  const aiContent = await generateAIEscalatedAlert(notification, recipient);
+  console.log(`[Escalation] Escalating alert ${notification._id} (${notification.title}) to ${targets.map(t => t.name).join(', ')}`);
+
+  const aiContent = await generateAIEscalatedAlert(notification, recipient, subjectName);
   const escTitle = aiContent.title;
   const escMsg = aiContent.message;
 
