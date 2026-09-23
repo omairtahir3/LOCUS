@@ -34,6 +34,7 @@ def _get_mongo_db():
 # Confidence thresholds - tuned for real-world YOLO + MediaPipe accuracy
 from .core.policy import ConfidencePolicy
 from db_config import get_client, get_db_name
+from service_config import get_locus_api_url
 EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
 
 # ── Capture timing (Core FE-1, FE-3) ────────────────────────────────────────
@@ -410,7 +411,7 @@ class MedicationDetectionPipeline:
 
                 try:
                     # Hit the Node.js backend so it can trigger push notifications and websockets
-                    resp = httpx.post("http://localhost:5000/api/medications/logs", json=payload, headers=headers, timeout=10.0)
+                    resp = httpx.post(f"{get_locus_api_url()}/api/medications/logs", json=payload, headers=headers, timeout=10.0)
                     if resp.status_code in (200, 201):
                         logged_count += 1
                         print(f"[Pipeline] [DB-Log-Batch] OK API Logged {med_id} as {status.upper()} ({logged_count}/{pills_to_log})")

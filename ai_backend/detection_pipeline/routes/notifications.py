@@ -95,11 +95,12 @@ async def notify_skip(body: dict, db=Depends(get_db)):
     import httpx
     from fastapi import HTTPException
     
-    # Forward the request to the Node.js backend running on port 5000
+    # Forward the request to the Node.js backend
+    from service_config import get_locus_api_url
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                "http://localhost:5000/api/notifications/skip",
+                f"{get_locus_api_url()}/api/notifications/skip",
                 json=body,
                 timeout=10.0
             )
