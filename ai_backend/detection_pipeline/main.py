@@ -46,6 +46,12 @@ async def lifespan(app: FastAPI):
     print("[Startup] Dynamic multi-user pipeline architecture active")
     print(f"[Startup] Default camera fallback: {os.environ.get('CAMERA_SOURCE', '0')}")
 
+    # Core FE-8. Retention must not depend on anything writing: the activity
+    # and item stores only built their sweepers when saving a frame, so with
+    # the camera off their frames were kept for ever.
+    from keyframe_backend.keyframe import start_all_retention
+    start_all_retention()
+
     scheduler_task = asyncio.create_task(run_scheduler())
 
     # Pre-warm Item Embedding Backbone in background thread to avoid cold-start lag
