@@ -5,6 +5,7 @@ const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
 const fs = require('fs');
 const path = require('path');
+const { queueEmail, flushAll, configure: configureDigest } = require('./emailDigest');
 
 // Initialize Firebase Admin
 try {
@@ -53,6 +54,33 @@ if (emailConfigured) {
     });
 } else {
   console.log('[Email] EMAIL_USER not configured — emails will be simulated (logged, not sent).');
+}
+
+/**
+ * Bring the dedup_key index into line with the model.
+ *
+ * Mongoose's autoIndex creates a missing index but will not alter one that
+ * already exists under the same name with different options, so an older
+ * `sparse` version would survive a deploy and keep rejecting every keyless
+ * notification (sparse indexes DO index explicit nulls). This drops anything
+ * that does not match and lets the model rebuild it, after clearing nulls
+ * left by an earlier schema.
+ */
+async function ensureDedupIndex() {
+  try {
+    const coll = Notification.collection;
+    const existing = (await coll.indexes()).find(i => i.name === 'dedup_key_1');
+    const correct = existing && existing.unique === true
+      && JSON.stringify(existing.partialFilterExpression) === JSON.stringify({ dedup_key: { $type: 'string' } });
+    if (existing && !correct) {
+      await coll.dropIndex('dedup_key_1');
+      console.log('[Notifications] replaced the old dedup_key index');
+    }
+    await Notification.updateMany({ dedup_key: null }, { $unset: { dedup_key: '' } });
+    if (!correct) await Notification.syncIndexes();
+  } catch (e) {
+    console.error('[Notifications] could not set up the dedup_key index:', e.message);
+  }
 }
 
 // Send an email notification via Nodemailer
@@ -291,6 +319,7 @@ const createNotification = async ({
   requiresAcknowledgement = false,
   sendEmailTo = null,
   sendPush = true,
+  dedupKey = null,
 }) => {
   // The scheduled time used to be glued onto the message as
   // "\n\n(Scheduled for: ...)". Those newlines collapse in HTML, so both the
@@ -309,36 +338,52 @@ const createNotification = async ({
     }
   }
 
-  const notification = await Notification.create({
-    recipient_id: recipientId,
-    subject_user_id: subjectUserId,
-    type,
-    title,
-    message,
-    medication_id: medicationId,
-    medication_log_id: medicationLogId,
-    requires_acknowledgement: requiresAcknowledgement,
-    delivery: {
-      push:  { sent: false, failed: false },
-      email: { sent: false, failed: false },
-      sms:   { sent: false, failed: false },
+  let notification;
+  try {
+    notification = await Notification.create({
+      recipient_id: recipientId,
+      subject_user_id: subjectUserId,
+      type,
+      title,
+      message,
+      medication_id: medicationId,
+      medication_log_id: medicationLogId,
+      requires_acknowledgement: requiresAcknowledgement,
+      // absent, never null, when there is no natural key (see the model)
+      ...(dedupKey ? { dedup_key: dedupKey } : {}),
+      delivery: {
+        push:  { sent: false, failed: false },
+        email: { sent: false, failed: false },
+        sms:   { sent: false, failed: false },
+      }
+    });
+  } catch (e) {
+    // Unique index on dedup_key: this exact alert has already been raised and
+    // delivered. Return the original and, above all, do not send it again.
+    if (e.code === 11000 && dedupKey) {
+      console.warn(`[Notifications] duplicate suppressed: ${dedupKey}`);
+      return await Notification.findOne({ dedup_key: dedupKey });
     }
-  });
+    throw e;
+  }
 
   const updates = {};
 
   // Send email if requested
+  // Queued, not sent: a burst to the same person goes out as one email.
+  // emailDigest records delivery.email.* itself once the send happens, so the
+  // fields are set here only when it sends inline (EMAIL_COALESCE_MS=0).
   if (sendEmailTo) {
-    const parts = { title, message, type, detailLabel, detailValue };
-    const sent = await sendEmail({
+    const sent = await queueEmail({
       to: sendEmailTo,
-      subject: title,
-      html: getLocusEmailHtml(parts),
-      text: getLocusEmailText(parts),
+      parts: { title, message, type, detailLabel, detailValue },
+      notificationId: notification._id,
     });
-    updates['delivery.email.sent'] = sent;
-    updates['delivery.email.sent_at'] = sent ? new Date() : null;
-    updates['delivery.email.failed'] = !sent;
+    if (sent !== null) {
+      updates['delivery.email.sent'] = sent;
+      updates['delivery.email.sent_at'] = sent ? new Date() : null;
+      updates['delivery.email.failed'] = !sent;
+    }
   }
 
   // Send push notification via FCM
@@ -370,6 +415,9 @@ const notifyUserDoseReminder = async (user, medication, log) => {
   const message = aiContent.message;
 
   return await createNotification({
+    // Reminder #2 for a dose is a different event from reminder #1, so the
+    // count is part of the key; the same count is the same event.
+    dedupKey: `${user._id}:dose_reminder:${log._id}:${log.reminder_count || 0}`,
     recipientId: user._id,
     subjectUserId: user._id,
     type: 'dose_reminder',
@@ -412,6 +460,7 @@ const notifyCaregiversMissedDose = async (user, medication, logId) => {
     }
 
     await createNotification({
+      dedupKey: `${caregiver._id}:missed:${logId}`,
       recipientId: caregiver._id,
       subjectUserId: user._id,
       type: log.status === 'camera_off' ? 'camera_off_alert' : 'missed_dose',
@@ -441,12 +490,12 @@ const notifyCaregiversTakenDose = async (user, medication, logId) => {
     const aiContent = await generateAITakenDoseAlert(user, medication, log, caregiver);
 
     await createNotification({
+      dedupKey: `${caregiver._id}:taken:${logId}`,
       recipientId: caregiver._id,
       subjectUserId: user._id,
       type: 'dose_confirmed',
       title: aiContent.title,
       message: aiContent.message,
-      actionButtons: '',
       medicationId: medication._id,
       medicationLogId: logId,
       requiresAcknowledgement: false,
@@ -464,6 +513,7 @@ const notifyUserTakenDose = async (user, medication, logId) => {
   const aiContent = await generateAIUserTakenDoseAlert(user, medication, log);
 
   await createNotification({
+    dedupKey: `${user._id}:taken:${logId}`,
     recipientId: user._id,
     subjectUserId: user._id,
     type: 'dose_confirmed',
@@ -496,6 +546,7 @@ const notifyUserMissedDose = async (user, medication, logId) => {
   }
 
   await createNotification({
+    dedupKey: `${user._id}:missed:${logId}`,
     recipientId: user._id,
     subjectUserId: user._id,
     type: log.status === 'camera_off' ? 'camera_off_alert' : 'missed_dose',
@@ -525,20 +576,18 @@ const escalateAlert = async (notification) => {
   // unconditionally, so every caregiver email that failed at SMTP was recorded
   // as delivered fifteen minutes later -- the delivery records read
   // {sent: true, failed: true} -- and the failure was invisible from the UI.
-  let emailSent = false;
+  let emailSent = null;
   if (recipient.email) {
-    const parts = { title: escTitle, message: escMsg, type: 'escalated' };
-    emailSent = await sendEmail({
+    emailSent = await queueEmail({
       to: recipient.email,
-      subject: escTitle,
-      html: getLocusEmailHtml(parts),
-      text: getLocusEmailText(parts),
+      parts: { title: escTitle, message: escMsg, type: 'escalated' },
+      notificationId: notification._id,
     });
   }
   const pushSent = await sendPushNotification({ userId: recipient._id, title: escTitle, body: escMsg });
 
   const set = { escalated: true, escalated_at: new Date() };
-  if (recipient.email) {
+  if (recipient.email && emailSent !== null) {
     set['delivery.email.sent'] = emailSent;
     set['delivery.email.failed'] = !emailSent;
     if (emailSent) set['delivery.email.sent_at'] = new Date();
@@ -563,4 +612,12 @@ module.exports = {
   sendPushNotification,
   getLocusEmailHtml,
   getLocusEmailText,
+  queueEmail,
+  flushEmails: flushAll,
+  ensureDedupIndex,
 };
+
+// emailDigest needs to send and to record delivery, but notifications.js is
+// what requires it, so the dependencies are handed over rather than required
+// back (which would be a cycle).
+configureDigest({ sendEmail, getLocusEmailHtml, getLocusEmailText, Notification });
