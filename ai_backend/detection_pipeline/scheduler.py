@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from database import get_db
 from ai.pipeline import MedicationDetectionPipeline
+from db_config import get_client, get_db_name
 
 # Optional GoPro auto-control via Open GoPro API
 _gopro_session = None
@@ -267,7 +268,7 @@ async def _start_pipeline_for_session(session, user_id):
         already_taken = 0
         try:
             from pymongo import MongoClient
-            sync_db = MongoClient("mongodb://localhost:27017")["locusDB"]
+            sync_db = get_client()[get_db_name()]
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             today_utc = today_start.astimezone(timezone.utc).replace(tzinfo=None)
             tomorrow_utc = today_utc + timedelta(days=1)

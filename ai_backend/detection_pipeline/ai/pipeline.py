@@ -33,6 +33,7 @@ def _get_mongo_db():
 
 # Confidence thresholds - tuned for real-world YOLO + MediaPipe accuracy
 from .core.policy import ConfidencePolicy
+from db_config import get_client, get_db_name
 EVENT_CONFIDENCE_POLICY = ConfidencePolicy(auto_verify_threshold=0.85, confirmation_threshold=0.70)
 
 # ── Capture timing (Core FE-1, FE-3) ────────────────────────────────────────
@@ -94,16 +95,40 @@ class MedicationDetectionPipeline:
                                                window_duration=1.0, top_n_per_window=1)
         self.extractor.on_scene_saved = self._log_scene_to_db
         from .core.policy import ConfidencePolicy
-        from .plugins.medication import MedicationIntakePlugin
-        from .plugins.face_recognition import FaceRecognitionPlugin
-        from .plugins.egocentric_activity import EgocentricActivityPlugin
         med_thresholds = (confidence_thresholds or {}).get("medication_intake", {})
         auto_v = med_thresholds.get("auto_verify", 0.85)
         conf = med_thresholds.get("confirm", 0.70)
         self.event_policy = ConfidencePolicy(auto_verify_threshold=auto_v, confirmation_threshold=conf)
-        self.event_plugin = MedicationIntakePlugin()
-        self.face_plugin = FaceRecognitionPlugin(similarity_threshold=0.65)
-        self.activity_plugin = EgocentricActivityPlugin()
+
+        # FE-5: detectors come from the registry, not from fields hard-coded
+        # here. Adding a detection type means writing a DetectorPlugin and
+        # listing it in plugins/registry.py -- this file does not change, which
+        # is what "without rebuilding the pipeline" has to mean in practice.
+        # The named attributes below are kept because the medication, face and
+        # activity paths still call their plugins directly; they are now views
+        # onto the registry rather than the only place the plugins exist.
+        from .plugins.registry import build_registry
+        from .core.contracts import ActionType
+        self.registry = build_registry()
+
+        def _plugin(action_type):
+            """None rather than a crash when a detector cannot be built.
+
+            A missing optional dependency used to take the whole pipeline down
+            at construction: no medication detection because insightface was
+            not installed. Each batch runner already guards its own call, so a
+            missing detector now costs only that detector.
+            """
+            try:
+                return self.registry.get(action_type)
+            except Exception as exc:
+                print(f"[Pipeline] {action_type.value} detector unavailable: "
+                      f"{type(exc).__name__}: {exc}")
+                return None
+
+        self.event_plugin = _plugin(ActionType.MEDICATION_INTAKE)
+        self.face_plugin = _plugin(ActionType.SOCIAL_INTERACTION)
+        self.activity_plugin = _plugin(ActionType.ACTIVITY)
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -155,8 +180,8 @@ class MedicationDetectionPipeline:
         try:
             from pymongo import MongoClient
             from bson import ObjectId
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             ts_now = datetime.utcnow()
             doc = {
                 "user_id": ObjectId(str(self.user_id)),
@@ -197,8 +222,8 @@ class MedicationDetectionPipeline:
         try:
             from pymongo import MongoClient
             from bson import ObjectId
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             ts_now = datetime.utcnow()
             
             # Confidence gating for upload. If >= 70%, we use the keyframe. 
@@ -243,8 +268,8 @@ class MedicationDetectionPipeline:
         try:
             from pymongo import MongoClient
             from bson import ObjectId
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             
             # pipeline.py might import datetime, but let's be safe just in case
             from datetime import datetime
@@ -285,8 +310,8 @@ class MedicationDetectionPipeline:
             from pymongo import MongoClient
             from bson import ObjectId
 
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
 
             sched_str = self.scheduled_time
             # Convert "HH:MM" to full UTC datetime
@@ -444,8 +469,8 @@ class MedicationDetectionPipeline:
                 try:
                     from pymongo import MongoClient
                     from bson import ObjectId
-                    client = MongoClient("mongodb://localhost:27017")
-                    db = client["locusDB"]
+                    client = get_client()
+                    db = client[get_db_name()]
                     for mid in self.medication_ids:
                         doc = db.medications.find_one({"_id": ObjectId(mid)})
                         if doc:
@@ -1844,7 +1869,7 @@ class MedicationDetectionPipeline:
                     threading.Thread(target=_run_batch, daemon=True).start()
 
                 # Run Face Recognition Plugin independently of medication results
-                if not getattr(self, '_face_busy', False):
+                if self.face_plugin is not None and not getattr(self, '_face_busy', False):
                     def _run_face_batch():
                         self._face_busy = True
                         try:
@@ -1864,7 +1889,7 @@ class MedicationDetectionPipeline:
                     threading.Thread(target=_run_face_batch, daemon=True).start()
 
                 # Run Egocentric Activity Plugin
-                if not getattr(self, '_activity_busy', False):
+                if self.activity_plugin is not None and not getattr(self, '_activity_busy', False):
                     def _run_activity_batch():
                         self._activity_busy = True
                         try:

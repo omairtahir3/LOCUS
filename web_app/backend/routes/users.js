@@ -140,7 +140,9 @@ router.put('/me/home_location', auth, async (req, res) => {
       return res.status(400).json({ error: 'lat and lng are required' });
     }
 
-    req.user.home_location = { lat, lng, address };
+    // inferred: false -- setting it by hand supersedes any guess, and stops
+    // resolveHome() overwriting it later.
+    req.user.home_location = { lat, lng, address, inferred: false };
     await req.user.save();
 
     res.json({ message: 'Home location updated successfully', home_location: req.user.home_location });

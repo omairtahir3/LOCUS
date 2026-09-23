@@ -23,6 +23,7 @@ import urllib.request
 import cv2
 import numpy as np
 from pymongo import MongoClient
+from db_config import get_client, get_db_name
 
 AI_BACKEND = "http://localhost:8000/api/detection/extract-embedding"
 
@@ -86,7 +87,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Report only; do not modify the gallery")
     a = ap.parse_args()
 
-    db = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=5000)["locusDB"]
+    db = get_client(serverSelectionTimeoutMS=5000)[get_db_name()]
     item = db.useritems.find_one({"item_name": a.item})
     if not item:
         names = [d["item_name"] for d in db.useritems.find({}, {"item_name": 1})]

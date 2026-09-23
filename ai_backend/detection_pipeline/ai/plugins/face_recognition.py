@@ -23,7 +23,10 @@ class FaceRecognitionPlugin(DetectorPlugin):
     action_type = ActionType.SOCIAL_INTERACTION
     model_name = "insightface_buffalo_l"
 
-    def __init__(self, mongo_uri: str = "mongodb://localhost:27017", db_name: str = "locusDB", similarity_threshold: float = 0.65):
+    def __init__(self, mongo_uri: str = None, db_name: str = None, similarity_threshold: float = 0.65):
+        from db_config import get_mongo_uri, get_db_name
+        mongo_uri = mongo_uri or get_mongo_uri()
+        db_name = db_name or get_db_name()
         import time
         t0 = time.time()
         print(f"[Profiling] FaceRecognitionPlugin init start at {t0}")

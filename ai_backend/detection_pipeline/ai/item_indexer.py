@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 import cv2
 import numpy as np
+from db_config import get_client, get_db_name
 
 # Model path resolution
 DEFAULT_MODEL_PATH = os.path.join(
@@ -595,8 +596,8 @@ class DailyItemIndexer:
             if not user_id:
                 return
 
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             self._ensure_suggestion_ttl_index(db)
 
             now = datetime.now(timezone.utc)
@@ -665,8 +666,8 @@ class DailyItemIndexer:
             from pymongo import MongoClient
             from bson import ObjectId
             if self._db_client is None:
-                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
-            db = self._db_client["locusDB"]
+                self._db_client = get_client(serverSelectionTimeoutMS=2000)
+            db = self._db_client[get_db_name()]
 
             try:
                 user_oid = ObjectId(user_id_str)
@@ -867,8 +868,8 @@ class DailyItemIndexer:
         try:
             from pymongo import MongoClient
             from bson import ObjectId
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             ts_now = datetime.now(timezone.utc)
             user_id = metadata.get("user_id")
             if not user_id:
@@ -924,8 +925,8 @@ class DailyItemIndexer:
             from pymongo import MongoClient
             from bson import ObjectId
 
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
 
             user_id = metadata.get("user_id")
             if not user_id:
@@ -1029,8 +1030,8 @@ class DailyItemIndexer:
             from datetime import datetime, timedelta, timezone
             import math
             if self._db_client is None:
-                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
-            db = self._db_client["locusDB"]
+                self._db_client = get_client(serverSelectionTimeoutMS=2000)
+            db = self._db_client[get_db_name()]
             try:
                 uid_forms = [user_id_str, ObjectId(user_id_str)]
             except Exception:
@@ -1113,8 +1114,8 @@ class DailyItemIndexer:
             from bson import ObjectId
             from datetime import datetime, timezone
             if self._db_client is None:
-                self._db_client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
-            db = self._db_client["locusDB"]
+                self._db_client = get_client(serverSelectionTimeoutMS=2000)
+            db = self._db_client[get_db_name()]
             try:
                 user_oid = ObjectId(user_id_str)
             except Exception:

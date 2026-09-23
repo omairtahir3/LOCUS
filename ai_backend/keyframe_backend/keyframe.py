@@ -9,6 +9,7 @@ import json
 import threading
 import time
 import glob
+from db_config import get_client, get_db_name
 
 # Storage lives inside keyframe_backend/keyframe_storage/
 KEYFRAME_STORAGE_DIR = os.path.join(
@@ -281,8 +282,8 @@ class KeyframeStorage:
         retained_kids = set()
         try:
             from pymongo import MongoClient
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             
             # Check event logs (keyframe_ref or keyframe_id might be used, check both)
             events = db.eventlogs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})
@@ -658,8 +659,8 @@ class MedicationEvidenceStorage:
         retained_kids = set()
         try:
             from pymongo import MongoClient
-            client = MongoClient("mongodb://localhost:27017")
-            db = client["locusDB"]
+            client = get_client()
+            db = client[get_db_name()]
             
             # Check event logs (keyframe_ref or keyframe_id might be used, check both)
             events = db.eventlogs.find({"keyframe_id": {"$in": expired_kids}, "is_flagged": True}, {"keyframe_id": 1})

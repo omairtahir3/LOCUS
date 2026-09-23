@@ -26,10 +26,15 @@ const UserSchema = new mongoose.Schema({
 
   phone:        { type: String, default: null },
   camera_stream_url: { type: String, default: null },  // RTSP/RTMP camera URL for this elderly user's AI pipeline
+  // Where the outdoor item checks measure "away from home" from (Core FE-12).
+  // Set in Settings, or inferred from where the phone spends the small hours
+  // when it has not been (utils/outdoor.js resolveHome). `inferred` records
+  // which, so the UI can show it as a guess and invite a correction.
   home_location: {
     lat: { type: Number },
     lng: { type: Number },
-    address: { type: String }
+    address: { type: String },
+    inferred: { type: Boolean, default: false }
   },
   
   // AI Confidence Thresholds Override
