@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Brain, Home, Package, AlertTriangle, Pill, Clock, CalendarDays } from 'lucide-react';
+import { Activity, Brain, Home, Package, AlertTriangle, Pill, Footprints, CalendarDays, ShieldCheck } from 'lucide-react';
 import UserSelector from '../components/Layout/UserSelector';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { eventLogsAPI } from '../services/api';
@@ -43,7 +43,19 @@ export default function ActivityFeed() {
   }, [date, selectedUser?._id]);
 
   const items = data?.items || [];
+  const anomalies = data?.anomalies || [];
   const s = data?.summary;
+
+  // Steps come from the phone, everything else from the camera. null means
+  // the phone has not reported, which is not the same as "did not walk", so
+  // it shows as a dash rather than a zero.
+  const steps = s?.steps;
+
+  const SEVERITY = {
+    urgent:  { color: 'var(--danger, #dc2626)', label: 'Needs attention now' },
+    warning: { color: 'var(--warning)',         label: 'Worth a look' },
+    info:    { color: 'var(--info)',            label: 'Just so you know' },
+  };
 
   return (
     <div>
@@ -132,28 +144,75 @@ export default function ActivityFeed() {
               <div className="stat-icon accent"><Brain size={18} /></div>
               <div>
                 <div className="stat-value">{s ? s.social : '—'}</div>
-                <div className="stat-label">Social Moments</div>
+                <div className="stat-label">Social Interactions</div>
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon primary"><Clock size={18} /></div>
+              <div className="stat-icon primary"><Footprints size={18} /></div>
               <div>
-                <div className="stat-value">{s ? `${Math.floor(s.tracked_minutes / 60)}h ${s.tracked_minutes % 60}m` : '—'}</div>
-                <div className="stat-label">Time In Rooms</div>
+                <div className="stat-value">{steps == null ? '—' : steps.toLocaleString()}</div>
+                <div className="stat-label">Steps Today</div>
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon warning"><AlertTriangle size={18} /></div>
+              <div className="stat-icon info"><Package size={18} /></div>
               <div>
-                <div className="stat-value">{s ? s.anomalies : '—'}</div>
-                <div className="stat-label">Things To Check</div>
+                <div className="stat-value">{s ? s.items_seen : '—'}</div>
+                <div className="stat-label">Items Found</div>
               </div>
             </div>
           </div>
 
+          {/* Anomalies: the routine monitor's findings for this day, listed
+              rather than only counted. */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>Anomalies</div>
+            <div className="card-subtitle" style={{ marginBottom: 12 }}>
+              {anomalies.length
+                ? `${anomalies.length} thing${anomalies.length === 1 ? '' : 's'} LOCUS noticed`
+                : 'Nothing out of the ordinary'}
+            </div>
+            {anomalies.length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <ShieldCheck size={18} style={{ color: 'var(--success)' }} />
+                <span className="text-sm text-muted">
+                  The day matched the usual pattern. Missed doses, long stretches without
+                  movement and items left behind would appear here.
+                </span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {anomalies.map((a, i) => {
+                  const sev = SEVERITY[a.severity] || SEVERITY.info;
+                  return (
+                    <div key={`${a.at}-${i}`} style={{
+                      display: 'flex', gap: 10, padding: '10px 12px', borderRadius: 10,
+                      background: 'var(--surface-alt, rgba(0,0,0,0.02))',
+                      borderLeft: `3px solid ${sev.color}`,
+                    }}>
+                      <AlertTriangle size={16} style={{ color: sev.color, flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{a.title}</span>
+                          <span className="text-xs text-muted" style={{ flexShrink: 0 }}>{timeOf(a.at)}</span>
+                        </div>
+                        <div className="text-sm text-muted">{a.detail}</div>
+                        <div className="text-xs" style={{ color: sev.color, marginTop: 2 }}>{sev.label}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="card">
             <div className="card-title" style={{ marginBottom: 4 }}>Where the day was spent</div>
-            <div className="card-subtitle" style={{ marginBottom: 12 }}>Rooms the camera recognised</div>
+            <div className="card-subtitle" style={{ marginBottom: 12 }}>
+              {s?.tracked_minutes
+                ? `${Math.floor(s.tracked_minutes / 60)}h ${s.tracked_minutes % 60}m across the rooms the camera recognised`
+                : 'Rooms the camera recognised'}
+            </div>
             {s?.rooms?.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {s.rooms.map((room) => (
@@ -172,11 +231,13 @@ export default function ActivityFeed() {
             )}
           </div>
 
-          {s && s.items_seen > 0 && (
+          {steps == null && (
             <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-title" style={{ marginBottom: 4 }}>Tracked belongings</div>
-              <div className="text-sm text-muted">
-                {s.items_seen} sighting{s.items_seen === 1 ? '' : 's'} of items you asked LOCUS to keep an eye on.
+              <div className="card-title" style={{ marginBottom: 4 }}>No step count for this day</div>
+              <div className="text-sm text-muted" style={{ lineHeight: 1.6 }}>
+                Steps are counted by the phone, not the camera. Open the LOCUS app on the
+                phone and allow physical activity access. Phones without a step sensor
+                will not report one.
               </div>
             </div>
           )}
