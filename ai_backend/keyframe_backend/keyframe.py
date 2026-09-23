@@ -25,6 +25,57 @@ KEYFRAME_STORAGE_DIR = os.path.join(
 KEYFRAME_TTL_HOURS = int(os.environ.get("KEYFRAME_TTL_HOURS", 36))
 
 
+# ── Retention sweepers (Core FE-8) ──────────────────────────────────────────
+#
+# Retention used to be a side effect of WRITING. Each storage class started a
+# cleanup thread in its constructor, and ActivityStorage / ItemStorage are only
+# constructed when a frame is about to be saved. So when the camera stopped on
+# 21 Sep 2026 those objects were never built, their sweepers never ran, and
+# activities_storage kept 94 frames and items_storage 12 indefinitely -- while
+# keyframe_storage, whose constructor runs on every /api/keyframes request, was
+# swept clean. Frames outlived their TTL precisely because nothing was
+# happening, which is the opposite of a retention guarantee.
+#
+# Sweepers are now keyed by directory and started once, and start_all_retention()
+# starts every one at application boot whether or not anything is writing.
+_SWEEPERS = {}
+_SWEEPER_LOCK = threading.Lock()
+
+
+def _start_sweeper(storage):
+    """Start the cleanup loop for this storage's directory, once."""
+    key = os.path.abspath(storage.storage_dir)
+    with _SWEEPER_LOCK:
+        existing = _SWEEPERS.get(key)
+        if existing and existing.is_alive():
+            return existing
+        t = threading.Thread(target=storage._cleanup_loop, daemon=True,
+                             name=f"sweep:{os.path.basename(key)}")
+        t.start()
+        _SWEEPERS[key] = t
+        return t
+
+
+def start_all_retention():
+    """Bring every store under retention, regardless of write activity.
+
+    Called once at startup. Constructing each storage is what registers and
+    starts its sweeper; the objects themselves are discarded, because the
+    writers build their own when they need to save.
+    """
+    started = []
+    for cls in (KeyframeStorage, SocialInteractionStorage, ActivityStorage,
+                ItemStorage, MedicationEvidenceStorage):
+        try:
+            cls()
+            started.append(cls.__name__)
+        except Exception as e:
+            print(f"[Retention] could not start sweeper for {cls.__name__}: {e}")
+    print(f"[Retention] active for {len(started)} stores, TTL {KEYFRAME_TTL_HOURS}h: "
+          f"{', '.join(started)}")
+    return started
+
+
 class KeyframeStorage:
     """
     Persists keyframe images to disk with automatic TTL-based cleanup.
@@ -42,13 +93,12 @@ class KeyframeStorage:
         self.ttl_hours = ttl_hours
         os.makedirs(self.storage_dir, exist_ok=True)
 
-
-
-        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
-
-        self._cleanup_thread.start()
-
-        print(f"[KeyframeStorage] Initialized at: {self.storage_dir}")
+        # One sweeper per DIRECTORY, not per object. KeyframeStorage() is
+        # constructed on every /api/keyframes request, every pipeline start and
+        # every face-plugin init, so this used to spawn a fresh cleanup thread
+        # each time -- dozens of threads all scanning the same folder.
+        self._cleanup_thread = _start_sweeper(self)
+        print(f"[{self.__class__.__name__}] Initialized at: {self.storage_dir}")
 
         
 
@@ -463,12 +513,8 @@ class MedicationEvidenceStorage:
 
         os.makedirs(self.storage_dir, exist_ok=True)
 
-
-
-        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
-
-        self._cleanup_thread.start()
-
+        # Same single-sweeper-per-directory rule as KeyframeStorage.
+        self._cleanup_thread = _start_sweeper(self)
         print(f"[EvidenceStorage] Initialized at: {self.storage_dir}")
 
 
