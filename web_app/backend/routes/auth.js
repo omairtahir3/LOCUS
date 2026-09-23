@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
-const { sendEmail } = require('../utils/notifications');
+const { sendEmail, getLocusEmailHtml, getLocusEmailText } = require('../utils/notifications');
 const { OAuth2Client } = require('google-auth-library');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -155,58 +155,21 @@ router.post('/forgot-password', async (req, res) => {
     const appUrl = process.env.APP_URL || 'http://localhost:5173';
     const resetUrl = `${appUrl}/reset-password?token=${token}&id=${user._id}`;
 
+    // Same light green shell as every other LOCUS email (utils/notifications.js).
+    const parts = {
+      type: 'system',
+      kicker: 'Password reset',
+      title: 'Reset your LOCUS password',
+      message: `Someone asked to reset the password for ${user.email}. The link below works for the next 15 minutes and can only be used once.`,
+      ctaLabel: 'Choose a new password',
+      ctaUrl: resetUrl,
+      footNote: "If this wasn't you, you can ignore this email and your password stays as it is.",
+    };
     await sendEmail({
       to: user.email,
-      subject: '🔒 LOCUS Password Reset Request',
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #0f172a; padding: 40px 10px;">
-            <tr>
-              <td align="center">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #1e293b; border-radius: 16px; overflow: hidden; border: 1px solid #334155; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #090d16 0%, #172030 100%); padding: 32px; border-bottom: 3px solid #0ea5e9; text-align: center;">
-                      <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                        <tr><td align="center" style="font-size: 28px; font-weight: 900; letter-spacing: 2px; color: #ffffff;"><span style="color: #38bdf8;">⚡</span> LOCUS</td></tr>
-                        <tr><td align="center" style="font-size: 11px; font-weight: 700; letter-spacing: 4px; color: #94a3b8; padding-top: 6px;">COGNITIVE CARE ASSISTANT</td></tr>
-                      </table>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 40px 32px; color: #f8fafc;">
-                      <table border="0" cellpadding="0" cellspacing="0">
-                        <tr><td style="background-color: #0c4a6e; color: #38bdf8; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase;">🔒 PASSWORD RESET</td></tr>
-                      </table>
-                      <h1 style="margin: 22px 0 14px 0; font-size: 24px; font-weight: 800; color: #ffffff;">Reset Your Password</h1>
-                      <div style="font-size: 16px; color: #e2e8f0; line-height: 1.6; background-color: #0f172a; padding: 20px 24px; border-left: 4px solid #0ea5e9; border-radius: 8px; margin-top: 16px;">
-                        We received a request to reset the password for your LOCUS account (<b>${user.email}</b>). This secure reset link is valid for <b>15 minutes</b>.
-                      </div>
-                      <table border="0" cellpadding="0" cellspacing="0" style="margin-top: 28px; width: 100%;">
-                        <tr>
-                          <td align="center">
-                            <a href="${resetUrl}" style="background-color: #0ea5e9; color: #ffffff; font-weight: 700; font-size: 15px; padding: 16px 36px; border-radius: 8px; text-decoration: none; display: inline-block; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);">
-                              🔐 Reset My Password
-                            </a>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="background-color: #090d16; padding: 24px 32px; border-top: 1px solid #334155; text-align: center; font-size: 12px; color: #64748b;">
-                      If you did not request a password reset, please ignore this email. Your account password will remain unchanged.
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </body>
-        </html>
-      `
+      subject: 'Reset your LOCUS password',
+      html: getLocusEmailHtml(parts),
+      text: getLocusEmailText(parts),
     });
 
     res.json({ message: 'If that email is registered, a password reset link has been sent.' });

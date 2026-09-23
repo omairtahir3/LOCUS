@@ -56,7 +56,7 @@ if (emailConfigured) {
 }
 
 // Send an email notification via Nodemailer
-const sendEmail = async ({ to, subject, html }) => {
+const sendEmail = async ({ to, subject, html, text }) => {
   try {
     if (!emailConfigured) {
       // Simulated: log it, but do NOT report it as sent. Reporting simulated
@@ -70,6 +70,9 @@ const sendEmail = async ({ to, subject, html }) => {
       to,
       subject,
       html,
+      // Without a text/plain part, clients that do not render HTML fall back to
+      // stripping the markup, which is where stray tags and entities show up.
+      ...(text ? { text } : {}),
     };
 
     const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
@@ -117,169 +120,163 @@ const sendPushNotification = async ({ userId, title, body, payload = {} }) => {
   }
 };
 
-// Generate premium interactive HTML email template with LOCUS branding
-const getLocusEmailHtml = ({ title, message, type, medicationLogId, notificationId }) => {
+// ── Email ───────────────────────────────────────────────────────────────────
+//
+// One layout for every notification. The message body is written by
+// llmAgent.js (or its template) and arrives already in plain, warm language,
+// so the email's job is to present it and offer one clear thing to do -- not
+// to shout. The previous version wrapped every message, including "your dose
+// is confirmed", in a CRITICAL ALERT badge, an all-caps "LOCUS AUTONOMOUS AI
+// CARE PLATFORM" footer and a PRO TIP box describing buttons that were not on
+// the page; and it promised one-tap actions that only opened the app.
+//
+// Palette stays light green throughout. No exclamation marks, no all-caps, no
+// letter-spaced banners.
+
+// Text arrives from the agent and from user-entered names, and goes into HTML.
+// Only the three characters that can break markup are encoded; apostrophes and
+// quotes are left as they are so no reader ever sees &#39; or &quot;.
+const escapeHtml = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// A bare URL in a message (the map link in a lost-item alert) should be
+// tappable rather than a wall of characters to copy out by hand.
+const linkify = html => html.replace(
+  /https?:\/\/[^\s<>"]+[^\s<>".,;:!?)]/g,
+  u => `<a href="${u}" style="color: #059669;">${u}</a>`);
+
+// A message is one or two sentences, but anything that did arrive with line
+// breaks becomes real paragraphs rather than collapsing into a run-on line.
+const paragraphs = (text, style) => escapeHtml(text)
+  .split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+  .map(p => `<p style="${style}">${linkify(p.replace(/\n/g, '<br />'))}</p>`)
+  .join('');
+
+// Per type: the quiet label above the title, and the one action offered.
+// Links open the app -- none of these are one-tap endpoints, so none of them
+// claim to be.
+const EMAIL_TYPES = {
+  dose_reminder:               { kicker: 'Medication reminder', cta: 'Confirm in LOCUS',       path: '/medications' },
+  missed_dose:                 { kicker: 'Worth a check',       cta: 'Open LOCUS',             path: '/medications' },
+  camera_off_alert:            { kicker: 'Not confirmed',       cta: 'Confirm it by hand',     path: '/medications' },
+  skipped_medicine:            { kicker: 'Worth a check',       cta: 'Open LOCUS',             path: '/medications' },
+  dose_confirmed:              { kicker: 'All done',            cta: "See today's doses",      path: '/medications' },
+  emergency:                   { kicker: 'Needs you now',       cta: 'Open LOCUS',             path: '/dashboard' },
+  escalated:                   { kicker: 'Still waiting',       cta: 'Open LOCUS',             path: '/notifications' },
+  status_check:                { kicker: 'Check-in',            cta: 'Reply in LOCUS',         path: '/notifications' },
+  caregiver_message:           { kicker: 'Message',             cta: 'Read in LOCUS',          path: '/notifications' },
+  system:                      { kicker: 'Notice',              cta: 'Open LOCUS',             path: '/dashboard' },
+  routine_medication_gap:      { kicker: 'Medication',          cta: 'See the dose history',   path: '/medications' },
+  routine_inactivity:          { kicker: 'Needs you now',       cta: 'Open LOCUS',             path: '/dashboard' },
+  routine_camera_off:          { kicker: 'Camera',              cta: 'Check the camera',       path: '/dashboard' },
+  routine_deviation:           { kicker: 'A change in routine', cta: 'Open LOCUS',             path: '/dashboard' },
+  routine_left_behind:         { kicker: 'Your things',         cta: 'See where it was',       path: '/items' },
+  routine_habitual_item:       { kicker: 'Your things',         cta: 'See where it usually is', path: '/items' },
+  routine_item_lost:           { kicker: 'Your things',         cta: 'See where it was',       path: '/items' },
+  routine_item_lost_escalated: { kicker: 'Needs you now',       cta: 'Open LOCUS',             path: '/dashboard' },
+};
+
+/**
+ * @param {string}  title          already written for a person, sentence case
+ * @param {string}  message        one or two sentences, plain language
+ * @param {string}  type           Notification.type
+ * @param {string}  [detailLabel]  e.g. 'Scheduled for'   (optional row)
+ * @param {string}  [detailValue]  e.g. 'Monday 22 September, 2:00 PM'
+ * @param {string}  [linkLabel]    e.g. 'Where it was last seen'  (optional row)
+ * @param {string}  [linkUrl]      a plain https link the reader can tap
+ * @param {string}  [kicker]       overrides the type's label
+ * @param {string}  [ctaLabel]     overrides the type's button, for one-off
+ * @param {string}  [ctaUrl]       emails such as a password reset
+ * @param {string}  [footNote]     replaces the standard footer sentence
+ */
+const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, linkLabel, linkUrl, kicker, ctaLabel, ctaUrl, footNote }) => {
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
-  const logoSrc = 'cid:locuslogo';
-  
-  let badgeText = 'SYSTEM NOTIFICATION';
-  let badgeColor = '#064E3B'; // Dark green
-  let badgeBg = '#D1FAE5';    // Light green
-  let accentColor = '#10B981'; // Green
-  
-  if (type === 'dose_reminder') {
-    badgeText = 'MEDICATION REMINDER';
-    badgeColor = '#064E3B'; badgeBg = '#D1FAE5'; accentColor = '#10B981';
-  } else if (type === 'missed_dose' || type === 'emergency' || type === 'escalated') {
-    badgeText = 'CRITICAL ALERT';
-    badgeColor = '#064E3B'; badgeBg = '#D1FAE5'; accentColor = '#10B981';
-  } else if (type === 'status_check') {
-    badgeText = 'STATUS CHECK';
-    badgeColor = '#064E3B'; badgeBg = '#D1FAE5'; accentColor = '#10B981';
-  } else if (type === 'caregiver_message') {
-    badgeText = 'CAREGIVER MESSAGE';
-    badgeColor = '#064E3B'; badgeBg = '#D1FAE5'; accentColor = '#10B981';
-  }
+  const base = EMAIL_TYPES[type] || EMAIL_TYPES.system;
+  const t = {
+    kicker: kicker || base.kicker,
+    cta: ctaLabel || base.cta,
+    href: ctaUrl || `${appUrl}${base.path}`,
+  };
 
-  let actionButtons = '';
-  if (type === 'dose_reminder') {
-    actionButtons = `
-      <table border="0" cellpadding="0" cellspacing="0" style="margin-top: 28px; width: 100%;">
-        <tr>
-          <td align="center">
-            <a href="${appUrl}/medications" style="background-color: #10B981; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 6px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);">
-              ✓ Confirm Dose Taken
-            </a>
-            <a href="${appUrl}/medications" style="background-color: #F59E0B; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 6px; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);">
-              Snooze 10m
-            </a>
-          </td>
-        </tr>
-      </table>
-    `;
-  } else if (type === 'status_check') {
-    actionButtons = `
-      <table border="0" cellpadding="0" cellspacing="0" style="margin-top: 28px; width: 100%;">
-        <tr>
-          <td align="center">
-            <a href="${appUrl}/notifications" style="background-color: ${accentColor}; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 6px; box-shadow: 0 4px 12px rgba(13, 148, 136, 0.4);">
-              I'm Okay
-            </a>
-            <a href="${appUrl}/notifications" style="background-color: #475569; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 6px;">
-              Please Call Me
-            </a>
-          </td>
-        </tr>
-      </table>
-    `;
-  } else {
-    actionButtons = `
-      <table border="0" cellpadding="0" cellspacing="0" style="margin-top: 28px; width: 100%;">
-        <tr>
-          <td align="center">
-            <a href="${appUrl}/dashboard" style="background-color: ${accentColor}; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 32px; border-radius: 8px; text-decoration: none; display: inline-block; box-shadow: 0 4px 12px rgba(13, 148, 136, 0.4);">
-              Open Live Dashboard
-            </a>
-          </td>
-        </tr>
-      </table>
-    `;
-  }
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #ECFDF5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; -webkit-font-smoothing: antialiased;">
-      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ECFDF5; padding: 40px 10px;">
-        <tr>
-          <td align="center">
-            <!-- Main Card -->
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #D1FAE5; border-radius: 16px; overflow: hidden; border: 1px solid #10B981; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);">
-              
-              <!-- Header Brand & Logo -->
+  const detailRow = (detailLabel && detailValue) ? `
               <tr>
-                <td style="background-color: #A7F3D0; padding: 32px; border-bottom: 3px solid ${accentColor}; text-align: center;">
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <td style="padding: 0 32px;">
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F0FDF4; border-radius: 10px;">
                     <tr>
-                      <td align="center">
-                        <img src="${logoSrc}" alt="LOCUS" height="48" style="vertical-align: middle;" />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td align="center" style="font-size: 11px; font-weight: 700; letter-spacing: 4px; color: #047857; padding-top: 12px;">
-                        COGNITIVE CARE ASSISTANT
+                      <td style="padding: 14px 18px; font-size: 14px; color: #047857; line-height: 1.5;">
+                        ${escapeHtml(detailLabel)} <span style="color: #064E3B; font-weight: 600;">${escapeHtml(detailValue)}</span>
                       </td>
                     </tr>
                   </table>
                 </td>
-              </tr>
+              </tr>` : '';
 
-              <!-- Body Section -->
+  const linkRow = (linkLabel && linkUrl) ? `
               <tr>
-                <td style="padding: 40px 32px; background-color: #FFFFFF; color: #064E3B;">
-                  
-                  <!-- Badge -->
-                  <table border="0" cellpadding="0" cellspacing="0">
-                    <tr>
-                      <td style="background-color: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase;">
-                        ${badgeText}
-                      </td>
-                    </tr>
-                  </table>
-
-                  <!-- Title -->
-                  <h1 style="margin: 22px 0 14px 0; font-size: 24px; font-weight: 800; color: #064E3B; line-height: 1.3;">
-                    ${title}
-                  </h1>
-
-                  <!-- Message -->
-                  <div style="font-size: 16px; color: #065F46; line-height: 1.6; background-color: #ECFDF5; padding: 20px 24px; border-left: 4px solid ${accentColor}; border-radius: 8px; margin-top: 16px;">
-                    ${message}
-                  </div>
-
-                  <!-- Interactive Action Buttons -->
-                  ${actionButtons}
-
+                <td style="padding: 12px 32px 0 32px; font-size: 14px; color: #047857; line-height: 1.5;">
+                  ${escapeHtml(linkLabel)}: <a href="${escapeHtml(linkUrl)}" style="color: #059669;">${escapeHtml(linkUrl)}</a>
                 </td>
-              </tr>
+              </tr>` : '';
 
-              <!-- Helpful Pro-Tip Box -->
-              <tr>
-                <td style="padding: 0 32px 32px 32px; background-color: #FFFFFF;">
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #D1FAE5; border-radius: 12px; padding: 18px; border: 1px dashed #34D399;">
-                    <tr>
-                      <td style="font-size: 13px; color: #047857; line-height: 1.5;">
-                        <span style="color: ${accentColor}; font-weight: 700;">PRO TIP:</span> You can confirm medication doses, snooze alerts, or respond to caregiver check-ins directly with a single tap using the interactive buttons above.
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F0FDF4; -webkit-font-smoothing: antialiased;">
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0;">${escapeHtml(message)}</div>
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F0FDF4; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="max-width: 560px; background-color: #FFFFFF; border: 1px solid #D1FAE5; border-radius: 14px; overflow: hidden; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
 
-              <!-- Footer Section -->
-              <tr>
-                <td style="background-color: #ECFDF5; padding: 28px 32px; border-top: 1px solid #6EE7B7; text-align: center; font-size: 12px; color: #047857; line-height: 1.6;">
-                  <p style="margin: 0 0 8px 0; font-weight: 700; color: #059669; letter-spacing: 1px;">
-                    LOCUS AUTONOMOUS AI CARE PLATFORM
-                  </p>
-                  <p style="margin: 0;">
-                    This is an automated healthcare notification. If you are experiencing a medical emergency, please contact your local emergency services immediately.<br>
-                    <a href="${appUrl}/settings" style="color: ${accentColor}; text-decoration: underline; margin-top: 10px; display: inline-block;">Manage Notification Settings</a>
-                  </p>
-                </td>
-              </tr>
+          <tr>
+            <td style="background-color: #ECFDF5; padding: 20px 32px; border-bottom: 1px solid #D1FAE5;">
+              <img src="cid:locuslogo" alt="LOCUS" height="28" style="display: block; border: 0;" />
+            </td>
+          </tr>
 
-            </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `;
+          <tr>
+            <td style="padding: 32px 32px 4px 32px;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #059669;">${escapeHtml(t.kicker)}</p>
+              <h1 style="margin: 0 0 16px 0; font-size: 22px; font-weight: 600; color: #064E3B; line-height: 1.35;">${escapeHtml(title)}</h1>
+              ${paragraphs(message, 'margin: 0 0 14px 0; font-size: 16px; color: #1F2937; line-height: 1.65;')}
+            </td>
+          </tr>
+${detailRow}${linkRow}
+          <tr>
+            <td style="padding: 22px 32px 32px 32px;">
+              <a href="${escapeHtml(t.href)}" style="display: inline-block; background-color: #10B981; color: #FFFFFF; font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 9px; text-decoration: none;">${escapeHtml(t.cta)}</a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color: #ECFDF5; padding: 20px 32px; border-top: 1px solid #D1FAE5; font-size: 12px; color: #047857; line-height: 1.7;">
+              ${escapeHtml(footNote || 'LOCUS sent this automatically. It is not medical advice, and in an emergency please call your local emergency number.')}<br />
+              <a href="${appUrl}/settings" style="color: #059669;">Choose which emails you get</a>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+};
+
+/** The text/plain alternative, for clients that do not render HTML. */
+const getLocusEmailText = ({ title, message, type, detailLabel, detailValue, linkLabel, linkUrl, ctaLabel, ctaUrl, footNote }) => {
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const base = EMAIL_TYPES[type] || EMAIL_TYPES.system;
+  const blocks = [title, message];
+  if (detailLabel && detailValue) blocks.push(`${detailLabel} ${detailValue}`);
+  if (linkLabel && linkUrl) blocks.push(`${linkLabel}: ${linkUrl}`);
+  blocks.push(`${ctaLabel || base.cta}: ${ctaUrl || appUrl + base.path}`);
+  blocks.push((footNote || 'LOCUS sent this automatically. It is not medical advice, and in an emergency please call your local emergency number.')
+    + `\nChoose which emails you get: ${appUrl}/settings`);
+  return blocks.join('\n\n');
 };
 
 // Create a notification record in DB and optionally send email & push
@@ -295,16 +292,20 @@ const createNotification = async ({
   sendEmailTo = null,
   sendPush = true,
 }) => {
-  let finalMessage = message;
+  // The scheduled time used to be glued onto the message as
+  // "\n\n(Scheduled for: ...)". Those newlines collapse in HTML, so both the
+  // email and the notifications page showed a parenthesis jammed onto the end
+  // of the sentence. It travels as its own field now and is laid out as a row.
+  let detailLabel = null, detailValue = null;
   if (medicationLogId) {
     const MedicationLog = require('../models/MedicationLog');
     const log = await MedicationLog.findById(medicationLogId);
     if (log && log.scheduled_time) {
-      const dtStr = new Date(log.scheduled_time).toLocaleString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric',
-        hour: 'numeric', minute: '2-digit', hour12: true
+      detailLabel = 'Scheduled for';
+      detailValue = new Date(log.scheduled_time).toLocaleString('en-US', {
+        weekday: 'long', day: 'numeric', month: 'long',
+        hour: 'numeric', minute: '2-digit', hour12: true,
       });
-      finalMessage = `${message}\n\n(Scheduled for: ${dtStr})`;
     }
   }
 
@@ -313,7 +314,7 @@ const createNotification = async ({
     subject_user_id: subjectUserId,
     type,
     title,
-    message: finalMessage,
+    message,
     medication_id: medicationId,
     medication_log_id: medicationLogId,
     requires_acknowledgement: requiresAcknowledgement,
@@ -328,10 +329,12 @@ const createNotification = async ({
 
   // Send email if requested
   if (sendEmailTo) {
+    const parts = { title, message, type, detailLabel, detailValue };
     const sent = await sendEmail({
       to: sendEmailTo,
       subject: title,
-      html: getLocusEmailHtml({ title, message, type, medicationLogId, notificationId: notification._id }),
+      html: getLocusEmailHtml(parts),
+      text: getLocusEmailText(parts),
     });
     updates['delivery.email.sent'] = sent;
     updates['delivery.email.sent_at'] = sent ? new Date() : null;
@@ -383,7 +386,6 @@ const notifyUserDoseReminder = async (user, medication, log) => {
 // Notify all caregivers of a user about a missed dose
 const notifyCaregiversMissedDose = async (user, medication, logId) => {
   if (!user.caregiver_ids || user.caregiver_ids.length === 0) return;
-  const appUrl = process.env.APP_URL || 'http://localhost:5173';
 
   const User = require('../models/User');
   const MedicationLog = require('../models/MedicationLog');
@@ -393,11 +395,14 @@ const notifyCaregiversMissedDose = async (user, medication, logId) => {
   for (const caregiver of caregivers) {
     if (!caregiver.notification_prefs?.missed_dose) continue;
 
+    // camera_off and skipped used to be written here by hand, as
+    // "Camera Offline: Panadol Unverified / ... Please verify manually." The
+    // agent already distinguishes "could not see it" from "was missed" and
+    // says so in plain words, so both cases go through it. Pre-generated text
+    // is only used for a genuine miss: it was written with missed wording.
     let title, message;
-    if (log && (log.status === 'camera_off' || log.status === 'skipped')) {
-      title = `Camera Offline: ${medication.name} Unverified`;
-      message = `We couldn't verify if ${user.name} took their ${medication.name} because the camera was offline. Please verify manually.`;
-    } else if (log && log.pre_generated_missed_title && log.pre_generated_missed_message) {
+    const cameraOff = log && (log.status === 'camera_off' || log.status === 'skipped');
+    if (!cameraOff && log && log.pre_generated_missed_title && log.pre_generated_missed_message) {
       title = log.pre_generated_missed_title;
       message = log.pre_generated_missed_message;
     } else {
@@ -406,29 +411,12 @@ const notifyCaregiversMissedDose = async (user, medication, logId) => {
       message = aiContent.message;
     }
 
-    // If it's a camera_off event, provide a Mark as Taken button for caregivers
-    let actionButtons = '';
-    if (log.status === 'camera_off' || log.status === 'skipped') {
-      actionButtons = `
-        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 24px;">
-          <tr>
-            <td align="left">
-              <a href="${appUrl}/api/medications/logs/${logId}/taken?caregiver=${caregiver._id}" style="display: inline-block; padding: 12px 24px; background-color: #10b981; color: #ffffff; text-decoration: none; font-weight: 700; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                ✓ Mark as Taken
-              </a>
-            </td>
-          </tr>
-        </table>
-      `;
-    }
-
     await createNotification({
       recipientId: caregiver._id,
       subjectUserId: user._id,
       type: log.status === 'camera_off' ? 'camera_off_alert' : 'missed_dose',
       title: title,
       message: message,
-      actionButtons,
       medicationId: medication._id,
       medicationLogId: logId,
       requiresAcknowledgement: true,
@@ -494,11 +482,11 @@ const notifyUserMissedDose = async (user, medication, logId) => {
   const MedicationLog = require('../models/MedicationLog');
   const log = await MedicationLog.findById(logId) || {};
 
+  // Same as the caregiver path: the agent phrases camera_off as "we couldn't
+  // see it", never as a missed dose, so it is not written by hand here.
   let title, message;
-  if (log && (log.status === 'camera_off' || log.status === 'skipped')) {
-    title = `Camera Offline: Could not verify ${medication.name}`;
-    message = `Your camera was offline during your scheduled time for ${medication.name}, so we couldn't automatically verify if you took it.`;
-  } else if (log && log.pre_generated_missed_title && log.pre_generated_missed_message) {
+  const cameraOff = log && (log.status === 'camera_off' || log.status === 'skipped');
+  if (!cameraOff && log && log.pre_generated_missed_title && log.pre_generated_missed_message) {
     title = log.pre_generated_missed_title;
     message = log.pre_generated_missed_message;
   } else {
@@ -539,10 +527,12 @@ const escalateAlert = async (notification) => {
   // {sent: true, failed: true} -- and the failure was invisible from the UI.
   let emailSent = false;
   if (recipient.email) {
+    const parts = { title: escTitle, message: escMsg, type: 'escalated' };
     emailSent = await sendEmail({
       to: recipient.email,
       subject: escTitle,
-      html: getLocusEmailHtml({ title: escTitle, message: escMsg, type: 'escalated', notificationId: notification._id }),
+      html: getLocusEmailHtml(parts),
+      text: getLocusEmailText(parts),
     });
   }
   const pushSent = await sendPushNotification({ userId: recipient._id, title: escTitle, body: escMsg });
@@ -572,4 +562,5 @@ module.exports = {
   sendEmail,
   sendPushNotification,
   getLocusEmailHtml,
+  getLocusEmailText,
 };
