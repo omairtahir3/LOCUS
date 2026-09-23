@@ -45,6 +45,18 @@ const NotificationSchema = new mongoose.Schema({
     sms:   { sent: Boolean, sent_at: Date, failed: Boolean },
   },
 
+  // Last line of defence against the same alert being written twice. Callers
+  // that can name the exact event ("this log, this reminder number, this
+  // recipient") pass a dedup_key and the unique index below rejects a repeat,
+  // whichever process or overlapping cron pass got there second.
+  //
+  // Notifications with no natural key leave the field ABSENT, not null: a
+  // sparse unique index skips missing fields but still indexes explicit
+  // nulls, so `default: null` plus sparse makes every keyless notification
+  // collide with the previous one. The index below is partial on $type
+  // 'string', which is correct whichever way the field is left.
+  dedup_key:    { type: String, default: undefined },
+
   is_read:      { type: Boolean, default: false },
   read_at:      { type: Date, default: null },
   is_dismissed: { type: Boolean, default: false },
@@ -60,5 +72,9 @@ const NotificationSchema = new mongoose.Schema({
 NotificationSchema.index({ recipient_id: 1, createdAt: -1 });
 NotificationSchema.index({ recipient_id: 1, is_read: 1 });
 NotificationSchema.index({ recipient_id: 1, is_dismissed: 1 });
+NotificationSchema.index({ dedup_key: 1 }, {
+  unique: true,
+  partialFilterExpression: { dedup_key: { $type: 'string' } },
+});
 
 module.exports = mongoose.model('Notification', NotificationSchema);

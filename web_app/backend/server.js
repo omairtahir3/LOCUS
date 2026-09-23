@@ -25,6 +25,20 @@ connectDB();
 const notificationScheduler = require('./utils/notificationScheduler');
 notificationScheduler.init();
 
+// The unique dedup_key index is what stops the same alert being written twice
+// when two scheduler passes overlap. Give the connection a moment first.
+const notificationUtils = require('./utils/notifications');
+setTimeout(() => { notificationUtils.ensureDedupIndex(); }, 3000);
+
+// Anything still held in the email coalescing window goes out before we exit,
+// rather than being lost on a restart.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    try { await notificationUtils.flushEmails(); } catch (e) { console.error('[Email] flush on exit failed:', e.message); }
+    process.exit(0);
+  });
+}
+
 const eventLogRetention = require('./utils/eventLogRetention');
 eventLogRetention.init();
 
