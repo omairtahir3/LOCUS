@@ -17,6 +17,7 @@ from bson import ObjectId
 from database import get_db
 from ai.pipeline import MedicationDetectionPipeline
 from db_config import get_client, get_db_name
+from service_config import get_locus_api_url
 
 # Optional GoPro auto-control via Open GoPro API
 _gopro_session = None
@@ -314,7 +315,7 @@ async def _fire_system_alert(user_id, medication_id, status, notes):
                 "notes": notes
             }
             # Fire and forget; if it fails, we just log and move on
-            async with session.post("http://localhost:5000/api/notifications/system-alert", json=payload) as response:
+            async with session.post(f"{get_locus_api_url()}/api/notifications/system-alert", json=payload) as response:
                 if response.status not in (200, 201):
                     print(f"[Scheduler] Warning: Failed to send system alert. Status {response.status}")
     except Exception as e:
