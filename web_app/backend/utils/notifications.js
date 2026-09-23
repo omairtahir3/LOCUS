@@ -103,12 +103,18 @@ const sendEmail = async ({ to, subject, html, text }) => {
       ...(text ? { text } : {}),
     };
 
-    const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
-    if (fs.existsSync(logoPath)) {
+    // The app logo is black artwork on transparency, which disappears against
+    // a dark header and against whatever background a client in dark mode
+    // decides to paint. assets/logo-email.png is the same mark in white, and
+    // it sits on an explicit dark green band, so it is legible either way.
+    const logoPath = path.join(__dirname, '../assets/logo-email.png');
+    const fallbackLogo = path.join(__dirname, '../../frontend/public/logo.png');
+    const logo = fs.existsSync(logoPath) ? logoPath : (fs.existsSync(fallbackLogo) ? fallbackLogo : null);
+    if (logo) {
       mailOptions.attachments = [{
         filename: 'logo.png',
-        path: logoPath,
-        cid: 'locuslogo'
+        path: logo,
+        cid: 'locuslogo',
       }];
     }
 
@@ -260,8 +266,8 @@ const getLocusEmailHtml = ({ title, message, type, detailLabel, detailValue, lin
         <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="max-width: 560px; background-color: #FFFFFF; border: 1px solid #D1FAE5; border-radius: 14px; overflow: hidden; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
 
           <tr>
-            <td style="background-color: #ECFDF5; padding: 20px 32px; border-bottom: 1px solid #D1FAE5;">
-              <img src="cid:locuslogo" alt="LOCUS" height="28" style="display: block; border: 0;" />
+            <td style="background-color: #064E3B; padding: 20px 32px;">
+              <img src="cid:locuslogo" alt="LOCUS" width="105" height="30" style="display: block; border: 0; width: 105px; height: 30px; color: #FFFFFF; font-size: 20px; font-weight: 700; letter-spacing: 2px;" />
             </td>
           </tr>
 
