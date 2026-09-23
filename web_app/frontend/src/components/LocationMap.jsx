@@ -1,5 +1,6 @@
 import React from 'react';
 import { GoogleMap, Marker, useLoadScript } from '@react-google-maps/api';
+import { formatClockTime } from '../utils/dateUtils';
 
 const mapContainerStyle = {
   width: '100%',
@@ -27,7 +28,7 @@ const LocationMap = ({ lat, lng, timestamp }) => {
       >
         <Marker 
           position={center} 
-          title={timestamp ? `Last updated: ${new Date(timestamp).toLocaleTimeString()}` : "Current Location"} 
+          title={timestamp ? `Last updated: ${formatClockTime(timestamp)}` : "Current Location"} 
         />
       </GoogleMap>
     </div>

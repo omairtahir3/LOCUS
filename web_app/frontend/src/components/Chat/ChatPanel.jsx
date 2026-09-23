@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSelectedUser } from '../../context/SelectedUserContext';
 import { authAPI } from '../../services/api';
 import { Send, X, AlertCircle, MessageCircle } from 'lucide-react';
+import { formatClockTime } from '../../utils/dateUtils';
 
 const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose }) => {
   const { user } = useAuth();
@@ -80,7 +81,7 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose })
   const formatTime = (isoString) => {
     if (!isoString) return '';
     const d = new Date(isoString);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatClockTime(d);
   };
 
   return (

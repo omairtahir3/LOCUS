@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User, AlertTriangle } from 'lucide-react';
 import UserSelector from '../components/Layout/UserSelector';
+import { formatDateTime12h } from '../utils/dateUtils';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -294,7 +295,7 @@ export default function KeyframeAudit() {
                       {ev.medication_name || 'Unknown'} · {ev.detection_status || ''}
                     </div>
                     <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                      {(ev.saved_at || ev.detected_at) ? new Date(ev.saved_at || ev.detected_at).toLocaleString() : ''}
+                      {(ev.saved_at || ev.detected_at) ? formatDateTime12h(ev.saved_at || ev.detected_at) : ''}
                     </div>
                   </div>
                 </div>
@@ -372,7 +373,7 @@ export default function KeyframeAudit() {
                         {ev.medication_name || 'Unknown'} · {((ev.detection_confidence || ev.phase_score || 0) * 100).toFixed(0)}% confidence
                       </div>
                       <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                        {(ev.saved_at || ev.detected_at) ? new Date(ev.saved_at || ev.detected_at).toLocaleString() : ''}
+                        {(ev.saved_at || ev.detected_at) ? formatDateTime12h(ev.saved_at || ev.detected_at) : ''}
                       </div>
                       </div>
                     </div>
@@ -432,7 +433,7 @@ export default function KeyframeAudit() {
                     <div style={{ padding: '12px' }}>
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>Unknown Person Detected</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-                        {new Date(ev.timestamp).toLocaleString()}
+                        {formatDateTime12h(ev.timestamp)}
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => setNamingEvent(ev)}>Name Person</button>
@@ -496,7 +497,7 @@ export default function KeyframeAudit() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Clock size={12} />
-                        {kf.saved_at ? new Date(kf.saved_at).toLocaleString() : 'Unknown time'}
+                        {kf.saved_at ? formatDateTime12h(kf.saved_at) : 'Unknown time'}
                         {user?.role === 'caregiver' && (
                           <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
                             <User size={10} style={{ marginRight: 4 }} />
