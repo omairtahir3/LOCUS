@@ -12,6 +12,48 @@ const AI_BACKEND_URL = process.env.AI_BACKEND_URL || 'http://localhost:8000';
  * Resolve the target user ID for item operations.
  * Caregivers operate on behalf of their monitored elderly user.
  */
+// The cosine similarity the AI backend's matcher demands before it will call a
+// crop "this person's Phone" (item_indexer.EXEMPLAR_MATCH_THRESHOLD). Kept here
+// only to judge whether a gallery could ever clear it.
+const MATCH_THRESHOLD = 0.74;
+
+/**
+ * How much an item's own enrolment photos agree with each other.
+ *
+ * This is the difference between an item that works and one that silently never
+ * matches anything. Osaid's "Phone" was enrolled from 4 photos whose pairwise
+ * similarity ran 0.507 to 0.849, mean 0.699 -- below the 0.74 the matcher
+ * requires. The gallery could not match ITSELF at the bar a novel view has to
+ * clear, so the phone was never once recognised, and nothing anywhere said so:
+ * the item looked perfectly healthy in the UI, with four embeddings and an
+ * enrolment photo. Lowering the threshold is not the answer, because the
+ * measured false positives sit at 0.663-0.714 (a computer mouse matched
+ * "Phone" at 0.663). The answer is to notice at enrolment time and ask for
+ * better photos.
+ */
+function galleryCoherence(embeddings) {
+  const vecs = (embeddings || []).filter(e => Array.isArray(e) && e.length);
+  if (vecs.length < 2) return null;
+  const cos = (a, b) => {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+  };
+  const sims = [];
+  for (let i = 0; i < vecs.length; i++)
+    for (let j = i + 1; j < vecs.length; j++) sims.push(cos(vecs[i], vecs[j]));
+  const mean = sims.reduce((a, b) => a + b, 0) / sims.length;
+  const min = Math.min(...sims);
+  return {
+    mean: Number(mean.toFixed(3)),
+    min: Number(min.toFixed(3)),
+    pairs: sims.length,
+    // Below the matcher's own bar this item cannot reliably be recognised.
+    matchable: mean >= MATCH_THRESHOLD,
+    threshold: MATCH_THRESHOLD,
+  };
+}
+
 async function resolveUserId(req) {
   let userId = req.user.id;
   if (req.user.role === 'caregiver') {
@@ -71,8 +113,26 @@ router.post('/enroll', auth, async (req, res) => {
       is_active: true
     });
 
+    const coherence = galleryCoherence(embeddings);
     console.log(`[UserItems] Enrolled "${item_name}" for user ${userId} with ${embeddings.length} embeddings (${embeddings[0]?.length || 0}-D)`);
-    res.status(201).json(item);
+    if (coherence && !coherence.matchable) {
+      console.warn(`[UserItems] "${item_name}" may never be recognised: its own photos `
+        + `agree at only ${coherence.mean} (lowest pair ${coherence.min}), below the `
+        + `${MATCH_THRESHOLD} the matcher requires. Retake with the item filling the frame, `
+        + `same lighting, a few angles.`);
+    }
+    // Returned so the enrolment screen can say so rather than reporting success
+    // on an item that will never match anything.
+    res.status(201).json({
+      ...item.toObject(),
+      item_embeddings: undefined,
+      gallery: coherence,
+      warning: coherence && !coherence.matchable
+        ? `These photos are too different from each other for "${item_name}" to be `
+          + `recognised reliably. Retake them with the item filling the frame, in the `
+          + `same lighting, from a few angles.`
+        : undefined,
+    });
   } catch (error) {
     console.error('Error enrolling item:', error);
     res.status(500).json({ error: 'Server error' });
@@ -84,10 +144,15 @@ router.post('/enroll', auth, async (req, res) => {
 router.get('/', auth, async (req, res) => {
   try {
     const userId = await resolveUserId(req);
+    // Embeddings are read but never sent: they are needed to judge whether each
+    // gallery can actually be matched, and an item that cannot is worth saying
+    // so on the list, not only at the moment it was enrolled.
     const items = await UserItem.find({ user_id: userId, is_active: true })
-      .select('-item_embeddings')  // Don't send large embedding arrays to the client
-      .sort({ createdAt: -1 });
-    res.json(items);
+      .sort({ createdAt: -1 }).lean();
+    res.json(items.map(({ item_embeddings, ...rest }) => ({
+      ...rest,
+      gallery: galleryCoherence(item_embeddings),
+    })));
   } catch (error) {
     console.error('Error fetching items:', error);
     res.status(500).json({ error: 'Server error' });

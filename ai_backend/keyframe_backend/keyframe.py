@@ -80,6 +80,16 @@ EVENT_BLUR_RATIO = float(os.environ.get("EVENT_BLUR_RATIO", 0.6))
 # high-resolution camera rather than exhausting memory on a long session.
 EVENT_WINDOW_MAX_BYTES = int(os.environ.get("EVENT_WINDOW_MAX_BYTES", 64 * 1024 * 1024))
 
+# A frame this dark holds no evidence and must not be saved, whatever triggered
+# it. Sharpness does not catch this: a nearly black frame can have perfectly
+# good Laplacian variance from sensor noise, and two frames in the 25 Sep
+# recording were stored at mean luminance 4.9 and 7.8, with 99% and 95% of
+# their pixels below 40. They show nothing. They also cost more than disk: every
+# saved frame is fed to the room classifier, where a frame that recognises
+# nothing keeps an open session coasting instead of closing it, so blank frames
+# actively stretch a session over rooms the wearer had already left.
+MIN_FRAME_LUMINANCE = float(os.environ.get("MIN_FRAME_LUMINANCE", 15.0))
+
 
 # ── Retention sweepers (Core FE-8) ──────────────────────────────────────────
 #
@@ -1094,6 +1104,21 @@ class KeyframeExtractor:
             self._last_any_save = now
 
         best = max(candidates, key=lambda c: c["blur_score"])
+
+        # Blank frames are rejected for EVERY kind, including medication. A
+        # blurred dose is still evidence; a black one is not evidence of
+        # anything, so there is nothing to preserve by keeping it.
+        try:
+            luminance = float(cv2.cvtColor(best["frame"], cv2.COLOR_BGR2GRAY).mean())
+        except Exception:
+            luminance = MIN_FRAME_LUMINANCE      # unreadable: do not reject on it
+        if luminance < MIN_FRAME_LUMINANCE:
+            print(f"[KeyframeExtractor] {kind} capture rejected as blank: "
+                  f"luminance {luminance:.1f} < {MIN_FRAME_LUMINANCE}")
+            with self._recent_lock:
+                self._last_event_save[kind] = prev_kind_save
+                self._last_any_save = prev_any_save
+            return None
 
         # Medication is the one event we never drop for softness: a blurred
         # record of a dose is evidence, and no record is a missed dose.
