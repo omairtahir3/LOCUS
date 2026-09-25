@@ -55,6 +55,13 @@ const LEFT_BEHIND_WINDOW_MIN = 10;
 // to still be useful while they are in the same building.
 const LEFT_BEHIND_AFTER_MIN = 10;
 
+// How long after a room session ends a sighting may still count as having
+// happened in that room. One keyframe's worth, no more: a session ends at its
+// last confirmed sighting of the room, so a genuine last glimpse of the item
+// can trail it by a frame, but anything later means the item is still being
+// seen and therefore went with the wearer.
+const LEFT_BEHIND_EXIT_TOLERANCE_MS = 60 * 1000;
+
 // ── Outdoor item loss (both roles) — Core FE-12, FE-15 ──────────────────────
 // A chest camera cannot see an item in a pocket or a bag, so "not seen for N
 // minutes outdoors" would fire constantly and is NOT the rule. The detectable
@@ -258,7 +265,9 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
   // in a pocket, so it would fire constantly. An item we watched leave the hand
   // onto a surface is a different claim: we know where it is, and we know it is
   // not on the person.
-  if (!isWakingHours(now)) return [];
+  // No waking-hours gate. "You left your phone in the kitchen" is worth saying
+  // whenever the wearer is up; the gate meant a 22:52 sighting could only have
+  // alerted at 23:02, by which time the gate had closed and the alert was lost.
   const out = [];
   const cutoff = minutesAgo(LEFT_BEHIND_AFTER_MIN, now);
 
@@ -287,7 +296,49 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
     }
   }
 
+  // ── Trigger 1: the wearer has just LEFT a room ───────────────────────────
+  //
+  // This is the moment that matters and it needs no waiting. A room session is
+  // written when the visit ends, so a session that appeared since the last run
+  // IS a room the wearer has walked out of. If a belonging was last seen put
+  // down in that room and has not been seen since, it is still in there.
+  //
+  // Waiting ten minutes instead meant the alert arrived long after the wearer
+  // could have turned round, and on one evening it never arrived at all.
+  const justLeft = await EventLog.find({
+    user_id: { $in: idForms(user._id) }, 'details.action': 'scene_session',
+    updatedAt: { $gte: sinceRun },
+  }).lean();
+
+  const alerted = new Set();
+  for (const sess of justLeft) {
+    const room = sess.details?.scene;
+    const start = new Date(sess.timestamp);
+    const end = new Date(+start + (sess.details?.duration_seconds || 0) * 1000);
+    const grace = LEFT_BEHIND_WINDOW_MIN * 60000;
+    for (const [itemId, s] of lastSeen) {
+      if (alerted.has(itemId) || !s.placed) continue;
+      // Seen inside that visit. The tolerance is generous on the way IN,
+      // because keyframes are sparse and the first sighting of a room often
+      // predates the session being confirmed, but nearly nothing on the way
+      // OUT: an item seen well after the wearer left that room is an item they
+      // took with them, and reporting it as left behind would be exactly
+      // backwards.
+      if (s.at < new Date(+start - grace)) continue;
+      if (s.at > new Date(+end + LEFT_BEHIND_EXIT_TOLERANCE_MS)) continue;
+      const seenSince = await EventLog.exists({
+        user_id: { $in: idForms(user._id) }, event_type: 'object',
+        'details.items.enrolled_item_id': itemId, timestamp: { $gt: s.at },
+      });
+      if (seenSince) continue;
+      const f = await raiseLeftBehind(user, itemId, s, room);
+      if (f) { out.push(f); alerted.add(itemId); }
+    }
+  }
+
+  // ── Trigger 2: no room was recognised, so fall back to elapsed time ──────
   for (const [itemId, s] of lastSeen) {
+    if (alerted.has(itemId)) continue;
     // In hand when last seen means it went with them.
     if (!s.placed) continue;
     if (s.at > cutoff) continue;
@@ -317,20 +368,38 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
       }
     }
 
-    // One alert per sighting, not per monitor run.
-    const dedup_key = `${user._id}:leftbehind:${itemId}:${Math.floor(+s.at / 1000)}`;
-    const w = itemWords(s.name);
-    const where = room ? ` in the ${room}` : '';
-    const f = await record(user, 'left_behind', dedup_key, 'info',
-      `You left your ${w.name} behind`,
-      `Your ${w.name} ${w.were} put down${where} at ${timeWords(s.at)} and ` +
-      `${w.they === 'they' ? 'have' : 'has'} not been in view since. ` +
-      `${w.they === 'they' ? 'They' : 'It'} should still be there.`,
-      { item_id: itemId, item_name: s.name, room, last_seen_at: s.at,
-        keyframe_id: s.keyframe_id });
-    if (f) out.push(f);
+    const f = await raiseLeftBehind(user, itemId, s, room);
+    if (f) { out.push(f); alerted.add(itemId); }
   }
   return out;
+}
+
+/**
+ * One alert per sighting, whichever trigger noticed it.
+ *
+ * Deliberately NOT restricted to a phone. Anything the wearer enrolled is a
+ * belonging they can walk away from, and the rule is the same for all of them:
+ * last seen PUT DOWN, not seen since, and the wearer has moved on. An item last
+ * seen in the hand went with them and is never reported.
+ */
+// The classifier's room keys are not what a person says. "in the living" is
+// not English; "in the living room" is.
+const ROOM_WORDS = {
+  living: 'living room', bedroom: 'bedroom', kitchen: 'kitchen',
+  bathroom: 'bathroom', dining: 'dining room', office: 'study',
+};
+
+async function raiseLeftBehind(user, itemId, s, room) {
+  const dedup_key = `${user._id}:leftbehind:${itemId}:${Math.floor(+s.at / 1000)}`;
+  const w = itemWords(s.name);
+  const where = room ? ` in the ${ROOM_WORDS[room] || room}` : ' where you were';
+  return record(user, 'left_behind', dedup_key, 'info',
+    `You left your ${w.name} behind`,
+    `Your ${w.name} ${w.were} put down${where} at ${timeWords(s.at)} and ` +
+    `${w.they === 'they' ? 'have' : 'has'} not been in view since. ` +
+    `${w.they === 'they' ? 'They' : 'It'} should still be there.`,
+    { item_id: itemId, item_name: s.name, room, last_seen_at: s.at,
+      keyframe_id: s.keyframe_id });
 }
 
 async function checkHabitualItems(user, profile, now = new Date()) {

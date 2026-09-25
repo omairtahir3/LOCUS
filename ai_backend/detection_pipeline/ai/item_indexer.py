@@ -465,7 +465,9 @@ class DailyItemIndexer:
         self._model = None
         self._model_lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue(maxsize=100)
-        self._last_item_seen: dict[tuple[str, int], float] = {}  # (user, class_id) -> monotonic ts
+        # (user, item identity, room) -> monotonic ts. The room is part of the
+        # key so the same belonging is recorded again when it moves.
+        self._last_item_seen: dict[tuple[str, Any, Any], float] = {}
         self._last_enriched_activity: dict[tuple[str, str], float] = {}  # (user, activity) -> monotonic ts
         self._is_running = True
 
@@ -751,11 +753,18 @@ class DailyItemIndexer:
         #    (an accepted design limitation since unenrolled objects lack unique signatures).
         user_key = str((metadata or {}).get("user_id", "unknown"))
         now_ts = time.monotonic()
+        # The room the wearer is in right now. It is part of the dedup key, so
+        # carrying an item from one room to another records it again in the new
+        # one instead of being swallowed as a repeat. Where a thing was last put
+        # down is the whole question this feature answers, and a fifteen-minute
+        # window that spans two rooms cannot answer it.
+        tracker = self._scene_trackers.get(user_key)
+        current_room = getattr(tracker, "_current", None) if tracker else None
         fresh = []
         suppressed = []
         for d in detections:
             item_identity = d.get("enrolled_item_id") or d["class_id"]
-            k = (user_key, item_identity)
+            k = (user_key, item_identity, current_room)
             last = self._last_item_seen.get(k)
             if last is None or (now_ts - last) >= ITEM_DEDUP_SECONDS:
                 self._last_item_seen[k] = now_ts
