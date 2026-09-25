@@ -394,10 +394,40 @@ async def extract_embedding(req: EmbeddingRequest):
     except Exception as e:
         print(f"[extract-embedding] tight crop unavailable, using full frames: {e}")
 
+    # Expand each photo across the lighting and angles the wearable camera will
+    # actually meet. The wearer photographs an item once, in one room, at one
+    # time of day, and then carries it into every other lighting in the house;
+    # a gallery built only from those shots does not cover the space it is
+    # matched against. See augment_for_enrollment for the measured motivation.
+    variants: list = []
+    source_indices: list[int] = []
+    try:
+        from ai.item_indexer import augment_for_enrollment
+        for src, img in enumerate(valid_images):
+            for v in augment_for_enrollment(img):
+                variants.append(v)
+                source_indices.append(src)
+    except Exception as e:
+        print(f"[extract-embedding] augmentation unavailable, using photos as-is: {e}")
+        variants = list(valid_images)
+        source_indices = list(range(len(valid_images)))
+
     # Fast batch inference in a single forward pass
     # enrollment=True: these are phone photos, so strip the high-frequency
     # detail the wearable camera never captures (see _simulate_wearable_optics).
-    raw_embeddings = backbone.extract_batch(valid_images, enrollment=True)
+    raw_embeddings = backbone.extract_batch(variants, enrollment=True)
     embeddings = [emb.tolist() for emb in raw_embeddings]
 
-    return {"embeddings": embeddings, "count": len(embeddings)}
+    print(f"[extract-embedding] {len(valid_images)} photo(s) -> {len(embeddings)} "
+          f"embeddings across lighting and angle")
+
+    # source_indices says which PHOTO each embedding came from. Coherence has to
+    # be judged between different photos: variants of one photo are near
+    # identical by construction, so averaging over all of them would report a
+    # healthy gallery no matter how poor the originals were.
+    return {
+        "embeddings": embeddings,
+        "count": len(embeddings),
+        "source_indices": source_indices,
+        "source_count": len(valid_images),
+    }
