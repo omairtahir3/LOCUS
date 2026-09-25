@@ -909,7 +909,9 @@ class KeyframeExtractor:
 
 
         # Smart scene logic configuration
-        self._last_scene_save_time = 0.0
+        # Kept as instance attributes so they stay tunable per extractor; the
+        # cooldown itself is enforced in capture_event, from
+        # EVENT_COOLDOWN_SECONDS, rather than by a second timer here.
         self.scene_cooldown_seconds = EVENT_COOLDOWN_SECONDS["scene_change"]
         self.scene_motion_threshold = SCENE_MOTION_THRESHOLD
         self.on_scene_saved = None
