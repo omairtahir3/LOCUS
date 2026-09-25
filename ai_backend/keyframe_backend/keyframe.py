@@ -24,6 +24,62 @@ KEYFRAME_STORAGE_DIR = os.path.join(
 # are kept regardless of age (see cleanup_expired).
 KEYFRAME_TTL_HOURS = int(os.environ.get("KEYFRAME_TTL_HOURS", 36))
 
+# ── Event-aligned capture ───────────────────────────────────────────────────
+#
+# Disk saving used to be triggered by MOTION alone: a frame-to-frame difference
+# above scene_motion_threshold armed a burst, and the sharpest frame of the next
+# 15 won. Motion is a proxy for "the camera moved", which is close to useless as
+# a proxy for "something worth remembering happened" -- and it is actively
+# inverted for the two events this system exists to record. Swallowing a pill is
+# a small, slow hand movement. Sitting with a phone is almost perfectly still.
+# In a real 7-minute recording that gate stored 8 frames, none of the wearer's
+# medication, and nothing of the room they were actually standing in.
+#
+# So the decision of WHEN to save is now driven by the detectors, and only the
+# choice of WHICH frame stays with sharpness. Every processed frame enters a
+# short rolling window; when a detector reports an event, the sharpest frame in
+# that window is persisted and tagged with the event. Because the window holds
+# history, the frame that gets kept can PRE-DATE the detector's confirmation --
+# which is what we want, since a pill is clearest a moment before the sequence
+# completes.
+EVENT_WINDOW_SECONDS = float(os.environ.get("EVENT_WINDOW_SECONDS", 3.0))
+
+# Per-event-kind cooldown. Separate per kind so a chatty detector cannot starve
+# a quiet one: a stream of activity frames must never crowd out the one
+# medication frame in the same minute.
+EVENT_COOLDOWN_SECONDS = {
+    "medication": float(os.environ.get("EVENT_COOLDOWN_MEDICATION", 4.0)),
+    "social": float(os.environ.get("EVENT_COOLDOWN_SOCIAL", 20.0)),
+    "activity": float(os.environ.get("EVENT_COOLDOWN_ACTIVITY", 15.0)),
+    "item": float(os.environ.get("EVENT_COOLDOWN_ITEM", 20.0)),
+    "scene_change": float(os.environ.get("SCENE_COOLDOWN_SECONDS", 8.0)),
+    "coverage": float(os.environ.get("EVENT_COOLDOWN_COVERAGE", 120.0)),
+}
+
+# Motion needed to arm the old opportunistic scene capture. Still useful for
+# catching room changes the detectors say nothing about, just no longer the only
+# way a frame reaches disk.
+SCENE_MOTION_THRESHOLD = float(os.environ.get("SCENE_MOTION_THRESHOLD", 15.0))
+
+# Guarantee a frame at least this often while the camera is running, whatever
+# the detectors and the motion score say. Without it a motionless wearer
+# produces NO frames at all, so a caregiver who is told "hasn't moved for three
+# hours" opens the memory view and finds nothing to look at -- the one case
+# where a picture matters most is the one case that had none.
+COVERAGE_SECONDS = float(os.environ.get("COVERAGE_SECONDS", 120.0))
+
+# Events accept a softer sharpness floor than opportunistic captures: a slightly
+# soft frame of a dose being taken is worth far more than no evidence at all.
+# Medication bypasses the floor entirely (see capture_event).
+EVENT_BLUR_RATIO = float(os.environ.get("EVENT_BLUR_RATIO", 0.6))
+
+# Hard ceiling on what the rolling window may hold, in bytes. The window is
+# sized in SECONDS, which is right for behaviour and dangerous for memory: 3s at
+# 10 FPS is 27 MB of 640x480 frames but 186 MB at 1080p. Frames are dropped from
+# the oldest end once the budget is hit, so the window shortens on a
+# high-resolution camera rather than exhausting memory on a long session.
+EVENT_WINDOW_MAX_BYTES = int(os.environ.get("EVENT_WINDOW_MAX_BYTES", 64 * 1024 * 1024))
+
 
 # ── Retention sweepers (Core FE-8) ──────────────────────────────────────────
 #
@@ -854,9 +910,21 @@ class KeyframeExtractor:
 
         # Smart scene logic configuration
         self._last_scene_save_time = 0.0
-        self.scene_cooldown_seconds = 10.0
-        self.scene_motion_threshold = 15.0
+        self.scene_cooldown_seconds = EVENT_COOLDOWN_SECONDS["scene_change"]
+        self.scene_motion_threshold = SCENE_MOTION_THRESHOLD
         self.on_scene_saved = None
+
+        # Rolling window of recent frames for event-aligned capture. Every
+        # processed frame lands here regardless of motion, so a detector firing
+        # on a still scene still has sharp frames to choose from. Sized in
+        # SECONDS so it holds the same span of history at any capture rate.
+        self._recent = deque(maxlen=max(4, int(EVENT_WINDOW_SECONDS * target_fps)))
+        self._recent_lock = threading.Lock()
+
+        # Last disk save per event kind, for the per-kind cooldowns.
+        self._last_event_save = {}
+        self._last_any_save = 0.0
+        self.on_event_saved = None
 
         # Local storage
         self.save_locally = save_locally
@@ -990,6 +1058,112 @@ class KeyframeExtractor:
 
 
 
+    def capture_event(self, kind, label=None, confidence=None, extra=None,
+                      force=False):
+        """Persist the sharpest recent frame because `kind` just happened.
+
+        This is the event-aligned half of keyframe storage: the detectors decide
+        WHEN, sharpness decides WHICH. The rolling window holds history, so the
+        frame chosen may pre-date the call -- a pill is clearest a moment before
+        the three-phase sequence finishes confirming it.
+
+        Returns the saved keyframe id, or None when nothing was saved (cooldown
+        still running, no frames yet, or every candidate too blurred).
+        """
+        if not (self.save_locally and self.storage):
+            return None
+
+        now = time.time()
+        cooldown = EVENT_COOLDOWN_SECONDS.get(kind, 10.0)
+
+        # Claim the cooldown slot and read the window under one lock. This is
+        # called from the capture loop AND from each detector's own thread, so a
+        # plain check-then-set lets two callers both pass the same cooldown and
+        # save duplicate frames for one event.
+        with self._recent_lock:
+            if not force and (now - self._last_event_save.get(kind, 0.0)) < cooldown:
+                return None
+            candidates = list(self._recent)
+            if not candidates:
+                return None
+            prev_kind_save = self._last_event_save.get(kind, 0.0)
+            prev_any_save = self._last_any_save
+            self._last_event_save[kind] = now
+            self._last_any_save = now
+
+        best = max(candidates, key=lambda c: c["blur_score"])
+
+        # Medication is the one event we never drop for softness: a blurred
+        # record of a dose is evidence, and no record is a missed dose.
+        if kind != "medication":
+            floor = self.blur_threshold * (EVENT_BLUR_RATIO if kind != "coverage" else 1.0)
+            if best["blur_score"] < floor:
+                print(f"[KeyframeExtractor] {kind} capture rejected on blur: "
+                      f"{best['blur_score']:.1f} < {floor:.1f}")
+                # Give the claim back. Nothing was written, so this must not
+                # count as a save -- otherwise a persistently soft stream keeps
+                # resetting the coverage floor and never produces any frame at
+                # all, which is the exact failure the floor exists to prevent.
+                with self._recent_lock:
+                    self._last_event_save[kind] = prev_kind_save
+                    self._last_any_save = prev_any_save
+                return None
+
+        metadata = {
+            "id": best["keyframe_id"],
+            "timestamp": best["timestamp"],
+            "motion_score": round(float(best["motion_score"]), 2),
+            "blur_score": round(float(best["blur_score"]), 2),
+            "width": best["frame"].shape[1],
+            "height": best["frame"].shape[0],
+            "user_id": getattr(self, "user_id", ""),
+            "event_type": kind,
+            "selected_from": len(candidates),
+        }
+        if label:
+            metadata["label"] = label
+        if confidence is not None:
+            metadata["confidence"] = round(float(confidence), 3)
+        if extra:
+            metadata.update(extra)
+
+        print(f"[KeyframeExtractor] {kind} frame saved (blur "
+              f"{best['blur_score']:.1f}, best of {len(candidates)})"
+              + (f": {label}" if label else ""))
+
+        threading.Thread(
+            target=self._save_event_async,
+            args=(best["keyframe_id"], best["frame"], metadata, kind),
+            daemon=True).start()
+        return best["keyframe_id"]
+
+    def maybe_capture_coverage(self):
+        """Save a frame if nothing has reached disk for COVERAGE_SECONDS.
+
+        Called from the pipeline's liveness heartbeat, so it runs whether or not
+        anybody is moving. This is what gives an inactivity stretch something to
+        show; a still wearer previously produced an empty memory view.
+        """
+        if (time.time() - self._last_any_save) < COVERAGE_SECONDS:
+            return None
+        return self.capture_event(
+            "coverage", label="Routine check", extra={"reason": "coverage_floor"})
+
+    def _save_event_async(self, keyframe_id, frame, metadata, kind):
+        try:
+            self.storage.save(keyframe_id, frame, metadata)
+            if self.on_event_saved:
+                self.on_event_saved(keyframe_id, kind, metadata)
+            # Event frames are still frames: hand them to the same Tier-2 path
+            # that indexes items and tracks rooms, so a medication or coverage
+            # frame contributes its objects to the scene tracker too. Starving
+            # that tracker of everything except motion spikes is exactly why the
+            # kitchen was never recognised.
+            if self.on_scene_saved:
+                self.on_scene_saved(keyframe_id, metadata.get("motion_score", 0.0))
+        except Exception as e:
+            print(f"[KeyframeExtractor] ERROR saving {kind} {keyframe_id}: {e}")
+
     def _save_scene_async(self, keyframe_id, frame, metadata, motion_score):
         try:
             self.storage.save(keyframe_id, frame, metadata)
@@ -1001,23 +1175,13 @@ class KeyframeExtractor:
 
 
     def flush_remaining(self):
-        """Flushes any pending scene captures to disk when stopping."""
-        if getattr(self, '_pending_scene_capture', False) and hasattr(self, '_scene_capture_frames') and self._scene_capture_frames:
-            import threading, time
-            best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
-            metadata = {
-                "id": best['keyframe_id'],
-                "timestamp": time.time(),
-                "blur_score": best['blur_score'],
-                "motion_score": best['motion_score'],
-                "type": "scene_capture",
-                "user_id": self.user_id
-            }
-            print(f"[KeyframeExtractor] Flushing remaining scene capture: {best['keyframe_id']}")
-            t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
-            t.start()
-            self._pending_scene_capture = False
-            self._scene_capture_frames = []
+        """Persist the last of the rolling window when the stream stops.
+
+        Forced past the cooldown: this is the final frame of the session and
+        there is no later opportunity to save it.
+        """
+        return self.capture_event(
+            "scene_change", extra={"reason": "stream_stopped"}, force=True)
 
     def get_buffer(self):
 
@@ -1181,53 +1345,33 @@ class KeyframeExtractor:
         timestamp = datetime.now().astimezone().isoformat()
 
 
-        # 1. Smart Scene disk saving
-        if self.save_locally and self.storage:
-            now = time.time()
-            if motion_score > self.scene_motion_threshold and (now - self._last_scene_save_time) >= self.scene_cooldown_seconds:
-                self._pending_scene_capture = True
-                if not hasattr(self, '_scene_capture_frames'):
-                    self._scene_capture_frames = []
-            
-            if getattr(self, '_pending_scene_capture', False):
-                self._scene_capture_frames.append({
-                    'frame': frame.copy(),
-                    'blur_score': blur_score,
-                    'motion_score': motion_score,
-                    'timestamp': timestamp,
-                    'keyframe_id': keyframe_id
-                })
-                # Wait 15 frames (~0.5s) for motion to settle, then pick sharpest
-                if len(self._scene_capture_frames) >= 15:
-                    best = max(self._scene_capture_frames, key=lambda x: x['blur_score'])
-                    
-                    # LOGGING 15 SCORES
-                    print("\n[KeyframeExtractor] --- BURST CAPTURE (15 frames) ---")
-                    for i, f in enumerate(self._scene_capture_frames):
-                        is_best = " <--- SELECTED" if f['keyframe_id'] == best['keyframe_id'] else ""
-                        print(f"  Frame {i+1}: blur_score = {f['blur_score']:.2f}{is_best}")
-                    print(f"[KeyframeExtractor] Best Score: {best['blur_score']:.2f} (Threshold: {self.blur_threshold})")
-                    
-                    if best['blur_score'] < self.blur_threshold:
-                        print(f"[KeyframeExtractor] Scene capture rejected due to blur: {best['blur_score']} < {self.blur_threshold}")
-                        self._scene_capture_frames = []
-                        self._pending_scene_capture = False
-                    else:
-                        self._last_scene_save_time = now
-                        metadata = {
-                            "id": best['keyframe_id'],
-                            "timestamp": best['timestamp'],
-                            "motion_score": round(float(best['motion_score']), 2),
-                            "blur_score": round(float(best['blur_score']), 2),
-                            "width": best['frame'].shape[1],
-                            "height": best['frame'].shape[0],
-                            "user_id": getattr(self, "user_id", ""),
-                            "event_type": "scene_change"
-                        }
-                        t = threading.Thread(target=self._save_scene_async, args=(best['keyframe_id'], best['frame'], metadata, best['motion_score']), daemon=True)
-                        t.start()
-                        self._pending_scene_capture = False
-                        self._scene_capture_frames = []
+        # 1. Rolling window for event-aligned capture. EVERY processed frame
+        # enters it, whatever the motion score, so that when a detector fires on
+        # a still scene there is sharp history to choose from. This is the pool
+        # capture_event() selects out of.
+        with self._recent_lock:
+            self._recent.append({
+                'frame': frame.copy(),
+                'blur_score': blur_score,
+                'motion_score': motion_score,
+                'timestamp': timestamp,
+                'keyframe_id': keyframe_id,
+                'nbytes': int(getattr(frame, 'nbytes', 0)),
+            })
+            # Shorten the window rather than exhaust memory on a
+            # high-resolution camera (see EVENT_WINDOW_MAX_BYTES).
+            total = sum(c.get('nbytes', 0) for c in self._recent)
+            while len(self._recent) > 2 and total > EVENT_WINDOW_MAX_BYTES:
+                total -= self._recent.popleft().get('nbytes', 0)
+
+        # 2. Opportunistic scene capture on motion. Now just one more trigger
+        # into capture_event() rather than its own burst-and-cooldown machine:
+        # the old version collected a fixed 15 frames, which is 1.5s at 10 FPS
+        # but 3s at 5 FPS, so the settle time silently changed with the rate. It
+        # also kept its own copy of every frame during a burst, duplicating the
+        # window that now exists anyway.
+        if motion_score > self.scene_motion_threshold:
+            self.capture_event("scene_change")
 
 
 

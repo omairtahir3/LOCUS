@@ -42,23 +42,42 @@ from typing import Any, Optional
 # 0.5-0.8 = supporting
 # Anything that appears across rooms is deliberately absent, not down-weighted.
 SCENE_WEIGHTS: dict[str, dict[str, float]] = {
+    # Counter-level objects are defining here, not merely supporting. A chest
+    # cam standing at a worktop sees a pot, a kettle and a sink; the big
+    # appliances that used to be the only way to unlock this room sit behind or
+    # beside the wearer and never enter frame. In a real recording the wearer
+    # spent minutes in this kitchen and it scored ZERO every time, because
+    # Refrigerator/Microwave/Oven were never in view -- while a dark appliance
+    # front read as "Monitor/TV" and the room was reported as a living room.
     "kitchen": {
         "Refrigerator": 1.0, "Microwave": 1.0, "Oven": 1.0, "Gas stove": 1.0,
         "Induction Cooker": 1.0, "Rice Cooker": 1.0, "Dishwasher": 1.0,
-        "Extractor": 1.0, "Coffee Machine": 0.9, "Blender": 0.8,
-        "Pot": 0.7, "Kettle": 0.7, "Cutting/chopping Board": 0.7,
-        "Cabinet/shelf": 0.5,
+        "Extractor": 1.0, "Coffee Machine": 0.9,
+        "Pot": 0.8, "Kettle": 0.8, "Cutting/chopping Board": 0.8,
+        "Tea pot": 0.8, "Blender": 0.8,
+        "Sink": 0.6, "Bowl/Basin": 0.3, "Cabinet/shelf": 0.3,
     },
     "bedroom": {
         "Bed": 1.0, "Pillow": 0.9, "Nightstand": 0.9, "Wardrobe": 0.8,
         "Lamp": 0.4, "Mirror": 0.3,
     },
+    # Monitor/TV is NOT defining, at any weight. A screen exists in every room
+    # of a modern home, and it is the class most easily confused with the dark
+    # rectangular front of a microwave or an oven. Both false "Sitting in the
+    # living room" sessions in the real recording came from Monitor/TV ALONE --
+    # one of them from a single detection at 0.49 -- while the wearer was in the
+    # kitchen. A couch or a coffee table defines this room; a screen does not.
     "living": {
-        "Couch": 1.0, "Monitor/TV": 0.8, "Coffee Table": 0.8,
-        "Remote": 0.6, "Picture/Frame": 0.3, "Candle": 0.3,
+        "Couch": 1.0, "Coffee Table": 0.8,
+        "Monitor/TV": 0.5, "Remote": 0.6,
+        "Picture/Frame": 0.3, "Candle": 0.3,
     },
+    # Sink and Towel are supporting, not defining: both are as common in a
+    # kitchen as in a bathroom, and as a defining pair they let a kitchen sink
+    # open a bathroom session. A toilet or a bathtub is what actually settles it.
     "bathroom": {
-        "Toilet": 1.0, "Bathtub": 1.0, "Sink": 0.8, "Towel": 0.8,
+        "Toilet": 1.0, "Bathtub": 1.0,
+        "Sink": 0.6, "Towel": 0.55,
         "Toothbrush": 0.7, "Soap": 0.7, "Toilet Paper": 0.7, "Toiletry": 0.6,
     },
     "dining": {
@@ -91,6 +110,24 @@ DEFINING_OBJECTS: dict[str, set[str]] = {
 
 MIN_SCENE_SCORE = 0.35     # below this, no room is claimed
 MIN_SCENE_MARGIN = 0.15    # winner must beat the runner-up by this much
+
+# The defining object must be seen CLEARLY, not merely seen. A real recording
+# opened a 59-second "Sitting in the living room" session off one detection of
+# Monitor/TV at 0.49 -- a coin flip, in a kitchen. A class that unlocks a whole
+# room has to be more than half believed.
+MIN_DEFINING_CONF = 0.55
+
+# One object is not a room. The same false session had a single contributing
+# class; every correct session in the calibration set had several. Requiring two
+# distinct classes costs nothing where the evidence is real and removes the
+# entire family of one-detection rooms.
+MIN_CONTRIBUTING_CLASSES = 2
+
+# A session needs at least this many CONFIRMED sightings to be written. One
+# sighting cannot establish a span of time: the false living-room session above
+# reported 59 seconds from frames=1, its duration made up entirely of later
+# frames that recognised nothing and merely coasted.
+MIN_SESSION_FRAMES = 2
 
 # How much evidence is needed to OVERWRITE an established room. Taking over
 # from an open session needs this many classified observations of the new room;
@@ -138,6 +175,26 @@ SCENE_STALE_SECONDS = 180
 MIN_SESSION_SECONDS = 10
 
 
+def validate_against_model(model_names) -> list[str]:
+    """Report weight keys that no Objects365 class matches.
+
+    A misspelled class name is invisible at runtime: the key simply never
+    appears in a detections dict, so the room silently loses that evidence
+    forever and nothing is logged. Called once at startup so a typo is loud.
+    Returns the offending names (empty when all are real).
+    """
+    try:
+        known = set(model_names.values()) if isinstance(model_names, dict) else set(model_names)
+    except Exception:
+        return []
+    used = {cls for weights in SCENE_WEIGHTS.values() for cls in weights}
+    unknown = sorted(used - known)
+    if unknown:
+        print(f"[scene] WARNING: {len(unknown)} scene weight keys match no "
+              f"Objects365 class and can never fire: {unknown}")
+    return unknown
+
+
 def classify_scene(detections: dict[str, float]) -> tuple[Optional[str], float, dict[str, float]]:
     """Classify one frame's room from {objects365_class_name: confidence}.
 
@@ -145,10 +202,16 @@ def classify_scene(detections: dict[str, float]) -> tuple[Optional[str], float, 
     """
     scores: dict[str, float] = {}
     for room, weights in SCENE_WEIGHTS.items():
-        if not (DEFINING_OBJECTS[room] & detections.keys()):
+        # The room is unlocked only by a defining object seen clearly enough.
+        if not any(detections.get(cls, 0.0) >= MIN_DEFINING_CONF
+                   for cls in DEFINING_OBJECTS[room]):
             scores[room] = 0.0
             continue
-        scores[room] = sum(w * detections[cls] for cls, w in weights.items() if cls in detections)
+        contributing = [cls for cls in weights if cls in detections]
+        if len(contributing) < MIN_CONTRIBUTING_CLASSES:
+            scores[room] = 0.0
+            continue
+        scores[room] = sum(weights[cls] * detections[cls] for cls in contributing)
 
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
     top, top_score = ranked[0]
@@ -251,7 +314,7 @@ class SceneSessionTracker:
         self._last_confirmed = None
         self._evidence = defaultdict(float)
         self._frames = 0
-        if duration < MIN_SESSION_SECONDS:
+        if duration < MIN_SESSION_SECONDS or frames < MIN_SESSION_FRAMES:
             return None
         return {
             "scene": room,
@@ -286,6 +349,148 @@ SCENE_TITLES = {
     "dining": "At the dining table",
     "office": "Desk work",
 }
+
+
+# ── Activity sessions ───────────────────────────────────────────────────────
+#
+# Per-frame activity labels were switched off (EMIT_PER_FRAME_ACTIVITY_EVENTS)
+# because they hallucinated: a bottle on a far table beat a laptop at 0.94 and
+# logged "Drinking." while the wearer typed. Switching them off removed the
+# false claims and also removed the true ones, so using a phone for twenty
+# minutes produced no record at all.
+#
+# The fix is the one that worked for rooms: an activity is a property of a
+# STRETCH OF TIME, not of a frame. A single frame's guess proves nothing, but the
+# same guess repeated across a span is evidence. One stray "Drinking." among
+# twenty "Using a phone." cannot open a session; twenty minutes of phone use is
+# reported once, with its duration.
+ACTIVITY_CONFIRM_FRAMES = 3      # agreeing observations needed to open a session
+ACTIVITY_PENDING_WINDOW = 90     # ...and they must fall within this many seconds
+ACTIVITY_STALE_SECONDS = 150     # unseen for this long: close at last sighting
+MIN_ACTIVITY_SESSION_SECONDS = 20
+
+
+class ActivitySessionTracker:
+    """Collapses per-frame activity guesses into confirmed, timed sessions.
+
+    Feed it one observation at a time. Returns a completed session dict when a
+    new activity takes over, and flush() closes the final one.
+    """
+
+    def __init__(self):
+        self._current: Optional[str] = None
+        self._started_at: Optional[float] = None
+        self._last_confirmed: Optional[float] = None
+        self._pending: Optional[str] = None
+        self._pending_count = 0
+        self._pending_since: Optional[float] = None
+        self._confs: list[float] = []
+        self._objects: dict[str, float] = defaultdict(float)
+        self._frames = 0
+
+    def observe(self, activity: Optional[str], confidence: float = 0.0,
+                objects: Optional[dict[str, float]] = None,
+                timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+        ts = timestamp if timestamp is not None else time.time()
+        objects = objects or {}
+
+        if activity is None:
+            if self._current is not None:
+                anchor = self._last_confirmed or self._started_at or ts
+                if (ts - anchor) > ACTIVITY_STALE_SECONDS:
+                    return self._close(anchor)
+            return None
+
+        if activity == self._current:
+            self._last_confirmed = ts
+            self._frames += 1
+            self._confs.append(confidence)
+            for k, v in objects.items():
+                self._objects[k] = max(self._objects[k], v)
+            self._pending = None
+            self._pending_count = 0
+            return None
+
+        # A different activity has to persist before it displaces anything.
+        if (activity == self._pending and self._pending_since is not None
+                and (ts - self._pending_since) <= ACTIVITY_PENDING_WINDOW):
+            self._pending_count += 1
+        else:
+            self._pending = activity
+            self._pending_count = 1
+            self._pending_since = ts
+
+        if self._pending_count < ACTIVITY_CONFIRM_FRAMES:
+            return None
+
+        # Date the new session from the FIRST sighting, not the confirmation, so
+        # the hysteresis delay is not charged to the wrong session.
+        switch_ts = self._pending_since if self._pending_since is not None else ts
+        completed = self._close(switch_ts)
+        self._current = activity
+        self._started_at = switch_ts
+        self._last_confirmed = ts
+        self._frames = self._pending_count
+        self._confs = [confidence]
+        self._objects = defaultdict(float)
+        for k, v in objects.items():
+            self._objects[k] = max(self._objects[k], v)
+        self._pending = None
+        self._pending_count = 0
+        self._pending_since = None
+        return completed
+
+    def flush(self, timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+        return self._close(timestamp if timestamp is not None else time.time())
+
+    def _close(self, ts: float) -> Optional[dict[str, Any]]:
+        if self._current is None or self._started_at is None:
+            return None
+        start = self._started_at
+        end = self._last_confirmed or ts
+        duration = max(0.0, end - start)
+        activity, frames = self._current, self._frames
+        confs, objects = list(self._confs), dict(self._objects)
+        self._current = None
+        self._started_at = None
+        self._last_confirmed = None
+        self._confs = []
+        self._objects = defaultdict(float)
+        self._frames = 0
+        if duration < MIN_ACTIVITY_SESSION_SECONDS or frames < ACTIVITY_CONFIRM_FRAMES:
+            return None
+        return {
+            "activity": activity,
+            "started_at": SceneSessionTracker._fmt(start),
+            "start_ts": start,
+            "end_ts": end,
+            "duration_seconds": round(duration),
+            "observations": frames,
+            "confidence": round(sum(confs) / len(confs), 3) if confs else 0.0,
+            "objects": {k: round(v, 2) for k, v in sorted(
+                objects.items(), key=lambda kv: -kv[1])[:8]},
+            "label": describe_activity(activity, duration),
+        }
+
+
+ACTIVITY_TITLES = {
+    "using a phone": "Using a phone",
+    "using_phone": "Using a phone",
+    "typing": "At a keyboard",
+    "reading": "Reading",
+    "eating": "Eating",
+    "drinking": "Drinking",
+    "cooking": "Cooking",
+    "watching tv": "Watching television",
+    "brushing teeth": "Brushing teeth",
+    "washing hands": "Washing hands",
+}
+
+
+def describe_activity(activity: str, duration: float) -> str:
+    """Human label for an activity session, without inventing detail."""
+    key = str(activity).strip().lower().rstrip(".")
+    return ACTIVITY_TITLES.get(key, key.capitalize() or "Activity")
 
 
 def describe_session(room: str, start_ts: float, duration: float,

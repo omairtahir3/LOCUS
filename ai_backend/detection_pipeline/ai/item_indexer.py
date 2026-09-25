@@ -319,6 +319,14 @@ class DailyItemIndexer:
                         self._model = YOLO(self.model_path)
                         elapsed = (time.perf_counter() - t0) * 1000
                         print(f"[DailyItemIndexer] YOLO11n-Objects365 loaded successfully in {elapsed:.1f}ms (Classes: {len(self._model.names)})")
+                        # A misspelled scene weight key can never fire and is
+                        # otherwise completely silent. Check once, here, where
+                        # the real class list is finally available.
+                        try:
+                            from ai.scene import validate_against_model
+                            validate_against_model(self._model.names)
+                        except Exception:
+                            pass
                     except Exception as e:
                         print(f"[DailyItemIndexer] ERROR: Failed to load YOLO11n-Objects365: {e}")
                         traceback.print_exc()
@@ -1122,7 +1130,9 @@ class DailyItemIndexer:
                 user_oid = user_id_str
 
             minutes = max(1, round(session["duration_seconds"] / 60))
-            sentence = f"{session['label']} — {minutes} min"
+            # No dash: these strings are read by the person and their caregiver,
+            # and a dash-joined fragment reads as machine output.
+            sentence = f"{session['label']} for {minutes} min"
             ts_now = datetime.now(timezone.utc)
             db.eventlogs.insert_one({
                 "user_id": user_oid,

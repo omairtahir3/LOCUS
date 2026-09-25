@@ -15,6 +15,7 @@ const KIND = {
   medication: { icon: Pill,          color: 'var(--success)' },
   social:     { icon: Brain,         color: 'var(--accent)' },
   items:      { icon: Package,       color: 'var(--info)' },
+  activity:   { icon: Activity,      color: 'var(--accent)' },
   anomaly:    { icon: AlertTriangle, color: 'var(--warning)' },
 };
 
