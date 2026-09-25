@@ -125,6 +125,17 @@ MIN_DEFINING_CONF = 0.55
 # entire family of one-detection rooms.
 MIN_CONTRIBUTING_CLASSES = 2
 
+# ...unless the defining object is overwhelming on its own. A real recording
+# threw away a frame whose only reading was "Bed=0.89, Picture/Frame=0.76",
+# because Picture/Frame carries no bedroom weight and the bed was therefore the
+# single contributing class. A bed seen that clearly IS a bedroom; demanding a
+# corroborating pillow discards the most certain evidence the detector ever
+# produces. The corroboration rule exists to stop a weak lone detection naming a
+# room, and everything it was built to reject scored far below this: the false
+# living rooms came from Monitor/TV at 0.49 and 0.71, and Monitor/TV is no
+# longer a defining object at all.
+STRONG_DEFINING_CONF = 0.75
+
 # A session needs at least this many CONFIRMED sightings to be written. One
 # sighting cannot establish a span of time: the false living-room session above
 # reported 59 seconds from frames=1, its duration made up entirely of later
@@ -213,9 +224,9 @@ def explain_scene(detections: dict[str, float]) -> str:
                     f"{strongest:.2f}, needs {MIN_DEFINING_CONF}")
         else:
             contributing = [c for c in weights if c in detections]
-            if len(contributing) < MIN_CONTRIBUTING_CLASSES:
-                note = (f"{room}: only {contributing} matched, needs "
-                        f"{MIN_CONTRIBUTING_CLASSES} different objects")
+            if len(contributing) < MIN_CONTRIBUTING_CLASSES and strongest < STRONG_DEFINING_CONF:
+                note = (f"{room}: only {contributing} matched at {strongest:.2f}, needs "
+                        f"{MIN_CONTRIBUTING_CLASSES} objects or one at {STRONG_DEFINING_CONF}")
             else:
                 note = f"{room}: scored but lost on score or margin"
         if best_note is None:
@@ -254,12 +265,14 @@ def classify_scene(detections: dict[str, float]) -> tuple[Optional[str], float, 
     scores: dict[str, float] = {}
     for room, weights in SCENE_WEIGHTS.items():
         # The room is unlocked only by a defining object seen clearly enough.
-        if not any(detections.get(cls, 0.0) >= MIN_DEFINING_CONF
-                   for cls in DEFINING_OBJECTS[room]):
+        strongest = max((detections.get(cls, 0.0) for cls in DEFINING_OBJECTS[room]),
+                        default=0.0)
+        if strongest < MIN_DEFINING_CONF:
             scores[room] = 0.0
             continue
         contributing = [cls for cls in weights if cls in detections]
-        if len(contributing) < MIN_CONTRIBUTING_CLASSES:
+        if (len(contributing) < MIN_CONTRIBUTING_CLASSES
+                and strongest < STRONG_DEFINING_CONF):
             scores[room] = 0.0
             continue
         scores[room] = sum(weights[cls] * detections[cls] for cls in contributing)

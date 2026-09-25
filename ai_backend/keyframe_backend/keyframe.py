@@ -1098,12 +1098,37 @@ class KeyframeExtractor:
             candidates = list(self._recent)
             if not candidates:
                 return None
+            # ONE image per moment, shared by every event that describes it.
+            #
+            # A real recording wrote the same instant four times over, as
+            # scene_change, medication, social and activity, every copy at blur
+            # 237.2. Each was a separate file and a separate Tier-2 job, which
+            # is what kept the indexing queue tens of frames deep, and each
+            # counted again towards the open session's frame total.
+            #
+            # Picking a different unused frame per event does not fix that: four
+            # near-identical images of one second is still four of everything.
+            # So while any frame in the window is already on disk, later events
+            # point at it instead of writing again. The window is three seconds
+            # long, so a genuinely new moment always gets its own image.
+            saved = [c for c in candidates if c.get("saved")]
+            already_saved = bool(saved)
+            if already_saved:
+                best = max(saved, key=lambda c: c["blur_score"])
+            else:
+                best = max(candidates, key=lambda c: c["blur_score"])
+                best["saved"] = True
             prev_kind_save = self._last_event_save.get(kind, 0.0)
             prev_any_save = self._last_any_save
             self._last_event_save[kind] = now
             self._last_any_save = now
 
-        best = max(candidates, key=lambda c: c["blur_score"])
+        def _give_back():
+            with self._recent_lock:
+                self._last_event_save[kind] = prev_kind_save
+                self._last_any_save = prev_any_save
+                if not already_saved:
+                    best["saved"] = False
 
         # Blank frames are rejected for EVERY kind, including medication. A
         # blurred dose is still evidence; a black one is not evidence of
@@ -1115,9 +1140,7 @@ class KeyframeExtractor:
         if luminance < MIN_FRAME_LUMINANCE:
             print(f"[KeyframeExtractor] {kind} capture rejected as blank: "
                   f"luminance {luminance:.1f} < {MIN_FRAME_LUMINANCE}")
-            with self._recent_lock:
-                self._last_event_save[kind] = prev_kind_save
-                self._last_any_save = prev_any_save
+            _give_back()
             return None
 
         # Medication is the one event we never drop for softness: a blurred
@@ -1131,10 +1154,16 @@ class KeyframeExtractor:
                 # count as a save -- otherwise a persistently soft stream keeps
                 # resetting the coverage floor and never produces any frame at
                 # all, which is the exact failure the floor exists to prevent.
-                with self._recent_lock:
-                    self._last_event_save[kind] = prev_kind_save
-                    self._last_any_save = prev_any_save
+                _give_back()
                 return None
+
+        # Already on disk from an earlier event. The image is the same one, so
+        # the right thing is to point this event at it rather than write a
+        # second copy and index it again.
+        if already_saved:
+            print(f"[KeyframeExtractor] {kind} reuses frame "
+                  f"{best['keyframe_id'][:8]}, already saved")
+            return best["keyframe_id"]
 
         metadata = {
             "id": best["keyframe_id"],
