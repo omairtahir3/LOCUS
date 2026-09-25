@@ -161,9 +161,20 @@ export default function MemorySearch() {
       };
     } else if (ev.event_type === 'object') {
       const itemsList = ev.details?.item_names || (ev.details?.items ? ev.details.items.map(it => it.name) : []);
+      const placed = ev.details?.placement === 'placed';
       const titleText = itemsList.length > 0
-        ? `Spotted ${itemsList.slice(0, 3).join(', ')}${itemsList.length > 3 ? ` +${itemsList.length - 3} more` : ''}`
+        ? `${placed ? 'Left' : 'Spotted'} ${itemsList.slice(0, 3).join(', ')}${itemsList.length > 3 ? ` +${itemsList.length - 3} more` : ''}${placed ? ' here' : ''}`
         : (ev.details?.summary || 'Items detected');
+      // How sure we are this is THIS person's belonging, which is what the
+      // entry claims. ev.confidence used to be YOLO's "is this a phone at all"
+      // score, so a match that identified the wearer's own phone at 0.755 was
+      // displayed as "32%". Older records keep the old number in ev.confidence,
+      // so read the identity figure from details first, then fall back.
+      const sims = (ev.details?.items || [])
+        .map(it => it.exemplar_similarity)
+        .filter(v => typeof v === 'number');
+      const identity = ev.details?.identity_confidence
+        ?? (sims.length ? Math.max(...sims) : ev.confidence);
       return {
         id: ev._id,
         keyframe_id: ev.keyframe_id,
@@ -173,7 +184,7 @@ export default function MemorySearch() {
         color: '#6366f1',
         group: groupLabel,
         category: 'Objects',
-        confidence: ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '',
+        confidence: identity ? `${(identity * 100).toFixed(0)}% match` : '',
         status: '✓ Logged',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
