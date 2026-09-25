@@ -35,6 +35,26 @@ function intakeMoment({ takenAt, method, scheduledTime }) {
   return takenAt ? new Date(takenAt) : new Date();
 }
 
+/**
+ * Withdraw the intake record for a dose that did not happen.
+ *
+ * Marking a dose missed, skipped or rescheduled leaves its EventLog behind. In
+ * the reschedule case the MedicationLog is deleted outright, so the record is
+ * orphaned: it points at a log that no longer exists and sits as "pending"
+ * forever. One wearer answered "not taken" and the dose was still listed in
+ * Memory Search afterwards. Rejected rather than deleted, so the fact that the
+ * camera once thought it saw an intake is still auditable; every query that
+ * feeds a memory view already excludes rejected.
+ */
+async function rejectIntakeEventLog(userId, logId) {
+  if (!logId) return;
+  const EventLog = require('../models/EventLog');
+  await EventLog.updateMany(
+    { user_id: userId, event_type: 'medication_intake', 'details.medication_log_id': logId },
+    { $set: { verification_status: 'rejected' } }
+  );
+}
+
 async function writeIntakeEventLog({
   userId, med, logId, status, confidence, keyframeId, takenAt, method, scheduledTime,
 }) {
@@ -263,6 +283,10 @@ router.post('/logs', async (req, res) => {
         );
       }
 
+      if (status === 'missed' || status === 'skipped' || status === 'scheduled') {
+        await rejectIntakeEventLog(targetUserId, existing._id);
+      }
+
       // Notify caregivers if updated to missed or skipped
       if ((status === 'missed' || status === 'skipped') && med.caregiver_notify_on_miss) {
         const User = require('../models/User');
@@ -407,6 +431,9 @@ router.patch('/logs/:logId', async (req, res) => {
       // a fresh log (taken/missed) when it completes or the window expires.
       // Keeping a 'scheduled' log causes duplicates and stale entries.
       if (req.body.status === 'scheduled') {
+        // Withdraw the intake record too. Deleting only the log left the
+        // EventLog pointing at nothing and still showing as a pending dose.
+        await rejectIntakeEventLog(log.user_id, log._id);
         await MedicationLog.deleteOne({ _id: log._id });
         return res.json({ message: 'Medicine rescheduled, log removed', deleted: true });
       }
@@ -421,6 +448,8 @@ router.patch('/logs/:logId', async (req, res) => {
     }
 
     if (req.body.status === 'missed' || req.body.status === 'skipped') {
+      // The dose did not happen, so any intake record for it is withdrawn.
+      await rejectIntakeEventLog(log.user_id, log._id);
       const Medication = require('../models/Medication');
       const med = await Medication.findById(log.medication_id._id || log.medication_id);
       if (med && med.caregiver_notify_on_miss) {

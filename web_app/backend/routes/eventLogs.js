@@ -46,7 +46,15 @@ router.get('/memory-search', auth, async (req, res) => {
       // recording in the wearer's own bedroom produced no memory at all
       // because every frame it saved was filed as a raw motion burst.
       'details.action': { $nin: ['scene_change', 'camera_heartbeat'] },
-      verification_status: { $ne: 'rejected' }
+      verification_status: { $ne: 'rejected' },
+      // An unconfirmed dose is a question, not a memory. A needs_verification
+      // detection appeared here as "Panadol, waiting for your confirmation",
+      // which asserts the dose and disclaims it in the same line; one wearer
+      // had already answered "not taken" and it was still listed. The record
+      // stays in the database for the verification screen to act on. Other
+      // event types are unaffected: only medication makes a claim that the
+      // person is expected to confirm before it counts.
+      $nor: [{ event_type: 'medication_intake', verification_status: { $ne: 'confirmed' } }],
     };
 
     if (type && query.event_type.$in.includes(type)) {
@@ -207,6 +215,11 @@ router.get('/timeline', auth, async (req, res) => {
     const idForms = [userId, String(userId)];
     if (mongoose.Types.ObjectId.isValid(userId)) idForms.push(new mongoose.Types.ObjectId(String(userId)));
 
+    // person_id is populated because the person's NAME lives on the
+    // relationship, not on the event. Without it every recognised face read
+    // "Someone familiar nearby" even when the wearer had named them, which is
+    // the one detail that makes the entry worth anything.
+    require('../models/Relationship');
     const events = await EventLog.find({
       user_id: { $in: idForms },
       timestamp: { $gte: start, $lt: end },
@@ -216,7 +229,7 @@ router.get('/timeline', auth, async (req, res) => {
       // timeline entry, and a day holds ~1440 heartbeats, so excluding them
       // here keeps the payload to real events. Coverage counts them separately.
       'details.action': { $nin: ['scene_change', 'camera_heartbeat'] },
-    }).sort({ timestamp: 1 }).lean();
+    }).populate('person_id', 'person_name relationship_type').sort({ timestamp: 1 }).lean();
 
     const RoutineFinding = require('../models/RoutineFinding');
     const findings = await RoutineFinding.find({
@@ -249,14 +262,29 @@ router.get('/timeline', auth, async (req, res) => {
           detail: mins ? `${mins} minute${mins === 1 ? '' : 's'}` : 'Briefly',
           confidence: e.confidence, keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'medication_intake') {
+        // Only a CONFIRMED dose is a memory. A needs_verification detection is
+        // a question the system is asking, not a thing that happened, and
+        // showing it as "Panadol taken, waiting for your confirmation" states
+        // the dose as fact in the same breath as admitting it is unverified.
+        // The record still exists for the verification screen to act on; it
+        // simply does not belong in a record of the day until somebody says so.
+        if (e.verification_status !== 'confirmed') continue;
         items.push({ at: e.timestamp, kind: 'medication',
           title: d.medication_name ? `${d.medication_name} taken` : 'Medication taken',
-          detail: e.verification_status === 'pending' ? 'Waiting for your confirmation' : 'Confirmed by the camera',
+          detail: 'Confirmed by the camera',
           confidence: e.confidence, keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'social_interaction') {
+        // The name first, because the name is the memory. "Someone familiar
+        // nearby" is what this said even for a face the wearer had themself
+        // named Onais, which tells them strictly less than they already knew.
+        const name = e.person_id?.person_name || d.person_name || d.person || null;
+        const rel = e.person_id?.relationship_type || d.relationship_type || null;
         items.push({ at: e.timestamp, kind: 'social',
-          title: d.person_name ? `Time with ${d.person_name}` : 'Someone familiar nearby',
-          detail: d.relationship_type || 'Recognised face',
+          title: name ? `You were with ${name}` : 'Someone you know was nearby',
+          detail: name
+            ? (rel ? `Your ${String(rel).toLowerCase()}` : 'A face you have named')
+            : 'Recognised, but not yet named',
+          person_name: name,
           keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'unknown_face') {
         items.push({ at: e.timestamp, kind: 'social', title: 'An unfamiliar face',
