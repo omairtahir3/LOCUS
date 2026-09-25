@@ -619,12 +619,16 @@ class DailyItemIndexer:
         # sighting dropped.
         hand_boxes = self._hand_boxes(image) if detections else None
         img_h, img_w = image.shape[:2]
+        if detections:
+            print(f"[Items] {str(keyframe_id)[:8]} -> "
+                  f"{[d.get('matched_item') or d['name'] for d in detections]} | hands "
+                  + ("unavailable" if hand_boxes is None else f"seen {len(hand_boxes)}"))
         if detections and LOG_ONLY_PLACED_ITEMS and hand_boxes is not None:
             kept = []
             for d in detections:
                 if self._is_held(d["bbox"], hand_boxes, img_w, img_h):
-                    print(f"[DailyItemIndexer] {d.get('matched_item', d['name'])} is in "
-                          f"hand, not recorded as put down")
+                    print(f"[Items] {d.get('matched_item', d['name'])} is in hand, "
+                          f"not recorded as put down")
                     continue
                 d["placement"] = "placed"
                 kept.append(d)
@@ -1309,7 +1313,27 @@ class DailyItemIndexer:
             tracker = SceneSessionTracker()
             self._scene_trackers[user_id_str] = tracker
 
-        room, score, _ = classify_scene(all_detections)
+        room, score, scores = classify_scene(all_detections)
+
+        # One line per indexed frame saying what was seen and what was decided.
+        # "Nothing was recognised" had been indistinguishable from "Tier-2 never
+        # ran" and "the room was recognised but the session has not closed yet",
+        # which need entirely different fixes and cannot be told apart from the
+        # database afterwards.
+        try:
+            from ai.scene import explain_scene
+            top = ", ".join(f"{k}={v:.2f}" for k, v in sorted(
+                all_detections.items(), key=lambda kv: -kv[1])[:6]) or "nothing"
+            if room:
+                live = {r: round(s, 2) for r, s in scores.items() if s > 0}
+                print(f"[Scene] {str(keyframe_id)[:8]} -> {room} ({score:.2f}) "
+                      f"| rooms {live} | saw {top}")
+            else:
+                print(f"[Scene] {str(keyframe_id)[:8]} -> no room: "
+                      f"{explain_scene(all_detections)} | saw {top}")
+        except Exception:
+            pass
+
         ts = time.time()
         session = tracker.observe(room, all_detections, ts,
                                   keyframe_id=keyframe_id, score=score)

@@ -191,6 +191,41 @@ MAX_SESSION_SECONDS = float(os.environ.get("MAX_SESSION_SECONDS", 600))
 MIN_SESSION_SECONDS = 10
 
 
+def explain_scene(detections: dict[str, float]) -> str:
+    """Why no room was claimed, in one short phrase.
+
+    Without this, "no room was recognised" is indistinguishable from "the
+    classifier never ran", "the detector saw nothing" and "the evidence was one
+    point short". Those need completely different fixes, and telling them apart
+    from database residue afterwards is guesswork.
+    """
+    if not detections:
+        return "the detector found no objects at all"
+
+    best_room, best_note = None, None
+    for room, weights in SCENE_WEIGHTS.items():
+        defining = DEFINING_OBJECTS[room] & detections.keys()
+        if not defining:
+            continue
+        strongest = max(detections[c] for c in defining)
+        if strongest < MIN_DEFINING_CONF:
+            note = (f"{room}: {max(defining, key=lambda c: detections[c])} only "
+                    f"{strongest:.2f}, needs {MIN_DEFINING_CONF}")
+        else:
+            contributing = [c for c in weights if c in detections]
+            if len(contributing) < MIN_CONTRIBUTING_CLASSES:
+                note = (f"{room}: only {contributing} matched, needs "
+                        f"{MIN_CONTRIBUTING_CLASSES} different objects")
+            else:
+                note = f"{room}: scored but lost on score or margin"
+        if best_note is None:
+            best_room, best_note = room, note
+    if best_note:
+        return best_note
+    return ("no room's defining object was in view (a bed, a fridge, a couch, "
+            "a toilet or a dining table)")
+
+
 def validate_against_model(model_names) -> list[str]:
     """Report weight keys that no Objects365 class matches.
 
