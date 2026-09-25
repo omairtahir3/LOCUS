@@ -1435,7 +1435,15 @@ class DailyItemIndexer:
             if not vecs:
                 return
 
-            sources = doc.get("embedding_sources") or []
+            sources = list(doc.get("embedding_sources") or [])
+            # Items enrolled before the mapping existed have no sources at all.
+            # The two arrays must stay the same length or the mapping is ignored
+            # wholesale, and the health check silently starts grading the
+            # system's own output instead of the wearer's photos.
+            if len(sources) < len(existing):
+                sources = list(range(len(existing) - len(sources))) + sources
+                db.useritems.update_one({"_id": oid},
+                                        {"$set": {"embedding_sources": sources}})
             next_source = LEARNED_SOURCE_BASE + sum(
                 1 for s in sources if isinstance(s, (int, float)) and s >= LEARNED_SOURCE_BASE)
             db.useritems.update_one({"_id": oid}, {"$push": {
@@ -1554,16 +1562,16 @@ class DailyItemIndexer:
             self._persist_scene_session(
                 session, user_id_str, session.get("keyframe_id"))
 
-        # Write the session that is still OPEN, and keep it up to date. Without
-        # this the feed shows nothing for as long as the wearer stays in one
-        # room: a real recording sat in the bedroom for three minutes, saved
-        # nine frames of it, and produced no memory at all, because the session
-        # had not ended yet. It also means a run that is killed rather than
-        # stopped cleanly no longer loses the room it was in.
-        open_session = tracker.snapshot(ts)
-        if open_session:
-            self._persist_scene_session(
-                open_session, user_id_str, open_session.get("keyframe_id"))
+        # A room is reported when the wearer LEAVES it, with the time spent
+        # there, and not before. Writing the session while it was still open
+        # meant a stretch in one room produced a record that kept being rewritten
+        # as it grew, so the feed carried "Time in the bedroom for 1 min" while
+        # the wearer was still sitting in the bedroom. The event people want is
+        # "you were in the kitchen for twelve minutes", and that sentence cannot
+        # be written until the visit is over.
+        #
+        # flush_scene_sessions() closes whatever is open when the stream stops,
+        # so the final room of a run is still recorded.
 
     def flush_scene_sessions(self, user_id_str: str | None = None):
         """Close open sessions, e.g. when a stream stops."""
