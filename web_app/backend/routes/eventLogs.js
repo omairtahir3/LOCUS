@@ -264,9 +264,14 @@ router.get('/timeline', auth, async (req, res) => {
       } else if (e.event_type === 'object' && d.action === 'item_seen') {
         const named = (d.items || []).filter(i => i.matched_item).map(i => i.matched_item);
         if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
+        // Items are recorded when they leave the wearer's hand, so the entry
+        // says where a thing was PUT, which is what gets looked up later.
+        const placed = d.placement === 'placed';
         items.push({ at: e.timestamp, kind: 'items',
-          title: `Spotted ${[...new Set(named)].slice(0, 3).join(', ')}`,
-          detail: e.location ? 'Seen while out' : 'Seen at home',
+          title: `${placed ? 'Left' : 'Spotted'} ${[...new Set(named)].slice(0, 3).join(', ')}`,
+          detail: placed
+            ? (e.location ? 'Put down while out' : 'Put down at home')
+            : (e.location ? 'Seen while out' : 'Seen at home'),
           keyframe_id: e.keyframe_id || null });
       }
     }
