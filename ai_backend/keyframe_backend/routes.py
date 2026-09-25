@@ -1,11 +1,79 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+import glob
 import os
+import threading
 
 from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR, ItemStorage
 from db_config import get_client, get_db_name
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
+
+# ── Serving keyframe images ─────────────────────────────────────────────────
+#
+# A keyframe is immutable. The id is a uuid minted when the frame is written,
+# the JPEG behind it is never modified, and the only thing that ever happens to
+# it afterwards is deletion by the retention sweeper. It was being served with
+# "no-cache, no-store, must-revalidate", which tells the browser it may never
+# keep a copy, so every poll of the dashboard re-downloaded every thumbnail it
+# had already shown. The same handful of ids appear over and over in a single
+# minute of the server log.
+#
+# Each of those re-downloads also ran up to four glob() calls with wildcards in
+# two path segments, which walks every user directory and every date directory
+# under four storage roots. That is a filesystem scan per thumbnail per poll,
+# on a machine whose CPU is already saturated by inference, which is what made
+# the dashboard feel slow to load frames.
+IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+_PATH_CACHE: dict[str, str] = {}
+_PATH_CACHE_LOCK = threading.Lock()
+# Bounded so a long-running server cannot accumulate one entry per frame ever
+# served. Well above any single dashboard page.
+_PATH_CACHE_MAX = 4096
+
+
+def _resolve_frame(frame_id: str, roots: list[str]) -> str | None:
+    """Find the JPEG for a frame id, remembering where it was.
+
+    Resolution is cached because the answer cannot change: an id maps to one
+    file for as long as that file exists. A cached path is still checked on
+    disk, so a frame removed by the retention sweeper is not served from a
+    stale entry -- it falls through to a fresh search and then a 404.
+    """
+    with _PATH_CACHE_LOCK:
+        hit = _PATH_CACHE.get(frame_id)
+    if hit and os.path.exists(hit):
+        return hit
+    if hit:
+        with _PATH_CACHE_LOCK:
+            _PATH_CACHE.pop(frame_id, None)
+
+    for root in roots:
+        matches = glob.glob(os.path.join(root, "*", "*", f"{frame_id}.jpg"))
+        if not matches:
+            flat = os.path.join(root, f"{frame_id}.jpg")
+            matches = [flat] if os.path.exists(flat) else []
+        if matches:
+            with _PATH_CACHE_LOCK:
+                if len(_PATH_CACHE) >= _PATH_CACHE_MAX:
+                    _PATH_CACHE.clear()
+                _PATH_CACHE[frame_id] = matches[0]
+            return matches[0]
+    return None
+
+
+def _serve_frame(img_path: str) -> FileResponse:
+    """Serve an immutable frame, with an ETag so a revalidating client gets 304."""
+    try:
+        st = os.stat(img_path)
+        etag = f'"{int(st.st_mtime)}-{st.st_size}"'
+    except OSError:
+        etag = None
+    headers = {"Cache-Control": IMAGE_CACHE_CONTROL}
+    if etag:
+        headers["ETag"] = etag
+    return FileResponse(img_path, media_type="image/jpeg", headers=headers)
 
 # Singleton storage instances
 _storage = None
@@ -103,30 +171,12 @@ async def get_keyframe_image(keyframe_id: str):
     """
     Serve a keyframe image by its ID for visual display in the caregiver dashboard.
     """
-    import glob
-    matches = glob.glob(os.path.join(KEYFRAME_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
-    if not matches:
-        matches = glob.glob(os.path.join(SOCIAL_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
-    if not matches:
-        matches = glob.glob(os.path.join(ACTIVITY_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
-    if not matches:
-        matches = glob.glob(os.path.join(ITEMS_STORAGE_DIR, "*", "*", f"{keyframe_id}.jpg"))
-
-    if matches:
-        img_path = matches[0]
-    else:
-        img_path = os.path.join(KEYFRAME_STORAGE_DIR, f"{keyframe_id}.jpg")
-        
-    if not os.path.exists(img_path):
-        # Fallback for old social frames
-        legacy_social = os.path.join(SOCIAL_STORAGE_DIR, f"{keyframe_id}.jpg")
-        if os.path.exists(legacy_social):
-            img_path = legacy_social
-            
-    if not os.path.exists(img_path):
+    img_path = _resolve_frame(keyframe_id, [
+        KEYFRAME_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR,
+    ])
+    if not img_path:
         raise HTTPException(status_code=404, detail="Keyframe image not found")
-
-    return FileResponse(img_path, media_type="image/jpeg", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    return _serve_frame(img_path)
 
 
 @router.get("/sync")
@@ -218,14 +268,7 @@ async def get_medication_frame_image(evidence_id: str):
     """
     Serve an evidence frame image by its ID.
     """
-    import glob
-    matches = glob.glob(os.path.join(MEDICATION_EVIDENCE_STORAGE_DIR, "*", "*", f"{evidence_id}.jpg"))
-    if matches:
-        img_path = matches[0]
-    else:
-        img_path = os.path.join(MEDICATION_EVIDENCE_STORAGE_DIR, f"{evidence_id}.jpg")
-        
-    if not os.path.exists(img_path):
+    img_path = _resolve_frame(evidence_id, [MEDICATION_EVIDENCE_STORAGE_DIR])
+    if not img_path:
         raise HTTPException(status_code=404, detail="Evidence frame not found")
-
-    return FileResponse(img_path, media_type="image/jpeg", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    return _serve_frame(img_path)
