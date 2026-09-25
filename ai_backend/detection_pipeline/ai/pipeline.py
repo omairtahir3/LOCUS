@@ -216,46 +216,62 @@ class MedicationDetectionPipeline:
         except Exception as e:
             print(f"[Pipeline] [DB-Log] Heartbeat failed: {e}")
 
-    def _log_scene_to_db(self, keyframe_id, motion_score):
+    # Kinds that already have an event of their own carrying this same frame:
+    # a dose writes medication_intake, a face writes social_interaction, an
+    # activity writes activity_session. Writing a frame-level record for them
+    # too would show the same moment twice in memory search.
+    FRAME_EVENT_KINDS = {"scene_change", "coverage"}
+
+    def _log_scene_to_db(self, keyframe_id, motion_score, kind="scene_change"):
         """
-        Write a scene change activity log to MongoDB for Behavioral ML baseline.
+        Write a frame-level activity log to MongoDB for Behavioral ML baseline.
+
+        `kind` is what the capture was FOR. A coverage frame is the deliberate
+        every-two-minutes memory that exists so a still stretch is not blank,
+        and it has to be distinguishable from a raw motion burst, which memory
+        search deliberately hides.
         """
         if not self.user_id:
             return
+        ts_now = datetime.utcnow()
         try:
-            from pymongo import MongoClient
             from bson import ObjectId
             client = get_client()
             db = client[get_db_name()]
-            ts_now = datetime.utcnow()
-            doc = {
-                "user_id": ObjectId(str(self.user_id)),
-                "event_type": "activity",
-                "timestamp": ts_now,
-                "confidence": 1.0,
-                "details": {
-                    "action": "scene_change",
-                    "motion_score": motion_score,
-                    "description": "Significant activity detected"
-                },
-                "keyframe_id": keyframe_id,
-                "createdAt": ts_now,
-                "updatedAt": ts_now
-            }
-            self._attach_latest_location(db, doc, ts_now)
-            db.eventlogs.insert_one(doc)
-            print(f"[Pipeline] [DB-Log] Logged scene_change activity event for {self.user_id}")
-
-            # Tier-2 Asynchronous Daily Life Item Indexer (Passive indexing for Memory Search)
-            try:
-                from .item_indexer import DailyItemIndexer
-                DailyItemIndexer.get_instance().enqueue_keyframe(
-                    keyframe_id, None, {"user_id": str(self.user_id), "timestamp": ts_now.isoformat()}
-                )
-            except Exception as e:
-                print(f"[Pipeline] [ItemIndexer Hook Note] {e}")
+            if kind in self.FRAME_EVENT_KINDS:
+                doc = {
+                    "user_id": ObjectId(str(self.user_id)),
+                    "event_type": "activity",
+                    "timestamp": ts_now,
+                    "confidence": 1.0,
+                    "details": {
+                        "action": kind,
+                        "motion_score": motion_score,
+                        "description": ("A moment from the day"
+                                        if kind == "coverage"
+                                        else "Significant activity detected"),
+                    },
+                    "keyframe_id": keyframe_id,
+                    "createdAt": ts_now,
+                    "updatedAt": ts_now,
+                }
+                self._attach_latest_location(db, doc, ts_now)
+                db.eventlogs.insert_one(doc)
+                print(f"[Pipeline] [DB-Log] Logged {kind} frame for {self.user_id}")
         except Exception as e:
-            print(f"[Pipeline] [DB-Log] Error logging scene change: {e}")
+            print(f"[Pipeline] [DB-Log] Error logging {kind} frame: {e}")
+
+        # Tier-2 indexing runs for EVERY saved frame, whatever it was captured
+        # for. A medication or social frame still contains objects worth
+        # indexing and still tells the room classifier where the wearer is;
+        # feeding it only motion bursts is why the kitchen went unrecognised.
+        try:
+            from .item_indexer import DailyItemIndexer
+            DailyItemIndexer.get_instance().enqueue_keyframe(
+                keyframe_id, None, {"user_id": str(self.user_id), "timestamp": ts_now.isoformat()}
+            )
+        except Exception as e:
+            print(f"[Pipeline] [ItemIndexer Hook Note] {e}")
 
     def _observe_activity(self, act_result):
         """Feed one activity observation to the session tracker.

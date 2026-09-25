@@ -16,6 +16,7 @@ const KIND = {
   social:     { icon: Brain,         color: 'var(--accent)' },
   items:      { icon: Package,       color: 'var(--info)' },
   activity:   { icon: Activity,      color: 'var(--accent)' },
+  moment:     { icon: Clock,         color: 'var(--text-muted, #6b7280)' },
   anomaly:    { icon: AlertTriangle, color: 'var(--warning)' },
 };
 

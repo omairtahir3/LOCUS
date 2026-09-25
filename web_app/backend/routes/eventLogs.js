@@ -39,6 +39,12 @@ router.get('/memory-search', auth, async (req, res) => {
       // camera_heartbeat is excluded for a different reason: it is liveness
       // bookkeeping written every minute with NO image, so it would flood the
       // day with entries that have nothing to show.
+      //
+      // 'coverage' is NOT excluded. It is the deliberate every-two-minutes
+      // frame, captured precisely so a stretch where nothing was recognised
+      // still leaves the person something to look at. A whole eight-minute
+      // recording in the wearer's own bedroom produced no memory at all
+      // because every frame it saved was filed as a raw motion burst.
       'details.action': { $nin: ['scene_change', 'camera_heartbeat'] },
       verification_status: { $ne: 'rejected' }
     };
@@ -226,6 +232,12 @@ router.get('/timeline', auth, async (req, res) => {
           title: `${d.scene ? d.scene[0].toUpperCase() + d.scene.slice(1) : 'Room'} activity`,
           detail: mins ? `${mins} minute${mins === 1 ? '' : 's'}` : 'Brief visit',
           keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'activity' && d.action === 'coverage') {
+        // A periodic frame from a stretch we could not name. Worth showing:
+        // "nothing was recognised here" and "nothing happened here" are
+        // different, and only one of them should look empty.
+        items.push({ at: e.timestamp, kind: 'moment', title: 'A moment from the day',
+          detail: 'No room or activity recognised', keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'activity' && d.action === 'activity_session') {
         // A confirmed stretch of one activity, not a guess about one frame.
         // Per-frame activity labels were removed because they hallucinated;

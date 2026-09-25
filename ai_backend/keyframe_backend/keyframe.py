@@ -1186,18 +1186,24 @@ class KeyframeExtractor:
             # frame contributes its objects to the scene tracker too. Starving
             # that tracker of everything except motion spikes is exactly why the
             # kitchen was never recognised.
+            #
+            # The KIND travels with it. Without it every event frame was written
+            # to the database as a raw motion burst, and memory search hides
+            # those -- so a coverage frame, whose entire purpose is to give a
+            # still stretch something to show, was filed under the one label
+            # guaranteed to keep it hidden.
             if self.on_scene_saved:
-                self.on_scene_saved(keyframe_id, metadata.get("motion_score", 0.0))
+                motion = metadata.get("motion_score", 0.0)
+                try:
+                    self.on_scene_saved(keyframe_id, motion, kind)
+                except TypeError:
+                    # An older two-argument callback. Falling back matters:
+                    # this same call is what hands the frame to Tier-2, so
+                    # letting the TypeError escape would stop item indexing and
+                    # room tracking for every event frame, silently.
+                    self.on_scene_saved(keyframe_id, motion)
         except Exception as e:
             print(f"[KeyframeExtractor] ERROR saving {kind} {keyframe_id}: {e}")
-
-    def _save_scene_async(self, keyframe_id, frame, metadata, motion_score):
-        try:
-            self.storage.save(keyframe_id, frame, metadata)
-            if self.on_scene_saved:
-                self.on_scene_saved(keyframe_id, motion_score)
-        except Exception as e:
-            print(f"[KeyframeExtractor] ERROR saving scene {keyframe_id}: {e}")
 
 
 

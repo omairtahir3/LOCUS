@@ -8,6 +8,76 @@ const { notifyCaregiversMissedDose } = require('../utils/notifications');
 const router = express.Router();
 router.use(protect);
 
+/**
+ * One EventLog per DOSE, for every path that can record one.
+ *
+ * Three copies of this logic existed and each had its own gap. Two of them
+ * keyed the upsert on medication_id with no time component, so a medication
+ * could hold only ONE intake record in its entire history and every later dose
+ * silently matched the first. One of them wrote a record only for 'taken', so a
+ * camera detection scoring below the auto-verify bar left no trace at all
+ * against a log the scheduler had already created, which is the normal case.
+ *
+ * `when` is the moment the dose was TAKEN, not the moment we found out. A
+ * camera detection observes the intake as it happens, so its taken_at is the
+ * real thing. A manual confirmation carries no information about when: its
+ * taken_at is just when somebody pressed the button, and using it files a
+ * breakfast dose confirmed at bedtime under bedtime. The scheduled time is the
+ * honest anchor there, which is what the wearer asked for: events belong in the
+ * feed at the time they happened.
+ */
+function intakeMoment({ takenAt, method, scheduledTime }) {
+  if (method === 'visual' && takenAt) return new Date(takenAt);
+  if (scheduledTime) {
+    const s = new Date(scheduledTime);
+    if (!isNaN(s.getTime())) return s;
+  }
+  return takenAt ? new Date(takenAt) : new Date();
+}
+
+async function writeIntakeEventLog({
+  userId, med, logId, status, confidence, keyframeId, takenAt, method, scheduledTime,
+}) {
+  if (status !== 'taken' && status !== 'needs_verification') return;
+  const EventLog = require('../models/EventLog');
+  const LocationLog = require('../models/LocationLog');
+
+  const timestamp = intakeMoment({ takenAt, method, scheduledTime });
+
+  let locationData;
+  const latestLoc = await LocationLog.findOne({ user_id: userId }).sort({ timestamp: -1 });
+  if (latestLoc && latestLoc.timestamp) {
+    const stalenessMin = (new Date() - new Date(latestLoc.timestamp)) / 1000 / 60;
+    if (stalenessMin <= 30) locationData = { lat: latestLoc.lat, lng: latestLoc.lng };
+    else console.log(`[EventLog] Skipped GPS attach: Location stale by ${stalenessMin.toFixed(1)} mins`);
+  }
+
+  // Keyed on the dose's own log id, so repeat detections of the SAME dose
+  // update one record while a later dose gets its own.
+  await EventLog.findOneAndUpdate(
+    { user_id: userId, event_type: 'medication_intake', 'details.medication_log_id': logId },
+    {
+      $set: {
+        confidence: confidence || 1.0,
+        verification_status: status === 'taken' ? 'confirmed' : 'pending',
+        // In $set, not $setOnInsert: a dose first seen as needs_verification
+        // and confirmed later must move to the moment it was actually taken,
+        // not stay at the moment it was first noticed.
+        timestamp,
+        ...(keyframeId ? { keyframe_id: keyframeId } : {}),
+        ...(locationData ? { location: locationData } : {}),
+      },
+      $setOnInsert: {
+        details: {
+          medication_name: med.name, dosage: med.dosage, medication_id: med._id,
+          medication_log_id: logId, detection_status: status,
+        },
+      },
+    },
+    { upsert: true, new: true }
+  );
+}
+
 
 // ── Medications CRUD ──────────────────────────────────────────────────────────
 
@@ -151,48 +221,7 @@ router.post('/logs', async (req, res) => {
     const Medication = require('../models/Medication');
     const MedicationLog = require('../models/MedicationLog');
 
-    // One EventLog per DOSE, written the same way whether the MedicationLog was
-    // just created or already existed. Two bugs lived in having two copies of
-    // this: the update path wrote an EventLog only for 'taken', so a
-    // needs_verification detection against a log the scheduler had already
-    // created (which is the normal case) left no memory record at all; and it
-    // keyed the upsert on medication_id alone with no time component, so a
-    // medication could only ever have ONE intake record in its whole history
-    // and every later dose silently matched the first. A memory aid that cannot
-    // answer "did I take it today?" for a repeat medication is not working.
-    const writeIntakeEventLog = async ({ logId, status, confidence_score, keyframe_id }) => {
-      if (status !== 'taken' && status !== 'needs_verification') return;
-      const EventLog = require('../models/EventLog');
-      const LocationLog = require('../models/LocationLog');
-      let locationData;
-      const latestLoc = await LocationLog.findOne({ user_id: targetUserId }).sort({ timestamp: -1 });
-      if (latestLoc && latestLoc.timestamp) {
-        const stalenessMin = (new Date() - new Date(latestLoc.timestamp)) / 1000 / 60;
-        if (stalenessMin <= 30) locationData = { lat: latestLoc.lat, lng: latestLoc.lng };
-        else console.log(`[EventLog] Skipped GPS attach: Location stale by ${stalenessMin.toFixed(1)} mins`);
-      }
-      // Keyed on the dose's own log id, so repeat detections of the SAME dose
-      // update one record while a later dose gets its own.
-      await EventLog.findOneAndUpdate(
-        { user_id: targetUserId, event_type: 'medication_intake', 'details.medication_log_id': logId },
-        {
-          $set: {
-            confidence: confidence_score || 1.0,
-            verification_status: status === 'taken' ? 'confirmed' : 'pending',
-            ...(keyframe_id ? { keyframe_id } : {}),
-            ...(locationData ? { location: locationData } : {}),
-          },
-          $setOnInsert: {
-            timestamp: new Date(),
-            details: {
-              medication_name: med.name, dosage: med.dosage, medication_id: med._id,
-              medication_log_id: logId, detection_status: status,
-            },
-          },
-        },
-        { upsert: true, new: true }
-      );
-    };
+    // Both paths below use the module-level writeIntakeEventLog.
 
     let med = null;
     if (req.user.role === 'internal_ai' || req.user.role === 'system') {
@@ -257,7 +286,10 @@ router.post('/logs', async (req, res) => {
       // needs_verification too: the camera did detect an intake, it just scored
       // below the auto-verify bar, and hiding it means the dose never appears.
       await writeIntakeEventLog({
-        logId: existing._id, status, confidence_score, keyframe_id,
+        userId: targetUserId, med, logId: existing._id, status,
+        confidence: confidence_score, keyframeId: keyframe_id,
+        takenAt: existing.taken_at, method: verification_method,
+        scheduledTime: parsedScheduledTime,
       });
 
       return res.status(200).json({ ...existing.toObject(), medication_name: med.name, dosage: med.dosage });
@@ -303,7 +335,12 @@ router.post('/logs', async (req, res) => {
           await notifyUserTakenDose(patient, med, log._id);
         }
       }
-      await writeIntakeEventLog({ logId: log._id, status, confidence_score, keyframe_id });
+      await writeIntakeEventLog({
+        userId: targetUserId, med, logId: log._id, status,
+        confidence: confidence_score, keyframeId: keyframe_id,
+        takenAt: log.taken_at, method: verification_method,
+        scheduledTime: parsedScheduledTime,
+      });
     }
 
     res.status(201).json({ ...log.toObject(), medication_name: med.name, dosage: med.dosage });
@@ -405,25 +442,18 @@ router.patch('/logs/:logId', async (req, res) => {
           await notifyCaregiversTakenDose(patient, med, log._id);
           await notifyUserTakenDose(patient, med, log._id);
         }
-        // Write to centralized EventLog MongoDB collection
-        const EventLog = require('../models/EventLog');
-        await EventLog.findOneAndUpdate(
-          { 
-            user_id: log.user_id, 
-            event_type: 'medication_intake', 
-            'details.medication_id': med._id 
-          },
-          {
-            $setOnInsert: {
-              timestamp: new Date(),
-              confidence: log.confidence_score || 1.0,
-              details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
-              keyframe_id: log.keyframe_id || null,
-              verification_status: 'confirmed'
-            }
-          },
-          { upsert: true, new: true }
-        );
+        // Manual confirmation. This path carried both of the bugs the shared
+        // helper exists to fix, and it is the one the wearer hits by hand: it
+        // keyed on medication_id with no time, so confirming today's dose
+        // matched a record from days ago and wrote nothing, and it stamped the
+        // event with the moment of confirmation rather than the moment the
+        // dose was taken.
+        await writeIntakeEventLog({
+          userId: log.user_id, med, logId: log._id, status: 'taken',
+          confidence: log.confidence_score, keyframeId: log.keyframe_id,
+          takenAt: log.taken_at, method: log.verification_method,
+          scheduledTime: log.scheduled_time,
+        });
       }
     }
 
