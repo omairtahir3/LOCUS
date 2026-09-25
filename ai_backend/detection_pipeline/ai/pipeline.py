@@ -2159,7 +2159,12 @@ class MedicationDetectionPipeline:
                                 # report a room over a span of time rather than an action
                                 # in an instant. The plugin still runs because its
                                 # result feeds Tier-2's metadata.
-                                if act_result and EMIT_PER_FRAME_ACTIVITY_EVENTS:
+                                # A repeat reading is the same ongoing activity,
+                                # so it feeds the session tracker but must not
+                                # produce another event if per-frame events are
+                                # ever switched back on.
+                                if (act_result and EMIT_PER_FRAME_ACTIVITY_EVENTS
+                                        and not (getattr(act_result, 'attributes', None) or {}).get('is_repeat')):
                                     self._log_activity_result_to_db(act_result)
                                 # Sessions, not frames. Switching the per-frame
                                 # events off removed the hallucinations and the

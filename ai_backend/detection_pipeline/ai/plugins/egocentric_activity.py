@@ -476,17 +476,31 @@ class EgocentricActivityPlugin(DetectorPlugin):
             import time as _t
             state = activity_found if activity_found else ('env', env_found)
             now_ts = _t.monotonic()
-            if self._last_event and self._last_event[0] == state \
-                    and (now_ts - self._last_event[1]) < ACTIVITY_DEDUP_SECONDS:
-                print(f"[ACT-DEBUG] EXIT: duplicate {state!r} within {ACTIVITY_DEDUP_SECONDS}s window")
-                return None
+            is_repeat = bool(
+                self._last_event and self._last_event[0] == state
+                and (now_ts - self._last_event[1]) < ACTIVITY_DEDUP_SECONDS)
+            if is_repeat:
+                # Reported, not swallowed. This window exists to stop duplicate
+                # EVENTS, and per-frame activity events are switched off, so all
+                # returning None achieved was starving the session tracker that
+                # replaced them: it needs several observations close together to
+                # confirm an activity, and one reading every 120 seconds can
+                # never reach that. A real recording found 'typing' on eight
+                # consecutive batches and formed no session at all, because
+                # seven of them were discarded here. The frame is still not
+                # written twice; only the reading is passed on.
+                print(f"[ACT-DEBUG] ongoing {state!r} (within {ACTIVITY_DEDUP_SECONDS}s window)")
             # A window-expiry repeat of the SAME state is the same ongoing
             # activity, so it still logs an event but does not need another
             # near-identical frame on disk. Only a genuine state change is
             # worth storing evidence for — one frame per activity, not one
             # per window.
             is_state_change = (self._last_event is None) or (self._last_event[0] != state)
-            self._last_event = (state, now_ts)
+            # The window is measured from the FIRST sighting of this state, as
+            # it was when a repeat returned early here. Refreshing it on every
+            # repeat would mean it never expires while the activity continues.
+            if not is_repeat:
+                self._last_event = (state, now_ts)
 
             # 3. Generate Sentence
             if activity_found and env_found:
@@ -501,6 +515,10 @@ class EgocentricActivityPlugin(DetectorPlugin):
                 "sentence": sentence,
                 "activity": activity_found,
                 "environment": env_found,
+                # True when this reading repeats one already inside the dedup
+                # window. The session tracker wants every reading; anything that
+                # emits a per-frame event should honour this.
+                "is_repeat": is_repeat,
                 "detected_objects": list(set(detected_classes)),
                 # Raw YOLO confidences behind this event. `confidence` on the
                 # event itself is a fixed tier (0.80 for environment-only), so

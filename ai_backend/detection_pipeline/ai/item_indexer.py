@@ -1272,16 +1272,26 @@ class DailyItemIndexer:
 
     def _is_held(self, bbox: dict, hand_boxes: list[dict] | None,
                  frame_w: int, frame_h: int) -> bool:
-        """Is this item in the wearer's hand right now?"""
-        x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-        area = max(1, (x2 - x1) * (y2 - y1))
+        """Is this item in the wearer's hand right now?
 
-        # Filling the view means it is at the camera, whatever the hands say.
-        if area / float(max(1, frame_w * frame_h)) >= ITEM_HELD_MAX_AREA_FRAC:
-            return True
+        Decided by the hands, and only by the hands. An earlier version also
+        called anything filling 30% of the frame "held", on the reasoning that
+        it must be right at the camera. On real frames that rule fired on a
+        laptop sitting on a desk, and the log said so in one line:
+
+            [Items] c2f03780 -> ['Laptop', 'Cell Phone'] | hands seen 0
+            [Items] Laptop is in hand, not recorded as put down
+
+        No hands were in frame and it was still called held, so the laptop was
+        never recorded as put down. A detector that looked and saw no hands is
+        evidence, and overruling it by bounding-box size contradicted the only
+        measurement being taken.
+        """
         if not hand_boxes:
             return False      # [] is real evidence; None was handled by caller
 
+        x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+        area = max(1, (x2 - x1) * (y2 - y1))
         pad = int(ITEM_HELD_NEAR_FRAC * frame_w)
         for hb in hand_boxes:
             hx1, hy1 = hb["x1"] - pad, hb["y1"] - pad
