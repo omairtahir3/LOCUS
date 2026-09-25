@@ -161,9 +161,10 @@ export default function MemorySearch() {
       };
     } else if (ev.event_type === 'object') {
       const itemsList = ev.details?.item_names || (ev.details?.items ? ev.details.items.map(it => it.name) : []);
-      const placed = ev.details?.placement === 'placed';
+      // A sighting. "Left" is a departure claim and belongs to the routine
+      // monitor's left_behind alert, not to one frame of a resting object.
       const titleText = itemsList.length > 0
-        ? `${placed ? 'Left' : 'Spotted'} ${itemsList.slice(0, 3).join(', ')}${itemsList.length > 3 ? ` +${itemsList.length - 3} more` : ''}${placed ? ' here' : ''}`
+        ? `Spotted ${itemsList.slice(0, 3).join(', ')}${itemsList.length > 3 ? ` +${itemsList.length - 3} more` : ''}`
         : (ev.details?.summary || 'Items detected');
       // How sure we are this is THIS person's belonging, which is what the
       // entry claims. ev.confidence used to be YOLO's "is this a phone at all"

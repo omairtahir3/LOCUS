@@ -49,6 +49,12 @@ const WAKING_END_HOUR = 23;
 // seen in that room during the session and not seen since is left behind.
 const LEFT_BEHIND_WINDOW_MIN = 10;
 
+// How long an item must have been out of view, having last been seen PUT DOWN,
+// before it counts as left behind rather than momentarily out of shot. Ten
+// minutes is long enough that the wearer has plainly moved on, and short enough
+// to still be useful while they are in the same building.
+const LEFT_BEHIND_AFTER_MIN = 10;
+
 // ── Outdoor item loss (both roles) — Core FE-12, FE-15 ──────────────────────
 // A chest camera cannot see an item in a pocket or a bag, so "not seen for N
 // minutes outdoors" would fire constantly and is NOT the rule. The detectable
@@ -236,39 +242,93 @@ async function checkDeviation(user, profile, now = new Date()) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function checkLeftBehind(user, sinceRun, now = new Date()) {
-  // Sessions that closed since the last run = rooms the user just left.
-  const closed = await EventLog.find({
-    user_id: { $in: idForms(user._id) }, 'details.action': 'scene_session',
-    createdAt: { $gte: sinceRun },
-  }).lean();
+  // "You walked away and left it there."
+  //
+  // This used to trigger only when a room SESSION closed, and it never fired
+  // once in the system's whole history. Rooms are recognised far less often
+  // than items are, so the two almost never coincided, and a phone left on a
+  // desk in a room the classifier could not name produced nothing at all. It
+  // also keyed on the session's createdAt, which stopped meaning "just closed"
+  // once sessions began being written while still open.
+  //
+  // The trigger is now the item itself: last seen PUT DOWN, not seen since,
+  // and long enough ago to be a departure rather than a glance away. Placement
+  // is what makes this safe. The reason a plain "not seen for N minutes" rule
+  // was rejected for outdoor tracking is that a chest camera cannot see an item
+  // in a pocket, so it would fire constantly. An item we watched leave the hand
+  // onto a surface is a different claim: we know where it is, and we know it is
+  // not on the person.
+  if (!isWakingHours(now)) return [];
   const out = [];
-  for (const s of closed) {
-    const room = s.details?.scene;
-    const start = new Date(s.timestamp);
-    const end = new Date(+start + (s.details?.duration_seconds || 0) * 1000);
-    if (!room) continue;
-    const sightings = await EventLog.find({
-      user_id: { $in: idForms(user._id) }, event_type: 'object',
-      timestamp: { $gte: new Date(+end - LEFT_BEHIND_WINDOW_MIN * 60000), $lte: end },
-    }).lean();
-    const items = new Map();
-    for (const o of sightings) for (const it of (o.details?.items || []))
-      if (it.enrolled_item_id && it.matched_item) items.set(it.enrolled_item_id, it.matched_item);
-    for (const [itemId, name] of items) {
-      const seenSince = await EventLog.exists({
-        user_id: { $in: idForms(user._id) }, event_type: 'object',
-        'details.items.enrolled_item_id': itemId, timestamp: { $gt: end },
+  const cutoff = minutesAgo(LEFT_BEHIND_AFTER_MIN, now);
+
+  const sightings = await EventLog.find({
+    user_id: { $in: idForms(user._id) }, event_type: 'object',
+    timestamp: { $gte: hoursAgo(ITEM_LOST_LOOKBACK_HOURS, now), $lte: now },
+  }).sort({ timestamp: -1 }).lean();
+
+  // Newest sighting per item; the list is sorted descending, so the first wins.
+  // Keyed by STRING. An ObjectId is an object, so Map.has() compares by
+  // reference and two ids with the same value never match: every sighting looks
+  // new, the oldest one ends up winning, and the alert cites a sighting the
+  // wearer has long since walked back to. It also means an item picked up again
+  // still reports as left behind.
+  const lastSeen = new Map();
+  for (const o of sightings) {
+    for (const it of (o.details?.items || [])) {
+      if (!it.enrolled_item_id || !it.matched_item) continue;
+      if (lastSeen.has(String(it.enrolled_item_id))) continue;
+      lastSeen.set(String(it.enrolled_item_id), {
+        name: it.matched_item,
+        at: new Date(o.timestamp),
+        keyframe_id: o.keyframe_id || null,
+        placed: it.placement === 'placed' || o.details?.placement === 'placed',
       });
-      if (seenSince) continue;
-      const dedup_key = `${user._id}:leftbehind:${itemId}:${Math.floor(+end / 1000)}`;
-      const w = itemWords(name);
-      const f = await record(user, 'left_behind', dedup_key, 'info',
-        `Your ${w.name} ${w.were} left in the ${room}`,
-        `Looks like your ${w.name} ${w.were} still in the ${room} when you left at ${timeWords(end)}. ` +
-        `${w.they === 'they' ? 'They' : 'It'} should still be there.`,
-        { item_id: itemId, room, session_end: end });
-      if (f) out.push(f);
     }
+  }
+
+  for (const [itemId, s] of lastSeen) {
+    // In hand when last seen means it went with them.
+    if (!s.placed) continue;
+    if (s.at > cutoff) continue;
+
+    // The camera has to have been running since. Otherwise "not seen again"
+    // only means nobody was looking, which is not evidence of anything.
+    const stillWatching = await EventLog.exists({
+      user_id: { $in: idForms(user._id) },
+      'details.action': { $in: ['camera_heartbeat', 'scene_change', 'coverage'] },
+      timestamp: { $gt: s.at },
+    });
+    if (!stillWatching) continue;
+
+    // Where it was, if a room was known at that moment. Absence of a room does
+    // not block the alert; it only makes the wording less specific.
+    let room = null;
+    const session = await EventLog.findOne({
+      user_id: { $in: idForms(user._id) }, 'details.action': 'scene_session',
+      timestamp: { $lte: s.at },
+    }).sort({ timestamp: -1 }).lean();
+    if (session) {
+      const end = new Date(+new Date(session.timestamp) +
+        (session.details?.duration_seconds || 0) * 1000);
+      // Only claim the room if the sighting actually falls inside that session.
+      if (s.at <= new Date(+end + LEFT_BEHIND_WINDOW_MIN * 60000)) {
+        room = session.details?.scene || null;
+      }
+    }
+
+    // One alert per sighting, not per monitor run.
+    const dedup_key = `${user._id}:leftbehind:${itemId}:${Math.floor(+s.at / 1000)}`;
+    const w = itemWords(s.name);
+    const where = room ? ` in the ${room}` : '';
+    const f = await record(user, 'left_behind', dedup_key, 'info',
+      `You left your ${w.name} behind`,
+      `Your ${w.name} ${w.were} put down${where} at ${timeWords(s.at)} and ` +
+      `${w.they === 'they' ? 'have' : 'has'} not been in view since. ` +
+      `${w.they === 'they' ? 'They' : 'It'} should still be there.`,
+      { item_id: itemId, item_name: s.name, room, last_seen_at: s.at,
+        keyframe_id: s.keyframe_id });
+    if (f) out.push(f);
   }
   return out;
 }
@@ -318,11 +378,15 @@ async function checkOutdoorItemLost(user, now = new Date()) {
     'location.lat': { $exists: true },
   }).sort({ timestamp: -1 }).lean();
 
+  // Keyed by STRING, for the same reason as checkLeftBehind above: an ObjectId
+  // key is compared by reference, so the newest-wins rule silently inverted and
+  // the oldest sighting was the one reported.
   const lastSeen = new Map();   // itemId -> {name, at, where, keyframe_id}
   for (const ev of sightings) {
     for (const it of (ev.details?.items || [])) {
-      if (!it.enrolled_item_id || !it.matched_item || lastSeen.has(it.enrolled_item_id)) continue;
-      lastSeen.set(it.enrolled_item_id, {
+      if (!it.enrolled_item_id || !it.matched_item
+          || lastSeen.has(String(it.enrolled_item_id))) continue;
+      lastSeen.set(String(it.enrolled_item_id), {
         name: it.matched_item, at: new Date(ev.timestamp),
         where: { lat: ev.location.lat, lng: ev.location.lng }, keyframe_id: ev.keyframe_id,
       });
@@ -425,5 +489,5 @@ module.exports = {
   checkMedicationGap, checkInactivityAndCamera, checkDeviation, checkLeftBehind, checkHabitualItems,
   checkOutdoorItemLost, escalateUnacknowledgedItemLoss,
   MED_GAP_DAYS, INACTIVITY_HOURS, MOTION_FLOOR, STREAM_ALIVE_MIN, CAMERA_OFF_HOURS, LEFT_BEHIND_WINDOW_MIN,
-  ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN,
+  ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN, LEFT_BEHIND_AFTER_MIN,
 };

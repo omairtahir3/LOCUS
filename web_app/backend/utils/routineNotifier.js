@@ -33,11 +33,13 @@ const KIND_TO_TYPE = {
   item_lost:      'routine_item_lost',
 };
 
-// item_lost is the one finding whose FIRST recipient is the user even when the
-// user is elderly: the person who can walk back and pick it up is the person
-// holding the phone. Caregivers come in via deliverEscalation if the user does
-// not acknowledge within ITEM_LOST_ESCALATE_MIN.
-const USER_FIRST_KINDS = new Set(['item_lost']);
+// The findings whose FIRST recipient is the user even when the user is
+// elderly: the person who can walk back and pick the thing up is the person
+// wearing the camera. Telling only a caregiver that somebody left their phone
+// in the kitchen helps nobody who is standing next to the kitchen. Caregivers
+// come in via deliverEscalation if the user does not acknowledge within
+// ITEM_LOST_ESCALATE_MIN.
+const USER_FIRST_KINDS = new Set(['item_lost', 'left_behind']);
 
 async function recipientsFor(subject, kind) {
   const User = require('../models/User');
