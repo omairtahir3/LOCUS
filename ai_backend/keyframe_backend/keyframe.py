@@ -1147,7 +1147,16 @@ class KeyframeExtractor:
             diff = cv2.absdiff(self.prev_frame, gray_small)
             motion_score = float(np.mean(diff))
             self.prev_frame = gray_small
-            
+
+        # Exposed so the pipeline's liveness heartbeat can report how much
+        # movement there was, including when there was none. Without this the
+        # only record of motion is a scene_change, which is never written while
+        # somebody sits still -- so "camera on, person motionless" looked
+        # exactly like "camera off".
+        self.last_motion_score = motion_score
+        self.peak_motion_since_heartbeat = max(
+            getattr(self, "peak_motion_since_heartbeat", 0.0), motion_score)
+
         import time as _t
         now_fps = _t.time()
         if not hasattr(self, '_fps_log_time'):

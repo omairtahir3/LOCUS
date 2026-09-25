@@ -47,6 +47,10 @@ CAPTURE_FPS = float(os.environ.get("CAPTURE_FPS", 5.0))
 # the last pass, so no frame is skipped and none is examined twice.
 BUFFER_SECONDS = float(os.environ.get("BUFFER_SECONDS", 30.0))
 BATCH_ANALYSIS_FRAMES = int(BUFFER_SECONDS * CAPTURE_FPS)
+# How often the camera says "still here", regardless of movement. Comfortably
+# under routineMonitor's STREAM_ALIVE_MIN (30 min) so a single missed write
+# cannot be mistaken for the camera going off.
+HEARTBEAT_SECONDS = float(os.environ.get("HEARTBEAT_SECONDS", 60.0))
 
 # Per-frame activity events are retired in favour of Tier-2 environment
 # sessions. Flip to True to restore the old behaviour for comparison.
@@ -171,6 +175,46 @@ class MedicationDetectionPipeline:
                     print(f"[Pipeline] [DB-Log] Skipped GPS attach: Location stale by {staleness:.1f} mins (Threshold: {GPS_STALENESS_THRESHOLD_MINUTES})")
         except Exception as e:
             print(f"[Pipeline] [DB-Log] Error attaching location: {e}")
+
+    def _log_heartbeat_to_db(self, peak_motion, frames_seen):
+        """Proof the camera was running, written whether or not anything moved.
+
+        Core FE-4's inactivity check needs to tell "camera on, person has not
+        moved for three hours" apart from "camera off". Until now the only
+        evidence a camera was alive was a scene_change record, and those are
+        only written when motion exceeds the scene threshold -- so somebody
+        sitting perfectly still produced no records at all and the monitor
+        reported the camera as OFF. Those two conclusions send a caregiver in
+        opposite directions: check the device, or check the person.
+
+        A heartbeat carries no image and no detection, just liveness and the
+        peak motion since the last one, so it costs almost nothing to keep.
+        """
+        if not self.user_id:
+            return
+        try:
+            from bson import ObjectId
+            db = get_client()[get_db_name()]
+            ts_now = datetime.utcnow()
+            doc = {
+                "user_id": ObjectId(str(self.user_id)),
+                "event_type": "activity",
+                "timestamp": ts_now,
+                "confidence": 1.0,
+                "details": {
+                    "action": "camera_heartbeat",
+                    "motion_score": round(float(peak_motion), 2),
+                    "frames": int(frames_seen),
+                    "description": "Camera running",
+                },
+                "keyframe_id": None,
+                "createdAt": ts_now,
+                "updatedAt": ts_now,
+            }
+            self._attach_latest_location(db, doc, ts_now)
+            db.eventlogs.insert_one(doc)
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log] Heartbeat failed: {e}")
 
     def _log_scene_to_db(self, keyframe_id, motion_score):
         """
@@ -1738,6 +1782,21 @@ class MedicationDetectionPipeline:
 
                 # Step 2: Buffer the frame for AI analysis
                 keyframe = self.extractor.process_frame(frame)
+
+                # Liveness heartbeat: proof the camera is running even when
+                # nothing is moving (see _log_heartbeat_to_db).
+                if not hasattr(self, '_last_heartbeat'):
+                    self._last_heartbeat = time.time()
+                    self._heartbeat_frames = 0
+                self._heartbeat_frames += 1
+                if time.time() - self._last_heartbeat >= HEARTBEAT_SECONDS:
+                    peak = getattr(self.extractor, 'peak_motion_since_heartbeat', 0.0)
+                    threading.Thread(
+                        target=self._log_heartbeat_to_db,
+                        args=(peak, self._heartbeat_frames), daemon=True).start()
+                    self.extractor.peak_motion_since_heartbeat = 0.0
+                    self._last_heartbeat = time.time()
+                    self._heartbeat_frames = 0
 
                 # ===========================================================
                 # BATCH KEYFRAME ANALYSIS — runs every 5 seconds
