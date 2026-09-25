@@ -222,18 +222,33 @@ class MedicationDetectionPipeline:
     # too would show the same moment twice in memory search.
     FRAME_EVENT_KINDS = {"scene_change", "coverage"}
 
-    def _log_scene_to_db(self, keyframe_id, motion_score, kind="scene_change"):
+    def _log_scene_to_db(self, keyframe_id, motion_score, meta=None):
         """
         Write a frame-level activity log to MongoDB for Behavioral ML baseline.
 
-        `kind` is what the capture was FOR. A coverage frame is the deliberate
-        every-two-minutes memory that exists so a still stretch is not blank,
-        and it has to be distinguishable from a raw motion burst, which memory
-        search deliberately hides.
+        `meta` is the saved frame's metadata. Two things are read from it. The
+        event_type is what the capture was FOR: a coverage frame is the
+        deliberate every-two-minutes memory that exists so a still stretch is
+        not blank, and it must be distinguishable from a raw motion burst,
+        which memory search deliberately hides. The timestamp is when the frame
+        was TAKEN; the sharpest frame in the rolling window can be a few
+        seconds old by the time it is chosen, and the final flush of a run is
+        older still.
         """
         if not self.user_id:
             return
+        meta = meta if isinstance(meta, dict) else {}
+        kind = meta.get("event_type") or "scene_change"
         ts_now = datetime.utcnow()
+        captured_at = ts_now
+        raw = meta.get("timestamp")
+        if isinstance(raw, str) and raw:
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                captured_at = (parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                               if parsed.tzinfo else parsed)
+            except ValueError:
+                pass
         try:
             from bson import ObjectId
             client = get_client()
@@ -242,7 +257,7 @@ class MedicationDetectionPipeline:
                 doc = {
                     "user_id": ObjectId(str(self.user_id)),
                     "event_type": "activity",
-                    "timestamp": ts_now,
+                    "timestamp": captured_at,
                     "confidence": 1.0,
                     "details": {
                         "action": kind,
@@ -268,7 +283,11 @@ class MedicationDetectionPipeline:
         try:
             from .item_indexer import DailyItemIndexer
             DailyItemIndexer.get_instance().enqueue_keyframe(
-                keyframe_id, None, {"user_id": str(self.user_id), "timestamp": ts_now.isoformat()}
+                keyframe_id, None,
+                # The capture time, so the item memory is filed when the frame
+                # was taken rather than when the queue reached it.
+                {"user_id": str(self.user_id), "timestamp": captured_at.isoformat(),
+                 "event_type": kind}
             )
         except Exception as e:
             print(f"[Pipeline] [ItemIndexer Hook Note] {e}")

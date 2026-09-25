@@ -1195,7 +1195,11 @@ class KeyframeExtractor:
             if self.on_scene_saved:
                 motion = metadata.get("motion_score", 0.0)
                 try:
-                    self.on_scene_saved(keyframe_id, motion, kind)
+                    # The whole metadata, not just the kind: it carries the
+                    # capture timestamp too, and without that the memory is
+                    # filed when the worker got round to it rather than when
+                    # the frame was taken.
+                    self.on_scene_saved(keyframe_id, motion, metadata)
                 except TypeError:
                     # An older two-argument callback. Falling back matters:
                     # this same call is what hands the frame to Tier-2, so
