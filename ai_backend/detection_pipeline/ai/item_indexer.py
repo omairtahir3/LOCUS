@@ -236,6 +236,22 @@ LOG_ONLY_PLACED_ITEMS = os.environ.get(
 TILE_SCAN_MAX_BACKLOG = int(os.environ.get("TILE_SCAN_MAX_BACKLOG", 3))
 
 
+def _confidences(detections: list[dict]) -> tuple[list[float], list[float]]:
+    """Split a frame's detections into identity and class confidences.
+
+    Two different questions, and they come apart badly. A real sighting of the
+    wearer's phone was written with confidence 0.319 and shown to them as "32%",
+    while the exemplar match behind it scored 0.755 and had cleared even the
+    original 0.74 bar. 0.319 answers "is that shape a phone"; 0.755 answers "is
+    that the phone we were told about". A record that says "Left Phone here" is
+    making the second claim, so that is the number it must carry.
+    """
+    identity = [d["exemplar_similarity"] for d in detections
+                if d.get("exemplar_similarity") is not None]
+    cls = [d["confidence"] for d in detections if d.get("confidence") is not None]
+    return identity, cls
+
+
 def _parse_ts(value):
     """Parse the capture timestamp the pipeline passes in metadata.
 
@@ -1083,7 +1099,10 @@ class DailyItemIndexer:
             # records; the pipeline has always passed the capture time in
             # metadata and it was simply being ignored here.
             captured_at = _parse_ts(metadata.get("timestamp")) or ts_now
-            max_conf = max(d["confidence"] for d in detections)
+
+            identity_confs, class_confs = _confidences(detections)
+            max_conf = max(identity_confs) if identity_confs else (
+                max(class_confs) if class_confs else 0.0)
 
             # 1. Update keyframemetas collection if keyframe document exists
             db.keyframemetas.update_one(
@@ -1146,6 +1165,10 @@ class DailyItemIndexer:
                     # At the event level too, so "where did I leave it" can be
                     # queried without unwinding the items array.
                     "placement": "placed" if all_placed else "mixed",
+                    # Both numbers, named for the question each answers, so the
+                    # UI never has to guess which one it is showing.
+                    "identity_confidence": round(max(identity_confs), 3) if identity_confs else None,
+                    "class_confidence": round(max(class_confs), 3) if class_confs else None,
                     "total_items": len(detections)
                 },
                 "keyframe_id": keyframe_id,
