@@ -227,6 +227,34 @@ ITEM_HELD_MAX_AREA_FRAC = float(os.environ.get("ITEM_HELD_MAX_AREA_FRAC", 0.30))
 LOG_ONLY_PLACED_ITEMS = os.environ.get(
     "LOG_ONLY_PLACED_ITEMS", "1").lower() not in ("0", "false", "no")
 
+# Indexing runs behind a queue and three models, so a frame can be processed
+# well after it was taken. Above this backlog the tile scan is skipped: it is
+# the single most expensive step (about 100 MobileNetV3 crops, ~975ms measured)
+# and it exists to catch small items YOLO cannot box. Under load, keeping up
+# with the stream matters more than finding every set of keys, and falling
+# further behind delays every memory after this one too.
+TILE_SCAN_MAX_BACKLOG = int(os.environ.get("TILE_SCAN_MAX_BACKLOG", 3))
+
+
+def _parse_ts(value):
+    """Parse the capture timestamp the pipeline passes in metadata.
+
+    Returns a timezone-aware datetime, or None when there is nothing usable.
+    Naive values are assumed to be UTC, matching how the pipeline writes them.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str) and value:
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    elif isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    else:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
 # ── Tiled exemplar scan ───────────────────────────────────────────────────────
 # Objects365 cannot box small personal items: across 6 real chest-cam frames it
 # produced a box on the wearer's car keys 0/6 times, and a sweep of imgsz
@@ -552,9 +580,17 @@ class DailyItemIndexer:
                 d.get("enrolled_item_id") for d in detections if d.get("matched_item")
             }
             enrolled_ids = {it["id"] for it in self._get_user_items_cached(user_id_str)}
+            backlog = self._queue.qsize()
             if enrolled_ids - already_matched:
-                detections.extend(self._scan_tiles_for_enrolled_items(
-                    image, user_id_str, exclude_item_ids=already_matched))
+                if backlog > TILE_SCAN_MAX_BACKLOG:
+                    # Shedding the expensive step rather than the frame. Running
+                    # it here would push every queued frame further behind, and
+                    # the lag is what the wearer actually notices.
+                    print(f"[DailyItemIndexer] {backlog} frames queued, skipping the "
+                          f"tile scan to catch up")
+                else:
+                    detections.extend(self._scan_tiles_for_enrolled_items(
+                        image, user_id_str, exclude_item_ids=already_matched))
 
         if not detections:
             return
@@ -1039,6 +1075,14 @@ class DailyItemIndexer:
                 user_oid = str(user_id)
 
             ts_now = datetime.now(timezone.utc)
+            # WHEN THE FRAME WAS TAKEN, not when this worker got round to it.
+            # Indexing is queued behind YOLO, the embedding backbone and the
+            # tile scan, and measured lag on real frames ran from 0.6s to 47.9s
+            # as the queue drained at the end of a run. Stamping the memory with
+            # the processing time files it minutes away from the moment it
+            # records; the pipeline has always passed the capture time in
+            # metadata and it was simply being ignored here.
+            captured_at = _parse_ts(metadata.get("timestamp")) or ts_now
             max_conf = max(d["confidence"] for d in detections)
 
             # 1. Update keyframemetas collection if keyframe document exists
@@ -1092,7 +1136,7 @@ class DailyItemIndexer:
             event_doc = {
                 "user_id": user_oid,
                 "event_type": "object",
-                "timestamp": ts_now,
+                "timestamp": captured_at,
                 "confidence": round(max_conf, 3),
                 "details": {
                     "action": "item_seen",
@@ -1114,7 +1158,10 @@ class DailyItemIndexer:
                 event_doc["location"] = location
 
             db.eventlogs.insert_one(event_doc)
-            print(f"[DailyItemIndexer] Logged 'object' memory event for user {user_id} with {len(item_names)} items")
+            lag = (ts_now - captured_at).total_seconds()
+            print(f"[DailyItemIndexer] Logged 'object' memory event for user {user_id} "
+                  f"with {len(item_names)} items, filed at capture time "
+                  f"({lag:.1f}s after the frame was taken)")
 
         except Exception as e:
             print(f"[DailyItemIndexer] DB error during persistence: {e}")
