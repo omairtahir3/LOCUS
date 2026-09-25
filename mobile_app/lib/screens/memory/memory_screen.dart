@@ -224,7 +224,14 @@ class _MemoryScreenState extends State<MemoryScreen> {
           final details = ev['details'];
           return _MemoryItem(
             id: ev['_id'],
-            title: (details is Map ? details['sentence'] : null) ?? 'Activity detected',
+            // sentence, then label, then description: scene and activity
+            // sessions all write sentence now, but records written before they
+            // did carry only one of the others, and "Activity detected" tells
+            // the person nothing at all.
+            title: (details is Map
+                    ? (details['sentence'] ?? details['label'] ?? details['description'])
+                    : null)
+                ?? 'Activity detected',
             time: timeLabel,
             icon: Icons.directions_run,
             color: AppColors.warning,

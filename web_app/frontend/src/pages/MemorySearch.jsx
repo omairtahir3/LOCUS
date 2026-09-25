@@ -143,7 +143,10 @@ export default function MemorySearch() {
       return {
         id: ev._id,
         keyframe_id: ev.keyframe_id,
-        title: ev.details?.sentence || 'Activity detected',
+        // sentence, then label, then description: scene and activity sessions
+        // all write sentence now, but records written before they did carry
+        // only one of the others, and "Activity detected" says nothing.
+        title: ev.details?.sentence || ev.details?.label || ev.details?.description || 'Activity detected',
         time: timeLabel,
         icon: Activity,
         color: 'var(--warning)',

@@ -257,6 +257,92 @@ class MedicationDetectionPipeline:
         except Exception as e:
             print(f"[Pipeline] [DB-Log] Error logging scene change: {e}")
 
+    def _observe_activity(self, act_result):
+        """Feed one activity observation to the session tracker.
+
+        Only a CLOSED session reaches the database, so the feed carries
+        "Using a phone for 22 minutes" rather than a claim per frame.
+        act_result may be None -- an observation of nothing still matters, since
+        it is what eventually closes a stale session.
+        """
+        try:
+            from ai.scene import ActivitySessionTracker
+        except Exception:
+            try:
+                from .scene import ActivitySessionTracker
+            except Exception as e:
+                print(f"[Pipeline] activity session tracker unavailable: {e}")
+                return
+        if not hasattr(self, '_activity_tracker'):
+            self._activity_tracker = ActivitySessionTracker()
+
+        activity, conf, objects = None, 0.0, {}
+        if act_result is not None:
+            attrs = getattr(act_result, 'attributes', None) or {}
+            activity = attrs.get('activity')
+            conf = float(getattr(act_result, 'confidence', 0.0) or 0.0)
+            objects = attrs.get('detection_confidences') or {}
+
+        try:
+            session = self._activity_tracker.observe(activity, conf, objects)
+        except Exception as e:
+            print(f"[Pipeline] activity observe failed: {e}")
+            return
+        if session:
+            self._log_activity_session_to_db(session)
+
+    def _log_activity_session_to_db(self, session):
+        """Write one confirmed activity session to EventLog, with a frame."""
+        if not self.user_id:
+            return
+        try:
+            from bson import ObjectId
+            client = get_client()
+            db = client[get_db_name()]
+            ts_now = datetime.utcnow()
+            keyframe_id = None
+            try:
+                keyframe_id = self.extractor.capture_event(
+                    "activity", label=session.get("label"),
+                    confidence=session.get("confidence"),
+                    extra={"activity": session.get("activity"),
+                           "duration_seconds": session.get("duration_seconds")})
+            except Exception as e:
+                print(f"[Pipeline] activity capture failed: {e}")
+            mins = max(1, round((session.get("duration_seconds") or 0) / 60))
+            # No dash: a caregiver reads this string. The memory-search renderer
+            # titles an activity from details.sentence, so without it every
+            # session rendered as the meaningless fallback "Activity detected".
+            sentence = f"{session.get('label')} for {mins} min"
+            doc = {
+                "user_id": ObjectId(str(self.user_id)),
+                "event_type": "activity",
+                "timestamp": ts_now,
+                "confidence": float(session.get("confidence") or 0.0),
+                "details": {
+                    "action": "activity_session",
+                    "activity": session.get("activity"),
+                    "label": session.get("label"),
+                    "sentence": sentence,
+                    "description": sentence,
+                    "duration_seconds": session.get("duration_seconds"),
+                    "observations": session.get("observations"),
+                    "objects": session.get("objects"),
+                    "started_at": session.get("started_at"),
+                },
+                "keyframe_id": keyframe_id,
+                "verification_status": "confirmed",
+                "createdAt": ts_now,
+                "updatedAt": ts_now,
+            }
+            self._attach_latest_location(db, doc, ts_now)
+            db.eventlogs.insert_one(doc)
+            print(f"[Pipeline] [DB-Log] activity session: {session.get('label')} "
+                  f"for {session.get('duration_seconds')}s "
+                  f"({session.get('observations')} observations)")
+        except Exception as e:
+            print(f"[Pipeline] [DB-Log] Error logging activity session: {e}")
+
     def _log_face_result_to_db(self, face_result):
         """
         Write a SOCIAL_INTERACTION or UNKNOWN_FACE event to the EventLog collection.
@@ -1794,6 +1880,14 @@ class MedicationDetectionPipeline:
                     threading.Thread(
                         target=self._log_heartbeat_to_db,
                         args=(peak, self._heartbeat_frames), daemon=True).start()
+                    # Coverage floor. A motionless wearer trips no detector and
+                    # no motion threshold, so without this the whole inactivity
+                    # stretch has zero frames behind it and the caregiver who is
+                    # told "hasn't moved for three hours" has nothing to look at.
+                    try:
+                        self.extractor.maybe_capture_coverage()
+                    except Exception as e:
+                        print(f"[Pipeline] coverage capture failed: {e}")
                     self.extractor.peak_motion_since_heartbeat = 0.0
                     self._last_heartbeat = time.time()
                     self._heartbeat_frames = 0
@@ -1839,6 +1933,20 @@ class MedicationDetectionPipeline:
                             for seq_idx, result in enumerate(results):
                                 confidence = result["final_confidence"]
                                 classification = result["classification"]
+                                # Persist a frame for the dose itself. The
+                                # three-phase evidence frames are stored
+                                # separately by _tag_detection_keyframes; this is
+                                # the one that belongs in the day's memory view,
+                                # and it is the single thing the old motion gate
+                                # was least likely to catch, because swallowing a
+                                # pill barely moves the camera.
+                                try:
+                                    self.extractor.capture_event(
+                                        "medication", label="Medication taken",
+                                        confidence=confidence,
+                                        extra={"classification": classification})
+                                except Exception as _e:
+                                    print(f"[Pipeline] medication capture failed: {_e}")
                                 evidence = result.get("_evidence_frames", [])
                                 p1_kf_id = result.get("_p1_kf_id")
                                 phases_passed = result.get("phase_details", {}).get("phases_passed", 0)
@@ -1930,8 +2038,13 @@ class MedicationDetectionPipeline:
 
                 # Run Face Recognition Plugin independently of medication results
                 if self.face_plugin is not None and not getattr(self, '_face_busy', False):
+                    # Claimed HERE, not inside the thread. Setting the flag as
+                    # the thread's first statement leaves a window of many
+                    # frames in which further threads all see it clear, so a
+                    # single stretch spawned a thread per frame.
+                    self._face_busy = True
+
                     def _run_face_batch():
-                        self._face_busy = True
                         try:
                             face_buffer = list(self.extractor.buffer)
                             if face_buffer:
@@ -1940,6 +2053,14 @@ class MedicationDetectionPipeline:
                                 face_result = self.face_plugin.analyze(face_buffer, ctx)
                                 if face_result:
                                     self._log_face_result_to_db(face_result)
+                                    try:
+                                        self.extractor.capture_event(
+                                            "social", label="Social interaction",
+                                            confidence=getattr(face_result, 'confidence', None)
+                                            if not isinstance(face_result, dict)
+                                            else face_result.get('confidence'))
+                                    except Exception as _e:
+                                        print(f"[Pipeline] social capture failed: {_e}")
                         except Exception as e:
                             import traceback
                             print('[Face Recognition Error] ' + traceback.format_exc())
@@ -1950,8 +2071,13 @@ class MedicationDetectionPipeline:
 
                 # Run Egocentric Activity Plugin
                 if self.activity_plugin is not None and not getattr(self, '_activity_busy', False):
+                    # Claimed before the thread starts, for the same reason as
+                    # the face batch above. It matters more here now: duplicate
+                    # threads feed duplicate observations into the activity
+                    # session tracker and inflate its confirmation count.
+                    self._activity_busy = True
+
                     def _run_activity_batch():
-                        self._activity_busy = True
                         try:
                             act_buffer = list(self.extractor.buffer)
                             if act_buffer:
@@ -1972,6 +2098,14 @@ class MedicationDetectionPipeline:
                                 # result feeds Tier-2's metadata.
                                 if act_result and EMIT_PER_FRAME_ACTIVITY_EVENTS:
                                     self._log_activity_result_to_db(act_result)
+                                # Sessions, not frames. Switching the per-frame
+                                # events off removed the hallucinations and the
+                                # real activities with them: using a phone for
+                                # twenty minutes produced no record at all. An
+                                # activity confirmed across several observations
+                                # over a span of time is evidence; one frame's
+                                # guess is not.
+                                self._observe_activity(act_result)
                         except Exception as e:
                             import traceback
                             print('[Activity Detection Error] ' + traceback.format_exc())
@@ -2085,6 +2219,18 @@ class MedicationDetectionPipeline:
 
     def stop(self):
         self.is_running = False
+        # Close the activity session that is still open. Same reason the scene
+        # flush below exists: a session is written when the activity CHANGES, so
+        # whatever the wearer was doing when the camera stopped would otherwise
+        # never be recorded at all.
+        try:
+            tracker = getattr(self, '_activity_tracker', None)
+            if tracker is not None:
+                session = tracker.flush()
+                if session:
+                    self._log_activity_session_to_db(session)
+        except Exception as e:
+            print(f"[Pipeline] activity flush error: {e}")
         # Close the environment session that is still open (Core FE-2).
         # A session is only written when the room CHANGES, so whichever room
         # the wearer is in when the camera stops was never persisted -- and

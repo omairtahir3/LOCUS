@@ -36,7 +36,10 @@ router.get('/memory-search', auth, async (req, res) => {
       // scene_change events share event_type 'activity' but are raw motion-burst
       // captures with no classification — they belong in Keyframe Audit, not a
       // memory timeline, where they render as meaningless "Activity detected".
-      'details.action': { $ne: 'scene_change' },
+      // camera_heartbeat is excluded for a different reason: it is liveness
+      // bookkeeping written every minute with NO image, so it would flood the
+      // day with entries that have nothing to show.
+      'details.action': { $nin: ['scene_change', 'camera_heartbeat'] },
       verification_status: { $ne: 'rejected' }
     };
 
@@ -128,9 +131,20 @@ async function buildInsights({ idForms, start, end, items, anomalies, steps, min
   const physical = steps == null ? null : pct(steps, STEP_GOAL);
 
   // ── Camera coverage: how much of the day was observed at all ────────────
-  // No sessions at all is null, not 0%. 0% asserts the camera was running and
-  // saw nothing; null admits we cannot tell that apart from it being off.
-  const coverage = minutesIndoors > 0 ? pct(minutesIndoors, OBSERVABLE_HOURS * 60) : null;
+  // Measured from liveness heartbeats, which are written every minute the
+  // camera runs whether or not anything is recognised. Room sessions alone
+  // understate this badly: a camera that ran all day in rooms it could not
+  // name reported "no room sessions for this day", which reads as a dead
+  // device. Heartbeats separate "not observed" from "observed, nothing named".
+  const HEARTBEAT_MINUTES = 1;   // HEARTBEAT_SECONDS is 60 in the pipeline
+  const beats = await EventLog.countDocuments({
+    user_id: { $in: idForms }, 'details.action': 'camera_heartbeat',
+    timestamp: { $gte: start, $lt: end },
+  });
+  const observedMinutes = Math.max(beats * HEARTBEAT_MINUTES, minutesIndoors);
+  // Still null, not 0%, when nothing was observed: 0% asserts the camera was
+  // running and saw nothing, and null admits we cannot tell that from off.
+  const coverage = observedMinutes > 0 ? pct(observedMinutes, OBSERVABLE_HOURS * 60) : null;
 
   return [
     { key: 'routine', label: 'Routine Adherence', value: adherence,
@@ -146,9 +160,10 @@ async function buildInsights({ idForms, start, end, items, anomalies, steps, min
       detail: steps == null ? 'The phone has not reported steps for this day'
                             : `${steps.toLocaleString()} steps against a ${STEP_GOAL.toLocaleString()} goal` },
     { key: 'coverage', label: 'Camera Coverage', value: coverage,
-      detail: minutesIndoors
-        ? `${Math.round(minutesIndoors)} minutes observed of about ${OBSERVABLE_HOURS} waking hours`
-        : 'The camera recorded no room sessions for this day' },
+      detail: observedMinutes
+        ? `${Math.round(observedMinutes)} minutes observed of about ${OBSERVABLE_HOURS} waking hours`
+          + (minutesIndoors > 0 ? `, ${Math.round(minutesIndoors)} in a recognised room` : '')
+        : 'The camera did not record anything for this day' },
   ];
 }
 
@@ -190,7 +205,11 @@ router.get('/timeline', auth, async (req, res) => {
       user_id: { $in: idForms },
       timestamp: { $gte: start, $lt: end },
       verification_status: { $ne: 'rejected' },
-      'details.action': { $ne: 'scene_change' },   // raw motion bursts, not activity
+      // scene_change is a raw motion burst with no classification; heartbeats
+      // are once-a-minute liveness bookkeeping with no image. Neither is a
+      // timeline entry, and a day holds ~1440 heartbeats, so excluding them
+      // here keeps the payload to real events. Coverage counts them separately.
+      'details.action': { $nin: ['scene_change', 'camera_heartbeat'] },
     }).sort({ timestamp: 1 }).lean();
 
     const RoutineFinding = require('../models/RoutineFinding');
@@ -207,6 +226,16 @@ router.get('/timeline', auth, async (req, res) => {
           title: `${d.scene ? d.scene[0].toUpperCase() + d.scene.slice(1) : 'Room'} activity`,
           detail: mins ? `${mins} minute${mins === 1 ? '' : 's'}` : 'Brief visit',
           keyframe_id: e.keyframe_id || null });
+      } else if (e.event_type === 'activity' && d.action === 'activity_session') {
+        // A confirmed stretch of one activity, not a guess about one frame.
+        // Per-frame activity labels were removed because they hallucinated;
+        // these are only written after the same activity is seen repeatedly
+        // over a span of time (see ai/scene.py ActivitySessionTracker).
+        const mins = Math.round((d.duration_seconds || 0) / 60);
+        items.push({ at: e.timestamp, kind: 'activity',
+          title: d.label || 'Activity',
+          detail: mins ? `${mins} minute${mins === 1 ? '' : 's'}` : 'Briefly',
+          confidence: e.confidence, keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'medication_intake') {
         items.push({ at: e.timestamp, kind: 'medication',
           title: d.medication_name ? `${d.medication_name} taken` : 'Medication taken',
@@ -265,6 +294,7 @@ router.get('/timeline', auth, async (req, res) => {
         medication: items.filter(i => i.kind === 'medication').length,
         social: items.filter(i => i.kind === 'social').length,
         items_seen: items.filter(i => i.kind === 'items').length,
+        activities: items.filter(i => i.kind === 'activity').length,
         anomalies: anomalies.length,
         steps: stepDoc ? stepDoc.steps : null,
         tracked_minutes: Math.round(minutesIndoors),

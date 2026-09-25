@@ -24,6 +24,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     'medication': AppColors.success,
     'social': AppColors.accent,
     'items': AppColors.info,
+    'activity': AppColors.accent,
     'anomaly': AppColors.warning,
   };
 
@@ -32,6 +33,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     'medication': Icons.medication_outlined,
     'social': Icons.psychology_outlined,
     'items': Icons.inventory_2_outlined,
+    'activity': Icons.directions_run_outlined,
     'anomaly': Icons.warning_amber_outlined,
   };
 
