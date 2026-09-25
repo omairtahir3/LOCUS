@@ -157,8 +157,16 @@ async function checkMedicationGap(user, now = new Date()) {
 async function checkInactivityAndCamera(user, now = new Date()) {
   if (!isWakingHours(now)) return null;
 
+  // Heartbeats AND scene changes. A scene_change is only written when motion
+  // clears the scene threshold, so somebody sitting perfectly still produced
+  // no records at all and this check reported the camera as OFF -- telling a
+  // caregiver to go and look at the device when the thing that needed looking
+  // at was the person. The heartbeat (ai/pipeline.py) is written every minute
+  // whether or not anything moved, carrying the peak motion since the last
+  // one. scene_change is still accepted so older data keeps working.
   const recent = await EventLog.find({
-    user_id: { $in: idForms(user._id) }, 'details.action': 'scene_change',
+    user_id: { $in: idForms(user._id) },
+    'details.action': { $in: ['camera_heartbeat', 'scene_change'] },
     timestamp: { $gte: hoursAgo(Math.max(INACTIVITY_HOURS, CAMERA_OFF_HOURS), now), $lte: now },
   }).sort({ timestamp: -1 }).lean();
 
