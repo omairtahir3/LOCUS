@@ -2,7 +2,7 @@
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
-const { generateAISkippedMedicineAlert } = require('../utils/llmAgent');
+const { generateAISkippedMedicineAlert, phraseNotification, NOT_MISSED } = require('../utils/llmAgent');
 const { createNotification } = require('../utils/notifications');
 
 const router = express.Router();
@@ -27,28 +27,39 @@ router.post('/system-alert', async (req, res) => {
       return res.status(404).json({ error: 'User or Medication not found' });
     }
 
+    // The recipient here is the wearer, so the facts are written to them. They
+    // used to be written ABOUT them ("No intake detected for Osaid's scheduled
+    // dose"), which reads like a note to somebody else and is the wrong person
+    // for this route. A camera that could not see the dose is also not a missed
+    // dose, so 'skipped' no longer claims one.
     let title, message, type;
     if (status === 'camera_off') {
-      title = `Camera Offline for ${med.name}`;
-      message = `${user.name}'s camera was disconnected during their scheduled window. We couldn't verify if they took their medication.`;
+      title = `Camera was off at your ${med.name} time`;
+      message = `Your camera was disconnected during the window for your ${med.name}, so we couldn't tell whether you took it. If you did, you can mark it as taken.`;
       type = 'camera_off_alert';
     } else if (status === 'missed') {
-      title = `Missed Medication: ${med.name}`;
-      message = `No intake detected for ${user.name}'s scheduled dose of ${med.name} within the window.`;
+      title = `You haven't taken your ${med.name}`;
+      message = `We didn't see you take your ${med.name} in its window. If you have taken it, you can mark it as taken.`;
       type = 'missed_alert';
     } else if (status === 'skipped') {
-      title = `Skipped Medication: ${med.name}`;
-      message = `${user.name}'s medication window elapsed without verification.`;
+      title = `Your ${med.name} wasn't confirmed`;
+      message = `The window for your ${med.name} has passed without us being able to confirm it. If you have taken it, you can mark it as taken.`;
       type = 'missed_alert';
     } else {
       return res.json({ success: true, message: 'Status ignored' }); // Ignore taken/scheduled
     }
+    // 'missed' genuinely was missed, so it may say so. The other two mean the
+    // camera could not see it, and the model has been caught calling that
+    // "missed": the guard sends the template instead.
+    const said = await phraseNotification(
+      { kind: status, severity: 'warning', title, message }, user, user,
+      { forbid: status === 'missed' ? null : NOT_MISSED });
 
     // Call the core helper to handle the email/push dispatch
     await createNotification({
       recipientId: user._id, // Will also route to caregivers
-      title,
-      message,
+      title: said.title,
+      message: said.message,
       type,
       medicationId: med._id,
       patientId: user._id,

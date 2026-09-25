@@ -72,10 +72,30 @@ const inventedNumber = (text, allowed) => [...numbersIn(text)].find(n => !allowe
  * message body only.
  *   direct: true when the recipient is the person the message is about.
  */
-async function phrase(instruction, facts, fallback, label, { direct = false, forbid = null } = {}) {
+async function phrase(instruction, facts, fallback, label, { direct = false, forbid = null, mustName = null, mustSay = null } = {}) {
   if (!isConfigured()) return fallback;
   const out = await completeJSON(`${BASE_RULES}\n${instruction}`, facts, SCHEMA);
   if (!out) return fallback;
+  // The mirror of the `direct` guard. Writing to a caregiver, the model
+  // collapsed the two people into one and told the caregiver they had lost
+  // their own keys: "We told you 10 minutes ago that your car keys were left
+  // behind and you were last seen at 11:40 PM. Please give them a call."
+  // Second person cannot simply be banned here, because "Could you give Osaid a
+  // call?" is correct and wanted. What the collapse always loses is the subject's
+  // name, which every caregiver template carries, so that is what is checked.
+  if (mustName && !new RegExp(`\\b${mustName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(out.message)) {
+    console.warn(`[LLMAgent] ${label}: wrote to the caregiver as if they were ${mustName}, using template`); return fallback;
+  }
+  // Some facts cannot be summarised away without changing what the reader will
+  // do, and asking for shorter prose is exactly when the model drops one. An
+  // escalation lost "and they haven't responded" and read like a first alert; on
+  // another run it lost the item and read as "Osaid hasn't responded yet. They
+  // were last seen at 11:43 PM", which tells a caregiver nothing. Each entry is
+  // one such fact and all of them have to survive.
+  const missing = (Array.isArray(mustSay) ? mustSay : mustSay ? [mustSay] : []).find(re => !re.test(out.message));
+  if (missing) {
+    console.warn(`[LLMAgent] ${label}: dropped a fact the reader needs (${missing}), using template`); return fallback;
+  }
   if (forbid && forbid.test(out.message)) { console.warn(`[LLMAgent] ${label}: mentioned something that did not happen, using template`); return fallback; }
   if (GENDERED.test(out.message)) { console.warn(`[LLMAgent] ${label}: guessed a gender, using template`); return fallback; }
   if (CHATTY.test(out.message)) { console.warn(`[LLMAgent] ${label}: chatty, using template`); return fallback; }
@@ -83,7 +103,15 @@ async function phrase(instruction, facts, fallback, label, { direct = false, for
   const bad = inventedNumber(out.message, allowedNumbers(`${facts} ${fallback.title} ${fallback.message}`));
   if (bad) { console.warn(`[LLMAgent] ${label}: invented "${bad}", using template`); return fallback; }
   const message = undash(out.message).slice(0, 400);
-  console.log(`[LLMAgent] ${label}: "${message}"`);
+  // Say so when the model handed the input straight back. It is not wrong and
+  // not worth rejecting, but it is worth seeing: a notification that reads
+  // exactly like the template usually means the prompt invited a copy, and
+  // silence here is how that went unnoticed.
+  if (message.trim() === fallback.message.trim()) {
+    console.log(`[LLMAgent] ${label}: model returned the template unchanged`);
+  } else {
+    console.log(`[LLMAgent] ${label}: "${message}"`);
+  }
   return { title: fallback.title, message };
 }
 
@@ -240,12 +268,18 @@ const generateAIEscalatedAlert = async (notification, caregiver, subjectName = n
  * title/message (built from real counts by the monitor) is the fallback, so
  * the LLM can only improve tone -- never the facts.
  */
-const generateRoutineFindingMessage = async (finding, recipient, subject) => {
+const phraseNotification = async (finding, recipient, subject, { forbid = null, mustSay = null, keep = null } = {}) => {
   const fallback = { title: finding.title.slice(0, 80), message: finding.message.slice(0, 400) };
   const toCaregiver = recipient._id?.toString() !== subject._id?.toString();
   const who = firstName(subject.name);
+  // Two people, and the model has been caught merging them: told to write to a
+  // caregiver about Osaid's keys, it wrote "your car keys were left behind, you
+  // were last seen at 11:40 PM" to the caregiver. So the split is spelled out,
+  // and phrase()'s mustName guard catches it when spelling it out is not enough.
   const audience = toCaregiver
-    ? `You are writing to ${firstName(recipient.name)}, who looks after ${who}. Refer to ${who} by first name.`
+    ? `You are writing to ${firstName(recipient.name)}, who looks after ${who}. The notes are about ${who}, NOT about ` +
+      `${firstName(recipient.name)}. Name ${who} in the message. "You" and "your" may only ever mean ` +
+      `${firstName(recipient.name)}, so never write "your" about anything belonging to ${who}.`
     : `You are writing to ${who} directly. Address them as "you".`;
   const tone = {
     urgent: 'This matters now: be clear and direct about what to do, without being frightening.',
@@ -256,10 +290,44 @@ const generateRoutineFindingMessage = async (finding, recipient, subject) => {
   // words by the monitor. It IS the fact sheet. Raw evidence (motion scores,
   // frame counts, ratios) is deliberately not passed: the model can only
   // parrot numbers it is shown, and a caregiver should never see them.
-  return phrase(`${audience} ${tone}`,
-    `Rewrite this in your own words, keeping every fact exactly as stated:\n${finding.message}`,
-    fallback, `${finding.kind} for ${recipient.name}`, { direct: !toCaregiver });
+  // "Rewrite this in your own words, keeping every fact exactly as stated" was
+  // tried first and the model simply copied the sentence back, every time:
+  // preserving every fact exactly is trivially satisfied by not changing
+  // anything. The notification then looked hand written because it was. Handing
+  // the same content over as NOTES, with copying forbidden outright, produced a
+  // genuine rewrite on every run while keeping the facts.
+  // `keep` names the facts that cannot be summarised away, in words. mustSay
+  // rejects a message that loses one, but rejection means the template ships,
+  // and on the escalation that was happening 2 runs in 3: with four facts and a
+  // "1-2 short sentences" rule, the model drops one to stay short. Telling it
+  // which ones are not optional is what stops it choosing.
+  const mustKeep = keep ? ` These must all appear in the message, even if it takes a third sentence: ${keep}.` : '';
+  return phrase(`${audience} ${tone}${mustKeep}`,
+    `Compose the notification from these notes, in your own sentences. ` +
+    `Never copy a sentence from the notes. Change nothing factual.\n` +
+    `Notes: ${finding.message}`,
+    fallback, `${finding.kind} for ${recipient.name}`,
+    { direct: !toCaregiver, forbid, mustSay, mustName: toCaregiver ? who : null });
 };
+
+// A dose the camera could not see is not a dose that was skipped. BASE_RULES
+// says so and the model still wrote "You missed the window for your Panadol"
+// (1 of 3 runs, measured) for facts that said only that it could not be
+// confirmed. Callers phrasing an unconfirmed dose pass this, and the template
+// ships instead.
+const NOT_MISSED = /\b(missed|skipped|forgot|didn't take|did not take)\b/i;
+
+// Every notification LOCUS composes itself goes through the line above, not
+// just routine findings: the item-lost escalation, an SOS, a status check and a
+// snooze receipt were all shipping their own hand-written strings, which is why
+// they did not read like the medication alerts. The caller still writes the
+// facts and the title; only the wording is the model's.
+//
+// Notifications carrying a HUMAN's words are deliberately not here: a caregiver
+// chat message, a caregiver-composed alert and a quoted check-in reply all put
+// somebody's actual sentence in the body, and rewriting that would put words in
+// their mouth. Those stay verbatim.
+const generateRoutineFindingMessage = phraseNotification;
 
 module.exports = {
   generateAIDoseReminder,
@@ -270,4 +338,6 @@ module.exports = {
   generateAISkippedMedicineAlert,
   generateAIEscalatedAlert,
   generateRoutineFindingMessage,
+  phraseNotification,
+  NOT_MISSED,
 };
