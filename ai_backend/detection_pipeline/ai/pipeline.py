@@ -338,6 +338,15 @@ class MedicationDetectionPipeline:
             return
         if session:
             self._log_activity_session_to_db(session)
+        # And the one still running, for the same reason rooms are written
+        # while open: an activity that lasts twenty minutes should not be
+        # invisible for twenty minutes.
+        try:
+            open_session = self._activity_tracker.snapshot()
+            if open_session:
+                self._log_activity_session_to_db(open_session)
+        except Exception as e:
+            print(f"[Pipeline] activity snapshot failed: {e}")
 
     def _log_activity_session_to_db(self, session):
         """Write one confirmed activity session to EventLog, with a frame."""
@@ -370,14 +379,27 @@ class MedicationDetectionPipeline:
                     "observations": session.get("observations"),
                     "objects": session.get("objects"),
                     "started_at": session.get("started_at"),
+                    "session_id": session.get("session_id"),
+                    "in_progress": bool(session.get("in_progress")),
                 },
                 "keyframe_id": keyframe_id,
                 "verification_status": "confirmed",
-                "createdAt": ts_now,
                 "updatedAt": ts_now,
             }
             self._attach_latest_location(db, doc, ts_now)
-            db.eventlogs.insert_one(doc)
+            # Upserted on the session's own id: the same session is written
+            # while it runs and again when it ends, and inserting each time
+            # would leave a row per update all claiming the same stretch.
+            sid = session.get("session_id")
+            if sid:
+                db.eventlogs.update_one(
+                    {"user_id": doc["user_id"], "details.session_id": sid},
+                    {"$set": doc, "$setOnInsert": {"createdAt": ts_now}},
+                    upsert=True,
+                )
+            else:
+                doc["createdAt"] = ts_now
+                db.eventlogs.insert_one(doc)
             print(f"[Pipeline] [DB-Log] activity session: {session.get('label')} "
                   f"for {session.get('duration_seconds')}s "
                   f"({session.get('observations')} observations)")

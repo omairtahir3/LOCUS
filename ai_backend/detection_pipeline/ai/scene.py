@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -260,6 +261,32 @@ class SceneSessionTracker:
         # carried a photo of the bedroom the wearer walked into next.
         self._best_kf: Optional[str] = None
         self._best_score = -1.0
+        # Stable identity for the OPEN session, so it can be written to the
+        # database while it is still running and updated in place as it grows.
+        self._session_id: Optional[str] = None
+
+    def snapshot(self, timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+        """The open session as it stands, without closing it.
+
+        Sessions used to reach the database only when they ENDED. Standing in
+        one room meant the feed showed nothing at all for as long as the wearer
+        stayed there, and a run that was killed rather than stopped cleanly
+        never flushed, so the session was lost outright. Writing the session
+        while it is open fixes both: it appears within a couple of confirmed
+        frames and survives a hard stop.
+
+        Returns None until the session would qualify to be written at all, so
+        an in-progress record never claims more than a closed one would.
+        """
+        if self._current is None or self._started_at is None:
+            return None
+        end = self._last_confirmed or self._started_at
+        duration = max(0.0, end - self._started_at)
+        if duration < MIN_SESSION_SECONDS or self._frames < MIN_SESSION_FRAMES:
+            return None
+        return self._describe(self._current, self._started_at, end, duration,
+                              dict(self._evidence), self._frames, self._best_kf,
+                              in_progress=True)
 
     def observe(self, room: Optional[str], detections: dict[str, float],
                 timestamp: Optional[float] = None,
@@ -294,6 +321,7 @@ class SceneSessionTracker:
                 completed = self._close(ts)
                 self._current = room
                 self._started_at = ts
+                self._session_id = uuid.uuid4().hex
                 self._last_seen = ts
                 self._last_confirmed = ts
                 self._frames = 1
@@ -326,6 +354,7 @@ class SceneSessionTracker:
         completed = self._close(switch_ts)
         self._current = room
         self._started_at = switch_ts
+        self._session_id = uuid.uuid4().hex
         self._last_seen = ts
         self._last_confirmed = ts
         # The pending sightings ARE confirmed sightings of this room; they are
@@ -356,7 +385,7 @@ class SceneSessionTracker:
         end = self._last_confirmed or self._last_seen or ts
         duration = max(0.0, end - start)
         room, evidence, frames = self._current, dict(self._evidence), self._frames
-        best_kf = self._best_kf
+        best_kf, session_id = self._best_kf, self._session_id
         self._current = None
         self._started_at = None
         self._last_seen = None
@@ -364,10 +393,20 @@ class SceneSessionTracker:
         self._evidence = defaultdict(float)
         self._frames = 0
         self._best_kf, self._best_score = None, -1.0
+        self._session_id = None
         if duration < MIN_SESSION_SECONDS or frames < MIN_SESSION_FRAMES:
             return None
+        return self._describe(room, start, end, duration, evidence, frames,
+                              best_kf, in_progress=False, session_id=session_id)
+
+    def _describe(self, room, start, end, duration, evidence, frames, best_kf,
+                  in_progress, session_id=None) -> dict[str, Any]:
+        """One shape for a session, open or closed, so an in-progress record
+        and the final one cannot drift apart."""
         return {
             "scene": room,
+            "session_id": session_id or self._session_id,
+            "in_progress": in_progress,
             "keyframe_id": best_kf,
             "started_at": self._fmt(start),
             "start_ts": start,
@@ -443,6 +482,23 @@ class ActivitySessionTracker:
         # being reported.
         self._best_kf: Optional[str] = None
         self._best_score = -1.0
+        self._session_id: Optional[str] = None
+
+    def snapshot(self, timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+        """The open activity as it stands, without closing it.
+
+        Same reason as SceneSessionTracker.snapshot: an activity that runs for
+        twenty minutes should not be invisible for twenty minutes.
+        """
+        if self._current is None or self._started_at is None:
+            return None
+        end = self._last_confirmed or self._started_at
+        duration = max(0.0, end - self._started_at)
+        if duration < MIN_ACTIVITY_SESSION_SECONDS or self._frames < ACTIVITY_CONFIRM_FRAMES:
+            return None
+        return self._describe(self._current, self._started_at, end, duration,
+                              list(self._confs), dict(self._objects), self._frames,
+                              self._best_kf, in_progress=True)
 
     def observe(self, activity: Optional[str], confidence: float = 0.0,
                 objects: Optional[dict[str, float]] = None,
@@ -474,6 +530,7 @@ class ActivitySessionTracker:
                 completed = self._close(ts)
                 self._current = activity
                 self._started_at = ts
+                self._session_id = uuid.uuid4().hex
                 self._last_confirmed = ts
                 self._frames = ACTIVITY_CONFIRM_FRAMES
                 self._confs = [confidence]
@@ -502,6 +559,7 @@ class ActivitySessionTracker:
         completed = self._close(switch_ts)
         self._current = activity
         self._started_at = switch_ts
+        self._session_id = uuid.uuid4().hex
         self._last_confirmed = ts
         self._frames = self._pending_count
         self._confs = [confidence]
@@ -526,7 +584,7 @@ class ActivitySessionTracker:
         duration = max(0.0, end - start)
         activity, frames = self._current, self._frames
         confs, objects = list(self._confs), dict(self._objects)
-        best_kf = self._best_kf
+        best_kf, session_id = self._best_kf, self._session_id
         self._current = None
         self._started_at = None
         self._last_confirmed = None
@@ -534,10 +592,20 @@ class ActivitySessionTracker:
         self._objects = defaultdict(float)
         self._frames = 0
         self._best_kf, self._best_score = None, -1.0
+        self._session_id = None
         if duration < MIN_ACTIVITY_SESSION_SECONDS or frames < ACTIVITY_CONFIRM_FRAMES:
             return None
+        return self._describe(activity, start, end, duration, confs, objects,
+                              frames, best_kf, in_progress=False,
+                              session_id=session_id)
+
+    def _describe(self, activity, start, end, duration, confs, objects, frames,
+                  best_kf, in_progress, session_id=None) -> dict[str, Any]:
+        """One shape for an activity session, open or closed."""
         return {
             "activity": activity,
+            "session_id": session_id or self._session_id,
+            "in_progress": in_progress,
             "keyframe_id": best_kf,
             "started_at": SceneSessionTracker._fmt(start),
             "start_ts": start,

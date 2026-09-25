@@ -1319,6 +1319,17 @@ class DailyItemIndexer:
             self._persist_scene_session(
                 session, user_id_str, session.get("keyframe_id"))
 
+        # Write the session that is still OPEN, and keep it up to date. Without
+        # this the feed shows nothing for as long as the wearer stays in one
+        # room: a real recording sat in the bedroom for three minutes, saved
+        # nine frames of it, and produced no memory at all, because the session
+        # had not ended yet. It also means a run that is killed rather than
+        # stopped cleanly no longer loses the room it was in.
+        open_session = tracker.snapshot(ts)
+        if open_session:
+            self._persist_scene_session(
+                open_session, user_id_str, open_session.get("keyframe_id"))
+
     def flush_scene_sessions(self, user_id_str: str | None = None):
         """Close open sessions, e.g. when a stream stops."""
         targets = [user_id_str] if user_id_str else list(self._scene_trackers)
@@ -1331,14 +1342,18 @@ class DailyItemIndexer:
                 self._persist_scene_session(session, uid, session.get("keyframe_id"))
 
     def _persist_scene_session(self, session: dict, user_id_str: str, keyframe_id: str | None):
-        """Write a completed environment session to EventLog.
+        """Write an environment session to EventLog, open or closed.
+
+        Upserted on the session's own id rather than inserted, because the same
+        session is written repeatedly: once as soon as it is confirmed, again
+        each time it grows, and finally when it closes. Inserting would leave a
+        row per update, all of them claiming the same stretch of time.
 
         Uses event_type "activity" with details.action "scene_session" so the
         existing memory-search query and the feed's activity renderer pick it up
         unchanged -- the renderer shows details.sentence as the title.
         """
         try:
-            from pymongo import MongoClient
             from bson import ObjectId
             from datetime import datetime, timezone
             if self._db_client is None:
@@ -1353,30 +1368,49 @@ class DailyItemIndexer:
             # No dash: these strings are read by the person and their caregiver,
             # and a dash-joined fragment reads as machine output.
             sentence = f"{session['label']} for {minutes} min"
+            in_progress = bool(session.get("in_progress"))
             ts_now = datetime.now(timezone.utc)
-            db.eventlogs.insert_one({
+            session_id = session.get("session_id")
+
+            details = {
+                "action": "scene_session",
+                "scene": session["scene"],
+                "sentence": sentence,
+                "description": sentence,
+                "label": session["label"],
+                "duration_seconds": session["duration_seconds"],
+                "keyframes": session["keyframes"],
+                "evidence": session["evidence"],
+                "session_id": session_id,
+                "in_progress": in_progress,
+                "source": "scene_sessions",
+            }
+            doc = {
                 "user_id": user_oid,
                 "event_type": "activity",
                 "timestamp": datetime.fromtimestamp(session["start_ts"], tz=timezone.utc),
                 "confidence": 0.8,
-                "details": {
-                    "action": "scene_session",
-                    "scene": session["scene"],
-                    "sentence": sentence,
-                    "description": sentence,
-                    "label": session["label"],
-                    "duration_seconds": session["duration_seconds"],
-                    "keyframes": session["keyframes"],
-                    "evidence": session["evidence"],
-                    "source": "scene_sessions",
-                },
+                "details": details,
                 "keyframe_id": keyframe_id,
                 "verification_status": "confirmed",
-                "createdAt": ts_now,
                 "updatedAt": ts_now,
-            })
-            print(f"[DailyItemIndexer] [Scene] {sentence} "
-                  f"({session['keyframes']} keyframes, evidence {list(session['evidence'])[:3]})")
+            }
+
+            if session_id:
+                db.eventlogs.update_one(
+                    {"user_id": user_oid, "details.session_id": session_id},
+                    {"$set": doc, "$setOnInsert": {"createdAt": ts_now}},
+                    upsert=True,
+                )
+            else:
+                # A session from before ids existed, or one built by hand.
+                doc["createdAt"] = ts_now
+                db.eventlogs.insert_one(doc)
+
+            state = "open" if in_progress else "closed"
+            print(f"[DailyItemIndexer] [Scene] {sentence} ({state}, "
+                  f"{session['keyframes']} keyframes, evidence "
+                  f"{list(session['evidence'])[:3]})")
         except Exception as e:
             print(f"[DailyItemIndexer] Error persisting scene session: {e}")
 
