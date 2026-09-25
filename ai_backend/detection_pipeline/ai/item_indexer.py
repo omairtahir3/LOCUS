@@ -1140,17 +1140,17 @@ class DailyItemIndexer:
                 print(f"[DailyItemIndexer] Location lookup note: {e}")
 
             # 3. Create searchable EventLog entry for Memory Search (Module 7)
-            # "Left here" rather than "Spotted": what the wearer will come
-            # looking for is where they PUT something down, and these records
-            # are now only written for items that were out of hand.
+            # "Spotted", not "Left". Seeing a phone resting on a desk while its
+            # owner is standing right there is a SIGHTING. "Left" is a claim
+            # about departure, and nothing in a single frame can support it: it
+            # needs the wearer to have moved away and the item not to have been
+            # seen since, which only the routine monitor can know. Saying "Left
+            # Phone here" on every placed sighting cried wolf on every glance.
             all_placed = bool(detections) and all(
                 d.get("placement") == "placed" for d in detections)
-            verb = "Left" if all_placed else "Spotted"
-            summary_str = f"{verb} {', '.join(item_names[:4])}"
+            summary_str = f"Spotted {', '.join(item_names[:4])}"
             if len(item_names) > 4:
                 summary_str += f" and {len(item_names) - 4} more"
-            if all_placed:
-                summary_str += " here"
 
             event_doc = {
                 "user_id": user_oid,

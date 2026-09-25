@@ -256,13 +256,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
           }
           
           final summary = (details is Map ? details['summary'] : null)?.toString();
-          // Items are recorded when they leave the hand, so the entry says
-          // where a thing was PUT, which is what gets looked up later.
-          final placed = details is Map && details['placement'] == 'placed';
-          final verb = placed ? 'Left' : 'Spotted';
-          final tail = placed ? ' here' : '';
+          // A sighting. "Left" is a departure claim and belongs to the routine
+          // monitor's left_behind alert, not to one frame of a resting object.
           final titleText = itemNames.isNotEmpty
-              ? '$verb ${itemNames.take(3).join(', ')}${itemNames.length > 3 ? ' +${itemNames.length - 3} more' : ''}$tail'
+              ? 'Spotted ${itemNames.take(3).join(', ')}${itemNames.length > 3 ? ' +${itemNames.length - 3} more' : ''}'
               : (summary ?? 'Items detected');
 
           return _MemoryItem(
