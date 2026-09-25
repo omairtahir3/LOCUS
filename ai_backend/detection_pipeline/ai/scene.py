@@ -59,8 +59,16 @@ SCENE_WEIGHTS: dict[str, dict[str, float]] = {
         "Tea pot": 0.8, "Blender": 0.8,
         "Sink": 0.6, "Bowl/Basin": 0.3, "Cabinet/shelf": 0.3,
     },
+    # "Wardrobe" was here at 0.8, which made it a DEFINING object for this room.
+    # It is not an Objects365 class, so it never once appeared in a detections
+    # dict and could never have unlocked anything. The startup validator
+    # reported it the first time the real model was loaded:
+    #   [scene] WARNING: 1 scene weight keys match no Objects365 class and can
+    #   never fire: ['Wardrobe']
+    # Removed rather than guessed at: inventing a replacement name would put
+    # back exactly the invisible failure the validator exists to catch.
     "bedroom": {
-        "Bed": 1.0, "Pillow": 0.9, "Nightstand": 0.9, "Wardrobe": 0.8,
+        "Bed": 1.0, "Pillow": 0.9, "Nightstand": 0.9,
         "Lamp": 0.4, "Mirror": 0.3,
     },
     # Monitor/TV is NOT defining, at any weight. A screen exists in every room
