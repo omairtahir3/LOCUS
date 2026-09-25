@@ -1095,9 +1095,13 @@ class DailyItemIndexer:
 
         room, score, _ = classify_scene(all_detections)
         ts = time.time()
-        session = tracker.observe(room, all_detections, ts)
+        session = tracker.observe(room, all_detections, ts,
+                                  keyframe_id=keyframe_id, score=score)
         if session:
-            self._persist_scene_session(session, user_id_str, keyframe_id)
+            # The session's OWN best frame. Passing the frame in hand here
+            # attached the next room's photo to every session that closed.
+            self._persist_scene_session(
+                session, user_id_str, session.get("keyframe_id"))
 
     def flush_scene_sessions(self, user_id_str: str | None = None):
         """Close open sessions, e.g. when a stream stops."""
@@ -1108,7 +1112,7 @@ class DailyItemIndexer:
                 continue
             session = tracker.flush()
             if session:
-                self._persist_scene_session(session, uid, None)
+                self._persist_scene_session(session, uid, session.get("keyframe_id"))
 
     def _persist_scene_session(self, session: dict, user_id_str: str, keyframe_id: str | None):
         """Write a completed environment session to EventLog.

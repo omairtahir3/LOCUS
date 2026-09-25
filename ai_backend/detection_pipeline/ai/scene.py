@@ -33,6 +33,7 @@ claim, not a guess.
 
 from __future__ import annotations
 
+import os
 import time
 from collections import defaultdict
 from typing import Any, Optional
@@ -163,7 +164,21 @@ SCENE_PENDING_WINDOW = 300
 # wearer had long since walked out of. Beyond this gap we have simply lost
 # track, and the honest end of the session is the last time we actually saw the
 # room.
-SCENE_STALE_SECONDS = 180
+#
+# 90s, not 180s: at 180 a bedroom session confirmed at 06:54 coasted for 154
+# seconds straight through a trip to the kitchen, because the kitchen frames in
+# between recognised nothing and neither confirmed nor closed it. The wearer's
+# kitchen visit was reported as time in the bedroom. Frames are much denser now
+# that capture is event-driven rather than motion-driven, so 90s is still
+# several frames of tolerance for looking down at a lap.
+SCENE_STALE_SECONDS = 90
+
+# Close and immediately reopen a session that runs this long. Nothing is written
+# until a session ENDS, so a wearer who stays in one room for forty minutes sees
+# nothing in the feed for forty minutes, which reads as a broken system. This
+# bounds that delay: a long stay becomes a sequence of chunks rather than one
+# block that arrives late.
+MAX_SESSION_SECONDS = float(os.environ.get("MAX_SESSION_SECONDS", 600))
 
 # A session shorter than this is noise (walking through a room), not an event.
 # 10s, because keyframes arrive roughly every 14 seconds: a session is measured
@@ -238,9 +253,18 @@ class SceneSessionTracker:
         self._pending_since: Optional[float] = None
         self._evidence: dict[str, float] = defaultdict(float)
         self._frames = 0
+        # The best frame of THIS session, kept so the session can illustrate
+        # itself. The caller used to attach whatever frame was in hand when the
+        # session closed, which is by definition a frame of the room that had
+        # just displaced it: every "Kitchen activity" in the real recording
+        # carried a photo of the bedroom the wearer walked into next.
+        self._best_kf: Optional[str] = None
+        self._best_score = -1.0
 
     def observe(self, room: Optional[str], detections: dict[str, float],
-                timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+                timestamp: Optional[float] = None,
+                keyframe_id: Optional[str] = None,
+                score: float = 0.0) -> Optional[dict[str, Any]]:
         ts = timestamp if timestamp is not None else time.time()
 
         if room is None:
@@ -260,6 +284,24 @@ class SceneSessionTracker:
             self._pending_count = 0
             for cls, conf in detections.items():
                 self._evidence[cls] = max(self._evidence[cls], conf)
+            # Illustrate the session with the frame that recognised the room
+            # most clearly, not the first or the last one.
+            if keyframe_id and score > self._best_score:
+                self._best_kf, self._best_score = keyframe_id, score
+            # A long stay is reported in chunks rather than withheld until the
+            # wearer finally leaves (see MAX_SESSION_SECONDS).
+            if self._started_at is not None and (ts - self._started_at) >= MAX_SESSION_SECONDS:
+                completed = self._close(ts)
+                self._current = room
+                self._started_at = ts
+                self._last_seen = ts
+                self._last_confirmed = ts
+                self._frames = 1
+                self._evidence = defaultdict(float)
+                for cls, conf in detections.items():
+                    self._evidence[cls] = max(self._evidence[cls], conf)
+                self._best_kf, self._best_score = keyframe_id, score
+                return completed
             return None
 
         # A different room — require it to persist before switching.
@@ -286,10 +328,16 @@ class SceneSessionTracker:
         self._started_at = switch_ts
         self._last_seen = ts
         self._last_confirmed = ts
-        self._frames = 1
+        # The pending sightings ARE confirmed sightings of this room; they are
+        # what proved the switch. Resetting to 1 discarded them, so the first
+        # session after every room change under-counted its frames by one and a
+        # genuine short visit was dropped by MIN_SESSION_FRAMES.
+        self._frames = max(1, self._pending_count)
         self._evidence = defaultdict(float)
         for cls, conf in detections.items():
             self._evidence[cls] = max(self._evidence[cls], conf)
+        # This frame belongs to the NEW session, never to the one just closed.
+        self._best_kf, self._best_score = keyframe_id, score
         self._pending = None
         self._pending_count = 0
         self._pending_since = None
@@ -308,16 +356,19 @@ class SceneSessionTracker:
         end = self._last_confirmed or self._last_seen or ts
         duration = max(0.0, end - start)
         room, evidence, frames = self._current, dict(self._evidence), self._frames
+        best_kf = self._best_kf
         self._current = None
         self._started_at = None
         self._last_seen = None
         self._last_confirmed = None
         self._evidence = defaultdict(float)
         self._frames = 0
+        self._best_kf, self._best_score = None, -1.0
         if duration < MIN_SESSION_SECONDS or frames < MIN_SESSION_FRAMES:
             return None
         return {
             "scene": room,
+            "keyframe_id": best_kf,
             "started_at": self._fmt(start),
             "start_ts": start,
             "end_ts": end,
@@ -387,10 +438,16 @@ class ActivitySessionTracker:
         self._confs: list[float] = []
         self._objects: dict[str, float] = defaultdict(float)
         self._frames = 0
+        # Same reason as SceneSessionTracker._best_kf: a frame grabbed when the
+        # session closes shows whatever the wearer moved on to, not the activity
+        # being reported.
+        self._best_kf: Optional[str] = None
+        self._best_score = -1.0
 
     def observe(self, activity: Optional[str], confidence: float = 0.0,
                 objects: Optional[dict[str, float]] = None,
-                timestamp: Optional[float] = None) -> Optional[dict[str, Any]]:
+                timestamp: Optional[float] = None,
+                keyframe_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         ts = timestamp if timestamp is not None else time.time()
         objects = objects or {}
 
@@ -407,8 +464,24 @@ class ActivitySessionTracker:
             self._confs.append(confidence)
             for k, v in objects.items():
                 self._objects[k] = max(self._objects[k], v)
+            if keyframe_id and confidence > self._best_score:
+                self._best_kf, self._best_score = keyframe_id, confidence
             self._pending = None
             self._pending_count = 0
+            # Same chunking as scene sessions: a long activity is reported as
+            # it goes rather than held back until it finally ends.
+            if self._started_at is not None and (ts - self._started_at) >= MAX_SESSION_SECONDS:
+                completed = self._close(ts)
+                self._current = activity
+                self._started_at = ts
+                self._last_confirmed = ts
+                self._frames = ACTIVITY_CONFIRM_FRAMES
+                self._confs = [confidence]
+                self._objects = defaultdict(float)
+                for k, v in objects.items():
+                    self._objects[k] = max(self._objects[k], v)
+                self._best_kf, self._best_score = keyframe_id, confidence
+                return completed
             return None
 
         # A different activity has to persist before it displaces anything.
@@ -435,6 +508,8 @@ class ActivitySessionTracker:
         self._objects = defaultdict(float)
         for k, v in objects.items():
             self._objects[k] = max(self._objects[k], v)
+        # Belongs to the NEW session, never to the one just closed.
+        self._best_kf, self._best_score = keyframe_id, confidence
         self._pending = None
         self._pending_count = 0
         self._pending_since = None
@@ -451,16 +526,19 @@ class ActivitySessionTracker:
         duration = max(0.0, end - start)
         activity, frames = self._current, self._frames
         confs, objects = list(self._confs), dict(self._objects)
+        best_kf = self._best_kf
         self._current = None
         self._started_at = None
         self._last_confirmed = None
         self._confs = []
         self._objects = defaultdict(float)
         self._frames = 0
+        self._best_kf, self._best_score = None, -1.0
         if duration < MIN_ACTIVITY_SESSION_SECONDS or frames < ACTIVITY_CONFIRM_FRAMES:
             return None
         return {
             "activity": activity,
+            "keyframe_id": best_kf,
             "started_at": SceneSessionTracker._fmt(start),
             "start_ts": start,
             "end_ts": end,

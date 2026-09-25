@@ -151,6 +151,49 @@ router.post('/logs', async (req, res) => {
     const Medication = require('../models/Medication');
     const MedicationLog = require('../models/MedicationLog');
 
+    // One EventLog per DOSE, written the same way whether the MedicationLog was
+    // just created or already existed. Two bugs lived in having two copies of
+    // this: the update path wrote an EventLog only for 'taken', so a
+    // needs_verification detection against a log the scheduler had already
+    // created (which is the normal case) left no memory record at all; and it
+    // keyed the upsert on medication_id alone with no time component, so a
+    // medication could only ever have ONE intake record in its whole history
+    // and every later dose silently matched the first. A memory aid that cannot
+    // answer "did I take it today?" for a repeat medication is not working.
+    const writeIntakeEventLog = async ({ logId, status, confidence_score, keyframe_id }) => {
+      if (status !== 'taken' && status !== 'needs_verification') return;
+      const EventLog = require('../models/EventLog');
+      const LocationLog = require('../models/LocationLog');
+      let locationData;
+      const latestLoc = await LocationLog.findOne({ user_id: targetUserId }).sort({ timestamp: -1 });
+      if (latestLoc && latestLoc.timestamp) {
+        const stalenessMin = (new Date() - new Date(latestLoc.timestamp)) / 1000 / 60;
+        if (stalenessMin <= 30) locationData = { lat: latestLoc.lat, lng: latestLoc.lng };
+        else console.log(`[EventLog] Skipped GPS attach: Location stale by ${stalenessMin.toFixed(1)} mins`);
+      }
+      // Keyed on the dose's own log id, so repeat detections of the SAME dose
+      // update one record while a later dose gets its own.
+      await EventLog.findOneAndUpdate(
+        { user_id: targetUserId, event_type: 'medication_intake', 'details.medication_log_id': logId },
+        {
+          $set: {
+            confidence: confidence_score || 1.0,
+            verification_status: status === 'taken' ? 'confirmed' : 'pending',
+            ...(keyframe_id ? { keyframe_id } : {}),
+            ...(locationData ? { location: locationData } : {}),
+          },
+          $setOnInsert: {
+            timestamp: new Date(),
+            details: {
+              medication_name: med.name, dosage: med.dosage, medication_id: med._id,
+              medication_log_id: logId, detection_status: status,
+            },
+          },
+        },
+        { upsert: true, new: true }
+      );
+    };
+
     let med = null;
     if (req.user.role === 'internal_ai' || req.user.role === 'system') {
       med = await Medication.findById(medication_id);
@@ -207,27 +250,15 @@ router.post('/logs', async (req, res) => {
           await notifyCaregiversTakenDose(patient, med, existing._id);
           await notifyUserTakenDose(patient, med, existing._id);
         }
-        
-        // Write to centralized EventLog MongoDB collection
-        const EventLog = require('../models/EventLog');
-        await EventLog.findOneAndUpdate(
-          { 
-            user_id: targetUserId, 
-            event_type: 'medication_intake', 
-            'details.medication_id': med._id 
-          },
-          {
-            $setOnInsert: {
-              timestamp: new Date(),
-              confidence: confidence_score || 1.0,
-              details: { medication_name: med.name, dosage: med.dosage, medication_id: med._id },
-              keyframe_id: keyframe_id || null,
-              verification_status: 'confirmed'
-            }
-          },
-          { upsert: true, new: true }
-        );
       }
+
+      // Outside the notify branches on purpose. Push notifications stay
+      // exclusive to 'taken', but the memory record is written for
+      // needs_verification too: the camera did detect an intake, it just scored
+      // below the auto-verify bar, and hiding it means the dose never appears.
+      await writeIntakeEventLog({
+        logId: existing._id, status, confidence_score, keyframe_id,
+      });
 
       return res.status(200).json({ ...existing.toObject(), medication_name: med.name, dosage: med.dosage });
     }
@@ -272,35 +303,7 @@ router.post('/logs', async (req, res) => {
           await notifyUserTakenDose(patient, med, log._id);
         }
       }
-      // Fetch latest location
-      const LocationLog = require('../models/LocationLog');
-      const latestLoc = await LocationLog.findOne({ user_id: targetUserId }).sort({ timestamp: -1 });
-      let locationData = undefined;
-      
-      if (latestLoc && latestLoc.timestamp) {
-        const stalenessMin = (new Date() - new Date(latestLoc.timestamp)) / 1000 / 60;
-        if (stalenessMin <= 30) {
-          locationData = { lat: latestLoc.lat, lng: latestLoc.lng };
-        } else {
-          console.log(`[EventLog] Skipped GPS attach: Location stale by ${stalenessMin.toFixed(1)} mins`);
-        }
-      }
-
-      // Write to centralized EventLog MongoDB collection
-      const EventLog = require('../models/EventLog');
-      await EventLog.create({
-        user_id: targetUserId,
-        event_type: 'medication_intake',
-        timestamp: new Date(),
-        confidence: confidence_score || 1.0,
-        details: {
-          medication_name: med.name, dosage: med.dosage, medication_id: med._id,
-          detection_status: status,
-        },
-        keyframe_id: keyframe_id || null,
-        verification_status: status === 'taken' ? 'confirmed' : 'pending',
-        location: locationData
-      });
+      await writeIntakeEventLog({ logId: log._id, status, confidence_score, keyframe_id });
     }
 
     res.status(201).json({ ...log.toObject(), medication_name: med.name, dosage: med.dosage });

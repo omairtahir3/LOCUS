@@ -283,8 +283,21 @@ class MedicationDetectionPipeline:
             conf = float(getattr(act_result, 'confidence', 0.0) or 0.0)
             objects = attrs.get('detection_confidences') or {}
 
+        # Capture the frame WHILE the activity is happening. The cooldown keeps
+        # this to one frame every few seconds, and the tracker keeps the most
+        # confident one for its own session. Capturing at close time instead
+        # would store a picture of whatever the wearer moved on to.
+        kf = None
+        if activity:
+            try:
+                kf = self.extractor.capture_event(
+                    "activity", label=str(activity), confidence=conf)
+            except Exception as e:
+                print(f"[Pipeline] activity capture failed: {e}")
+
         try:
-            session = self._activity_tracker.observe(activity, conf, objects)
+            session = self._activity_tracker.observe(
+                activity, conf, objects, keyframe_id=kf)
         except Exception as e:
             print(f"[Pipeline] activity observe failed: {e}")
             return
@@ -300,15 +313,8 @@ class MedicationDetectionPipeline:
             client = get_client()
             db = client[get_db_name()]
             ts_now = datetime.utcnow()
-            keyframe_id = None
-            try:
-                keyframe_id = self.extractor.capture_event(
-                    "activity", label=session.get("label"),
-                    confidence=session.get("confidence"),
-                    extra={"activity": session.get("activity"),
-                           "duration_seconds": session.get("duration_seconds")})
-            except Exception as e:
-                print(f"[Pipeline] activity capture failed: {e}")
+            # The session's own best frame, captured while it was happening.
+            keyframe_id = session.get("keyframe_id")
             mins = max(1, round((session.get("duration_seconds") or 0) / 60))
             # No dash: a caregiver reads this string. The memory-search renderer
             # titles an activity from details.sentence, so without it every
