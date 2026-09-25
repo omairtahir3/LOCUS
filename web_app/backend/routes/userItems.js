@@ -31,17 +31,25 @@ const MATCH_THRESHOLD = 0.74;
  * "Phone" at 0.663). The answer is to notice at enrolment time and ask for
  * better photos.
  */
+// Sources at or above this were LEARNED by the system from its own camera,
+// not photographed by the person (item_indexer.LEARNED_SOURCE_BASE). They are
+// excluded from the health check: the question that check answers is "are the
+// photos you took good enough", and grading the system's own output would
+// answer a different one, and would drift as it learned.
+const LEARNED_SOURCE_BASE = 1000;
+
 function galleryCoherence(embeddings, sources = []) {
   const vecs = [];
   const src = [];
+  const hasMap = Array.isArray(sources) && sources.length === (embeddings || []).length;
   (embeddings || []).forEach((e, i) => {
-    if (Array.isArray(e) && e.length) {
-      vecs.push(e);
-      // No mapping means one embedding per photo, as it was before each photo
-      // was expanded across lighting and angle.
-      src.push(Array.isArray(sources) && sources.length === (embeddings || []).length
-        ? sources[i] : i);
-    }
+    if (!Array.isArray(e) || !e.length) return;
+    // No mapping means one embedding per photo, as it was before each photo
+    // was expanded across lighting and angle.
+    const s = hasMap ? sources[i] : i;
+    if (typeof s === 'number' && s >= LEARNED_SOURCE_BASE) return;
+    vecs.push(e);
+    src.push(s);
   });
   if (vecs.length < 2) return null;
   const cos = (a, b) => {

@@ -55,6 +55,20 @@ HEARTBEAT_SECONDS = float(os.environ.get("HEARTBEAT_SECONDS", 60.0))
 # Per-frame activity events are retired in favour of Tier-2 environment
 # sessions. Flip to True to restore the old behaviour for comparison.
 EMIT_PER_FRAME_ACTIVITY_EVENTS = False
+
+# Sessions like "At a keyboard for 454 seconds" are off.
+#
+# What a memory aid is asked to recall is WHERE somebody was, not which object
+# their hands were near: "you were in the kitchen for twelve minutes" is a
+# memory, "At a keyboard" is a description of furniture. The keyboard sessions
+# also drowned the feed, because a desk is where the wearer spends most of the
+# day, and they were rewritten on every observation as their duration grew.
+#
+# The environment sessions in ai/scene.py are what the feed carries instead.
+# The tracker itself still runs, so turning this back on needs one flag and no
+# other change.
+EMIT_ACTIVITY_SESSIONS = os.environ.get(
+    "EMIT_ACTIVITY_SESSIONS", "0").lower() in ("1", "true", "yes")
 THRESHOLD_AUTO_VERIFY = EVENT_CONFIDENCE_POLICY.auto_verify_threshold
 
 # Minimum pill confidence required IN THE PHASE-2 FRAME. Phase 2 judged hand
@@ -323,7 +337,7 @@ class MedicationDetectionPipeline:
         # confident one for its own session. Capturing at close time instead
         # would store a picture of whatever the wearer moved on to.
         kf = None
-        if activity:
+        if activity and EMIT_ACTIVITY_SESSIONS:
             try:
                 kf = self.extractor.capture_event(
                     "activity", label=str(activity), confidence=conf)
@@ -336,17 +350,8 @@ class MedicationDetectionPipeline:
         except Exception as e:
             print(f"[Pipeline] activity observe failed: {e}")
             return
-        if session:
+        if session and EMIT_ACTIVITY_SESSIONS:
             self._log_activity_session_to_db(session)
-        # And the one still running, for the same reason rooms are written
-        # while open: an activity that lasts twenty minutes should not be
-        # invisible for twenty minutes.
-        try:
-            open_session = self._activity_tracker.snapshot()
-            if open_session:
-                self._log_activity_session_to_db(open_session)
-        except Exception as e:
-            print(f"[Pipeline] activity snapshot failed: {e}")
 
     def _log_activity_session_to_db(self, session):
         """Write one confirmed activity session to EventLog, with a frame."""
@@ -2295,7 +2300,7 @@ class MedicationDetectionPipeline:
             tracker = getattr(self, '_activity_tracker', None)
             if tracker is not None:
                 session = tracker.flush()
-                if session:
+                if session and EMIT_ACTIVITY_SESSIONS:
                     self._log_activity_session_to_db(session)
         except Exception as e:
             print(f"[Pipeline] activity flush error: {e}")
