@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { protect: auth } = require('../middleware/auth');
 const { getIO } = require('../utils/socket');
 const { createNotification } = require('../utils/notifications');
+const { phraseNotification } = require('../utils/llmAgent');
 
 /**
  * PUT /api/users/me/steps   { date: 'YYYY-MM-DD', steps: 4213, raw_device_total?: 998123 }
@@ -89,20 +90,32 @@ router.post('/me/emergency', auth, async (req, res) => {
       location: { lat, lng }
     };
 
-    // Broadcast to all linked caregivers
+    // Broadcast to all linked caregivers. Every live socket event goes out
+    // before the first notification is built: the notification text is written
+    // by the agent, and one caregiver waiting on a model call must never hold
+    // up the instant alert to the next one.
     const io = getIO();
-    
     for (const caregiverId of req.user.caregiver_ids) {
-      // 1. Live socket event
       io.to(caregiverId.toString()).emit('sos_alert', payload);
-      
-      // 2. Persistent Escelated Notification (Triggers Push + Email)
+    }
+
+    // Persistent escalated notification (triggers push + email), phrased by the
+    // agent like every other alert. The title stays exactly as written: an
+    // emergency is the one case where the wording must not vary at a glance.
+    const caregivers = await User.find({ _id: { $in: req.user.caregiver_ids } }).lean();
+    const sos = {
+      kind: 'emergency', severity: 'urgent',
+      title: `EMERGENCY SOS: ${req.user.name}`,
+      message: `${req.user.name} has triggered an SOS alert. Please check their location immediately.`,
+    };
+    for (const caregiver of caregivers) {
+      const said = await phraseNotification(sos, caregiver, req.user);
       await createNotification({
-        recipientId: caregiverId,
+        recipientId: caregiver._id,
         subjectUserId: req.user._id,
         type: 'emergency',
-        title: `EMERGENCY SOS: ${req.user.name}`,
-        message: `${req.user.name} has triggered an SOS alert. Please check their location immediately.`,
+        title: said.title,
+        message: said.message,
         requiresAck: true,
         sender: 'System'
       });

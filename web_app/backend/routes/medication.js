@@ -535,12 +535,24 @@ router.post('/logs/:logId/snooze', async (req, res) => {
     if (!log) return res.status(404).json({ error: 'Log not found or not authorized' });
 
     const { createNotification } = require('../utils/notifications');
+    const { phraseNotification } = require('../utils/llmAgent');
+    const { timeWords } = require('../utils/friendly');
+    // Written by the agent, like the rest of the medication notifications. The
+    // time goes in as words, not toLocaleTimeString: the agent is told never to
+    // emit a machine-formatted timestamp, so it would have had to break its own
+    // rules to repeat its own facts.
+    const snoozeUser = await require('../models/User').findById(log.user_id).lean();
+    const said = await phraseNotification({
+      kind: 'dose_snoozed', severity: 'info',
+      title: `Dose snoozed for ${durationMinutes} minutes`,
+      message: `Your reminder for ${log.medication_id?.name || 'your medication'} is snoozed until ${timeWords(snoozedUntil)}.`,
+    }, snoozeUser || { _id: log.user_id }, snoozeUser || { _id: log.user_id });
     await createNotification({
       recipientId: log.user_id,
       subjectUserId: log.user_id,
       type: 'dose_reminder',
-      title: `⏰ Dose Snoozed (${durationMinutes}m)`,
-      message: `Reminder for ${log.medication_id?.name || 'medication'} snoozed until ${snoozedUntil.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`,
+      title: said.title,
+      message: said.message,
       medicationId: log.medication_id?._id,
       medicationLogId: log._id,
       sendPush: false

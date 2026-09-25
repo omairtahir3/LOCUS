@@ -4,6 +4,7 @@ const MedicationLog = require('../models/MedicationLog');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { createNotification } = require('../utils/notifications');
+const { phraseNotification } = require('../utils/llmAgent');
 
 const router = express.Router();
 router.use(protect, authorize('caregiver', 'admin'));
@@ -99,13 +100,22 @@ router.post('/users/:userId/message', async (req, res) => {
 router.post('/users/:userId/status-check', async (req, res) => {
   try {
     const caregiver = await User.findById(req.user._id);
+    // The caregiver pressed a button; they did not write anything. So the words
+    // are the agent's, like every other notification LOCUS composes itself.
+    // (The free-text /message route above is the opposite case and stays verbatim.)
+    const subject = await User.findById(req.params.userId).lean();
+    const said = await phraseNotification({
+      kind: 'status_check', severity: 'warning',
+      title: 'Status Check Request',
+      message: `${caregiver.name} is checking in on you. Please respond when you can.`,
+    }, subject || { _id: req.params.userId, name: 'there' }, subject || { _id: req.params.userId });
 
     const notification = await createNotification({
       recipientId: req.params.userId,
       subjectUserId: req.params.userId,
       type: 'status_check',
-      title: 'Status Check Request',
-      message: `${caregiver.name} is checking in on you. Please respond when you can.`,
+      title: said.title,
+      message: said.message,
       requiresAcknowledgement: true,
     });
 

@@ -19,7 +19,7 @@
  */
 
 const { createNotification, keyframeAttachment } = require('./notifications');
-const { generateRoutineFindingMessage } = require('./llmAgent');
+const { generateRoutineFindingMessage, phraseNotification } = require('./llmAgent');
 const RoutineFinding = require('../models/RoutineFinding');
 const { firstName, item, timeWords } = require('./friendly');
 
@@ -75,19 +75,43 @@ async function deliverEscalation(finding, subject, now = new Date()) {
   const keyframe = await keyframeAttachment(ev.keyframe_id, 'lastseen');
   // Raw coordinates and the keyframe id stay in finding.evidence for the app;
   // the person reading this needs a time, a place they can tap, and what to do.
+  // The map link is NOT part of this text. It is appended after the agent has
+  // written the words, because a URL handed to the model comes back truncated
+  // or reflowed, and its coordinates trip the invented-number guard.
   const message =
     `We told ${who} ${ITEM_LOST_ESCALATE_LABEL} ago that their ${w.name} ${w.were} left behind, but they haven't responded. ` +
-    (when ? `${w.they === 'they' ? 'They were' : 'It was'} last seen at ${timeWords(when)}` : `We don't have a time for when ${w.they} ${w.were} last seen`) +
-    (loc ? `, here's the spot on a map: ${mapLink}. ` : '. ') +
+    (when ? `${w.they === 'they' ? 'They were' : 'It was'} last seen at ${timeWords(when)}. ` : `We don't have a time for when ${w.they} ${w.were} last seen. `) +
     `Could you give ${who} a call?`;
+  const withMap = text => mapLink ? `${text} Here's the spot on a map: ${mapLink}` : text;
   const ids = [];
   for (const cg of caregivers) {
     const prefs = cg.notification_prefs || {};
+    // Phrased by the agent, like every other alert. This was the one routine
+    // notification still shipping its own hand-written string.
+    // Three facts this alert cannot lose, each seen dropped on a real run:
+    //   WHAT was left behind          ("Osaid hasn't responded yet. They were
+    //                                   last seen at 11:43 PM.")
+    //   that the wearer was told      (without it, it reads like a first alert,
+    //     and has not answered         when being the second is the whole point)
+    //   WHEN it was last seen         ("Osaid hasn't responded to the note about
+    //                                   the car keys. Call them now.")
+    // FE-15 asks for a timestamp, so the last one is not merely nice to have.
+    // Anything missing sends the template, which carries all three.
+    const said = await phraseNotification(
+      { kind: 'item_lost_escalated', severity: 'urgent', title, message }, cg, subject,
+      { keep: `the ${w.name}, that ${who} was already told and has not answered` +
+              (when ? `, and the time ${timeWords(when)}` : ''),
+        mustSay: [
+          new RegExp(w.name.split(/\s+/).pop(), 'i'),
+          /respond|repl|answer|no word|heard nothing/i,
+          ...(when ? [new RegExp(timeWords(when).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'i')] : []),
+        ] });
     const n = await createNotification({
       recipientId: cg._id,
       subjectUserId: subject._id,
       type: 'routine_item_lost_escalated',
-      title, message,
+      title,
+      message: withMap(said.message),
       requiresAcknowledgement: true,
       sendEmailTo: (prefs.email !== false && cg.email) ? cg.email : null,
       sendPush: prefs.push !== false,
