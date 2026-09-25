@@ -203,6 +203,30 @@ OUTDOOR_STATUS_CACHE_S = 60.0     # one DB lookup per user per minute, not per k
 # which is the flooding this gate exists to prevent.
 ITEM_DEDUP_SECONDS = 900  # 15 minutes
 
+# ── Held, or put down? ──────────────────────────────────────────────────────
+#
+# A memory aid does not need to tell somebody they are holding their phone;
+# they can see that. What it needs to record is the moment the phone stopped
+# being in their hand, because that is the fact they will want back later: not
+# "you have your keys" but "you put your keys on the hall table at 4pm".
+#
+# The test is the wearer's own hands, via the MediaPipe detector the medication
+# pipeline already runs. This is not a proxy: if a hand box overlaps the item,
+# or a fingertip is beside it, the item is in hand. Bounding-box area was tried
+# first and rejected: across the enrolled sightings actually recorded, held and
+# put-down items both span 1.6% to 6.7% of frame, so area cannot separate them.
+# Area survives only as a backstop for an item filling the view, which is at
+# the camera and cannot be across the room.
+ITEM_HELD_OVERLAP_FRAC = float(os.environ.get("ITEM_HELD_OVERLAP_FRAC", 0.15))
+ITEM_HELD_NEAR_FRAC = float(os.environ.get("ITEM_HELD_NEAR_FRAC", 0.06))
+ITEM_HELD_MAX_AREA_FRAC = float(os.environ.get("ITEM_HELD_MAX_AREA_FRAC", 0.30))
+
+# When the hand detector is unavailable, every sighting is treated as put down
+# rather than dropped. Losing the record entirely is the worse failure: a
+# missing "where did I leave it" is the thing this feature exists to prevent.
+LOG_ONLY_PLACED_ITEMS = os.environ.get(
+    "LOG_ONLY_PLACED_ITEMS", "1").lower() not in ("0", "false", "no")
+
 # ── Tiled exemplar scan ───────────────────────────────────────────────────────
 # Objects365 cannot box small personal items: across 6 real chest-cam frames it
 # produced a box on the wearer's car keys 0/6 times, and a sweep of imgsz
@@ -534,6 +558,31 @@ class DailyItemIndexer:
 
         if not detections:
             return
+
+        # ── Held items are not memories ──────────────────────────────────────
+        # Applied BEFORE the dedup gate on purpose. If a held sighting were
+        # allowed through, it would claim the item's 15-minute slot and the
+        # moment the wearer actually put it down would be suppressed as a
+        # duplicate -- turning the one sighting worth keeping into the one
+        # sighting dropped.
+        hand_boxes = self._hand_boxes(image) if detections else None
+        img_h, img_w = image.shape[:2]
+        if detections and LOG_ONLY_PLACED_ITEMS and hand_boxes is not None:
+            kept = []
+            for d in detections:
+                if self._is_held(d["bbox"], hand_boxes, img_w, img_h):
+                    print(f"[DailyItemIndexer] {d.get('matched_item', d['name'])} is in "
+                          f"hand, not recorded as put down")
+                    continue
+                d["placement"] = "placed"
+                kept.append(d)
+            detections = kept
+            if not detections:
+                return
+        else:
+            for d in detections:
+                # Recorded honestly: we did not look, so we do not claim.
+                d["placement"] = "unknown" if hand_boxes is None else "placed"
 
         # Tier-2 Gap-Filling Activity Enrichment
         self._check_and_enrich_activity(keyframe_id, detections, metadata, image.shape[:2])
@@ -1028,9 +1077,17 @@ class DailyItemIndexer:
                 print(f"[DailyItemIndexer] Location lookup note: {e}")
 
             # 3. Create searchable EventLog entry for Memory Search (Module 7)
-            summary_str = f"Spotted {', '.join(item_names[:4])}"
+            # "Left here" rather than "Spotted": what the wearer will come
+            # looking for is where they PUT something down, and these records
+            # are now only written for items that were out of hand.
+            all_placed = bool(detections) and all(
+                d.get("placement") == "placed" for d in detections)
+            verb = "Left" if all_placed else "Spotted"
+            summary_str = f"{verb} {', '.join(item_names[:4])}"
             if len(item_names) > 4:
                 summary_str += f" and {len(item_names) - 4} more"
+            if all_placed:
+                summary_str += " here"
 
             event_doc = {
                 "user_id": user_oid,
@@ -1042,6 +1099,9 @@ class DailyItemIndexer:
                     "items": detections,
                     "item_names": item_names,
                     "summary": summary_str,
+                    # At the event level too, so "where did I leave it" can be
+                    # queried without unwinding the items array.
+                    "placement": "placed" if all_placed else "mixed",
                     "total_items": len(detections)
                 },
                 "keyframe_id": keyframe_id,
@@ -1115,6 +1175,48 @@ class DailyItemIndexer:
 
         cache[user_id_str] = (now, result)
         return result
+
+    # ── Held, or put down? ───────────────────────────────────────────────────
+    def _hand_boxes(self, image) -> list[dict] | None:
+        """The wearer's hand boxes in this frame, or None if unavailable.
+
+        None and [] mean different things: [] is "looked, saw no hands", None is
+        "could not look". Only [] is evidence that an item is not being held.
+        """
+        try:
+            if getattr(self, "_gesture", None) is None:
+                from ai.gesture import GestureDetector
+                self._gesture = GestureDetector()
+            result = self._gesture.analyze_frame(image)
+            return list(result.get("all_hand_bboxes") or [])
+        except Exception as e:
+            if not getattr(self, "_warned_no_hands", False):
+                print(f"[DailyItemIndexer] hand detector unavailable, every item "
+                      f"will be recorded as put down: {e}")
+                self._warned_no_hands = True
+            return None
+
+    def _is_held(self, bbox: dict, hand_boxes: list[dict] | None,
+                 frame_w: int, frame_h: int) -> bool:
+        """Is this item in the wearer's hand right now?"""
+        x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+        area = max(1, (x2 - x1) * (y2 - y1))
+
+        # Filling the view means it is at the camera, whatever the hands say.
+        if area / float(max(1, frame_w * frame_h)) >= ITEM_HELD_MAX_AREA_FRAC:
+            return True
+        if not hand_boxes:
+            return False      # [] is real evidence; None was handled by caller
+
+        pad = int(ITEM_HELD_NEAR_FRAC * frame_w)
+        for hb in hand_boxes:
+            hx1, hy1 = hb["x1"] - pad, hb["y1"] - pad
+            hx2, hy2 = hb["x2"] + pad, hb["y2"] + pad
+            ox = max(0, min(x2, hx2) - max(x1, hx1))
+            oy = max(0, min(y2, hy2) - max(y1, hy1))
+            if (ox * oy) / float(area) >= ITEM_HELD_OVERLAP_FRAC:
+                return True
+        return False
 
     # ── Environment sessions ─────────────────────────────────────────────────
     def _observe_scene(self, all_detections: dict[str, float], user_id_str: str,
