@@ -182,13 +182,22 @@ const sendPushNotification = async ({ userId, title, body, payload = {} }) => {
     const user = await User.findById(userId);
     
     if (user && user.fcm_token && getApps().length > 0) {
+      // FCM rejects the whole message if any data value is not a string, with
+      // "data must only contain string values", and the push is then lost
+      // while the in-app notification saves normally. That is how "you left
+      // your phone behind" reached the notifications page and never reached
+      // the phone: its payload carried a Date and a null. Coerced here rather
+      // than at each call site, because every caller can and did get it wrong.
+      const data = { click_action: 'FLUTTER_NOTIFICATION_CLICK' };
+      for (const [k, v] of Object.entries(payload || {})) {
+        if (v === null || v === undefined) continue;
+        data[k] = v instanceof Date ? v.toISOString()
+          : (typeof v === 'string' ? v : JSON.stringify(v));
+      }
       await getMessaging().send({
         token: user.fcm_token,
         notification: { title, body },
-        data: {
-          click_action: 'FLUTTER_NOTIFICATION_CLICK',
-          ...payload
-        }
+        data,
       });
       console.log(`[FCM Push] Successfully sent to User ${userId} -> "${title}"`);
       return true;
