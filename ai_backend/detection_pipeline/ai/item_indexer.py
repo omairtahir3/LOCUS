@@ -250,6 +250,47 @@ TILE_SCAN_MAX_BACKLOG = int(os.environ.get("TILE_SCAN_MAX_BACKLOG", 3))
 # the frame being taken right now, and every frame in it delays that one.
 INDEX_QUEUE_HIGH_WATER = int(os.environ.get("INDEX_QUEUE_HIGH_WATER", 8))
 
+# ── Learning the item from the camera that has to recognise it ──────────────
+#
+# An enrolment photo is taken with a phone camera, close up, in one room. The
+# wearable sees the same object small, at an angle, across a desk, in whatever
+# light the room has. Those are different enough that the gallery matched only
+# 10 of 19 real sightings of the wearer's own phone.
+#
+# Measured on those 35 crops, seeding the gallery with four of the wearer's own
+# high-confidence sightings and augmenting each across lighting and angle, with
+# leave-one-out so nothing is graded on its own copy:
+#
+#   enrolled gallery as it stands           10/19 sightings matched
+#   + augmented from the stored photo       10/19   (no gain)
+#   + 4 wearable crops                      14/19
+#   + those 4 crops augmented               16/19
+#
+# The enrolment photo is not the problem to solve; the gap between the two
+# cameras is. So a confident match adds itself back to the gallery.
+# 0.70, set from the data rather than picked. 0.80 was tried first and made the
+# whole feature dead on arrival: the wearer's best real phone sighting scores
+# 0.785, so nothing would ever have qualified and the gallery would never have
+# learned anything. 0.70 sits above every one of the 16 mouse sightings, whose
+# best is 0.654, and admits 7 of the 19 real phone sightings as seeds.
+#
+# It is the second guard, not the first. Learning only happens on a crop that
+# already MATCHED, and a crop the detector labelled Mouse has to clear 0.85 to
+# match at all, which no mouse in the data comes close to.
+SELF_ENRICH_MIN_SIM = float(os.environ.get("SELF_ENRICH_MIN_SIM", 0.70))
+SELF_ENRICH_MAX_VECTORS = int(os.environ.get("SELF_ENRICH_MAX_VECTORS", 160))
+
+# A crop that another class also claims is not safe to learn from. In frame
+# c2f03780 the detector drew a "Cell Phone" box at 0.77 and a "Mouse" box at
+# 0.34 over the SAME pixels, IoU 0.97. Seeding from a box like that teaches the
+# gallery whichever object it really is, and the other name comes free with it.
+SELF_ENRICH_MAX_IOU = float(os.environ.get("SELF_ENRICH_MAX_IOU", 0.5))
+
+# Marks a vector as learned from the wearable rather than enrolled by hand, so
+# gallery coherence keeps measuring the ENROLMENT photos and does not quietly
+# start reporting on the system's own output.
+LEARNED_SOURCE_BASE = 1000
+
 
 def _confidences(detections: list[dict]) -> tuple[list[float], list[float]]:
     """Split a frame's detections into identity and class confidences.
@@ -996,6 +1037,10 @@ class DailyItemIndexer:
                     best_item_id = item["id"]
                     best_thresh = thresh
 
+            if best_match_name and best_sim >= SELF_ENRICH_MIN_SIM:
+                self._maybe_learn_from_sighting(
+                    best_item_id, best_match_name, d, detections, image, best_sim)
+
             if best_match_name:
                 generic_name = d["name"]
                 d["matched_item"] = best_match_name
@@ -1309,6 +1354,102 @@ class DailyItemIndexer:
 
         cache[user_id_str] = (now, result)
         return result
+
+    @staticmethod
+    def _box_iou(a: dict, b: dict) -> float:
+        ox = max(0, min(a["x2"], b["x2"]) - max(a["x1"], b["x1"]))
+        oy = max(0, min(a["y2"], b["y2"]) - max(a["y1"], b["y1"]))
+        inter = ox * oy
+        aa = max(0, a["x2"] - a["x1"]) * max(0, a["y2"] - a["y1"])
+        ab = max(0, b["x2"] - b["x1"]) * max(0, b["y2"] - b["y1"])
+        union = aa + ab - inter
+        return inter / float(union) if union > 0 else 0.0
+
+    def _maybe_learn_from_sighting(self, item_id, item_name, det, all_dets,
+                                   image, sim: float):
+        """Add a confident sighting back into the item's own gallery.
+
+        The gallery is built from photos taken with a phone camera and then
+        matched against a wearable one; that gap cost more than half of the
+        wearer's real phone sightings. A sighting the gallery already
+        recognises confidently is, by definition, a picture of the right object
+        through the right lens, so it is the best possible addition to it.
+
+        Guarded three ways, because a gallery that teaches itself can also
+        teach itself something wrong:
+          - only a confident match is learned from at all;
+          - never from a box another class also claims, which is exactly how a
+            mouse and a phone came to share one set of pixels;
+          - and the gallery is capped, so it cannot grow without end.
+        """
+        try:
+            bbox = det.get("bbox")
+            if not bbox or not item_id:
+                return
+
+            for other in all_dets:
+                if other is det or not other.get("bbox"):
+                    continue
+                if other.get("name") == det.get("name"):
+                    continue
+                if self._box_iou(bbox, other["bbox"]) >= SELF_ENRICH_MAX_IOU:
+                    print(f"[DailyItemIndexer] not learning {item_name} from a box "
+                          f"{other.get('name')!r} also claims")
+                    return
+
+            from bson import ObjectId
+            if self._db_client is None:
+                self._db_client = get_client(serverSelectionTimeoutMS=2000)
+            db = self._db_client[get_db_name()]
+            try:
+                oid = ObjectId(str(item_id))
+            except Exception:
+                return
+            doc = db.useritems.find_one({"_id": oid}, {"item_embeddings": 1,
+                                                       "embedding_sources": 1})
+            if not doc:
+                return
+            existing = doc.get("item_embeddings") or []
+            if len(existing) >= SELF_ENRICH_MAX_VECTORS:
+                return
+
+            x1, y1 = max(0, int(bbox["x1"])), max(0, int(bbox["y1"]))
+            x2 = min(image.shape[1], int(bbox["x2"]))
+            y2 = min(image.shape[0], int(bbox["y2"]))
+            if (x2 - x1) < 15 or (y2 - y1) < 15:
+                return
+            crop = image[y1:y2, x1:x2]
+            if crop.size == 0:
+                return
+
+            backbone = self._get_embedding_backbone()
+            if backbone is None:
+                return
+            # Augmented, for the same reason enrolment photos are: one sighting
+            # in one light should teach the gallery about that object in many.
+            variants = augment_for_enrollment(crop)
+            vecs = [np.asarray(v, dtype=float).tolist()
+                    for v in backbone.extract_batch(variants)]
+            room = SELF_ENRICH_MAX_VECTORS - len(existing)
+            vecs = vecs[:max(0, room)]
+            if not vecs:
+                return
+
+            sources = doc.get("embedding_sources") or []
+            next_source = LEARNED_SOURCE_BASE + sum(
+                1 for s in sources if isinstance(s, (int, float)) and s >= LEARNED_SOURCE_BASE)
+            db.useritems.update_one({"_id": oid}, {"$push": {
+                "item_embeddings": {"$each": vecs},
+                "embedding_sources": {"$each": [next_source] * len(vecs)},
+            }})
+            # The matcher holds a cached copy; drop it so the next frame sees
+            # what was just learned.
+            self._user_items_cache.pop(str(det.get("_user_id", "")), None)
+            self._user_items_cache.clear()
+            print(f"[DailyItemIndexer] learned {item_name} from a sighting at "
+                  f"sim={sim:.3f}: gallery {len(existing)} -> {len(existing) + len(vecs)}")
+        except Exception as e:
+            print(f"[DailyItemIndexer] could not learn from sighting: {e}")
 
     # ── Held, or put down? ───────────────────────────────────────────────────
     def _hand_boxes(self, image) -> list[dict] | None:
