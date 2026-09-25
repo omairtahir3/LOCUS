@@ -31,23 +31,41 @@ const MATCH_THRESHOLD = 0.74;
  * "Phone" at 0.663). The answer is to notice at enrolment time and ask for
  * better photos.
  */
-function galleryCoherence(embeddings) {
-  const vecs = (embeddings || []).filter(e => Array.isArray(e) && e.length);
+function galleryCoherence(embeddings, sources = []) {
+  const vecs = [];
+  const src = [];
+  (embeddings || []).forEach((e, i) => {
+    if (Array.isArray(e) && e.length) {
+      vecs.push(e);
+      // No mapping means one embedding per photo, as it was before each photo
+      // was expanded across lighting and angle.
+      src.push(Array.isArray(sources) && sources.length === (embeddings || []).length
+        ? sources[i] : i);
+    }
+  });
   if (vecs.length < 2) return null;
   const cos = (a, b) => {
     let dot = 0, na = 0, nb = 0;
     for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
     return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
   };
+  // Only across DIFFERENT photos. Variants of one photo are near identical by
+  // construction, so including them would report every gallery as healthy
+  // however poor the originals were, and the warning would never fire again.
   const sims = [];
   for (let i = 0; i < vecs.length; i++)
-    for (let j = i + 1; j < vecs.length; j++) sims.push(cos(vecs[i], vecs[j]));
+    for (let j = i + 1; j < vecs.length; j++)
+      if (src[i] !== src[j]) sims.push(cos(vecs[i], vecs[j]));
+  if (!sims.length) return null;      // every embedding came from one photo
   const mean = sims.reduce((a, b) => a + b, 0) / sims.length;
   const min = Math.min(...sims);
+  const photos = new Set(src).size;
   return {
     mean: Number(mean.toFixed(3)),
     min: Number(min.toFixed(3)),
     pairs: sims.length,
+    photos,
+    variants: vecs.length,
     // Below the matcher's own bar this item cannot reliably be recognised.
     matchable: mean >= MATCH_THRESHOLD,
     threshold: MATCH_THRESHOLD,
@@ -85,6 +103,7 @@ router.post('/enroll', auth, async (req, res) => {
 
     // Forward frames to FastAPI for MobileNetV3-Small embedding extraction
     let embeddings;
+    let embeddingSources = [];
     try {
       const aiRes = await axios.post(
         `${AI_BACKEND_URL}/api/detection/extract-embedding`,
@@ -92,6 +111,7 @@ router.post('/enroll', auth, async (req, res) => {
         { timeout: 60000, headers: { 'Content-Type': 'application/json' } }
       );
       embeddings = aiRes.data.embeddings;
+      embeddingSources = aiRes.data.source_indices || [];
     } catch (aiErr) {
       console.error('[UserItems] AI embedding extraction failed:', aiErr.message);
       return res.status(502).json({ error: 'Failed to extract item embeddings from AI backend' });
@@ -108,12 +128,13 @@ router.post('/enroll', auth, async (req, res) => {
       user_id: userId,
       item_name: item_name.trim(),
       item_embeddings: embeddings,
+      embedding_sources: embeddingSources,
       representative_image: representativeImage,
       enrolled_by: req.user.role === 'caregiver' ? 'caregiver' : (req.user.role || 'user'),
       is_active: true
     });
 
-    const coherence = galleryCoherence(embeddings);
+    const coherence = galleryCoherence(embeddings, embeddingSources);
     console.log(`[UserItems] Enrolled "${item_name}" for user ${userId} with ${embeddings.length} embeddings (${embeddings[0]?.length || 0}-D)`);
     if (coherence && !coherence.matchable) {
       console.warn(`[UserItems] "${item_name}" may never be recognised: its own photos `
@@ -149,9 +170,9 @@ router.get('/', auth, async (req, res) => {
     // so on the list, not only at the moment it was enrolled.
     const items = await UserItem.find({ user_id: userId, is_active: true })
       .sort({ createdAt: -1 }).lean();
-    res.json(items.map(({ item_embeddings, ...rest }) => ({
+    res.json(items.map(({ item_embeddings, embedding_sources, ...rest }) => ({
       ...rest,
-      gallery: galleryCoherence(item_embeddings),
+      gallery: galleryCoherence(item_embeddings, embedding_sources),
     })));
   } catch (error) {
     console.error('Error fetching items:', error);

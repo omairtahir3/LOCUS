@@ -14,6 +14,16 @@ const userItemSchema = new mongoose.Schema({
     type: [[Number]],
     default: []
   },
+  // Which enrolment PHOTO each embedding came from. Every photo is expanded
+  // across lighting and angle before embedding, so the gallery holds several
+  // vectors per photo. Judging how coherent a gallery is only means something
+  // between different photos: variants of one photo are near identical by
+  // construction and would report every gallery as healthy. Empty on items
+  // enrolled before augmentation existed, where one embedding is one photo.
+  embedding_sources: {
+    type: [Number],
+    default: []
+  },
   representative_image: {
     type: String,
     default: null

@@ -1609,6 +1609,67 @@ ENROLL_CROP_MIN_AREA = 0.02    # ignore specks
 ENROLL_CROP_MAX_AREA = 0.90    # ignore whole-scene boxes
 
 
+def _gamma(image_bgr: np.ndarray, g: float) -> np.ndarray:
+    """Brighten (g<1) or darken (g>1) the way a room's lighting does.
+
+    Gamma, not a linear scale, because that is how exposure actually behaves:
+    it moves the mid-tones while leaving black and white roughly in place, so
+    the object keeps its shape instead of washing out or crushing to a
+    silhouette.
+    """
+    table = np.array([((i / 255.0) ** g) * 255 for i in range(256)], dtype=np.uint8)
+    return cv2.LUT(image_bgr, table)
+
+
+def _rotate(image_bgr: np.ndarray, degrees: float) -> np.ndarray:
+    """Rotate in-plane, replicating the border.
+
+    Filling with black would put hard artificial edges into the crop, and
+    MobileNetV3 would embed those edges as if they were part of the object.
+    """
+    h, w = image_bgr.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), degrees, 1.0)
+    return cv2.warpAffine(image_bgr, m, (w, h), flags=cv2.INTER_LINEAR,
+                          borderMode=cv2.BORDER_REPLICATE)
+
+
+def _clahe(image_bgr: np.ndarray) -> np.ndarray:
+    """Local contrast lift, which is what a dim room does to a small object."""
+    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    l = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(l)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
+def augment_for_enrollment(image_bgr: np.ndarray) -> list[np.ndarray]:
+    """One enrollment photo, expanded to cover the conditions it will be seen in.
+
+    The gallery is matched by cosine similarity against a crop from a wearable
+    camera, so it has to span the LIGHTING and the ANGLE that camera will
+    actually encounter. Asking the wearer for more photos does not solve that:
+    they take them in one room, at one time of day, and the phone is then
+    carried into every other lighting in the house.
+
+    Measured motivation: the wearer's Phone gallery, four photos taken together,
+    agreed with ITSELF at a mean cosine of only 0.699 while the matcher demanded
+    0.74, and a computer mouse under different light scored 0.798 against it.
+    The gallery was not covering the space it needed to cover.
+
+    Lighting and rotation are varied mostly independently rather than crossed,
+    to keep enrollment fast; two combined variants cover the corner where a
+    dim room and an odd angle happen together.
+    """
+    out = [image_bgr]
+    for g in (0.55, 0.75, 1.35, 1.8):
+        out.append(_gamma(image_bgr, g))
+    out.append(_clahe(image_bgr))
+    for deg in (-12.0, 12.0):
+        out.append(_rotate(image_bgr, deg))
+    out.append(_gamma(_rotate(image_bgr, -12.0), 0.7))
+    out.append(_gamma(_rotate(image_bgr, 12.0), 1.4))
+    return out
+
+
 def tight_crop_enrollment_image(image_bgr: np.ndarray,
                                 margin: float = ENROLL_CROP_MARGIN) -> np.ndarray:
     """Crop a phone enrollment photo down to the object it is a photo OF.
