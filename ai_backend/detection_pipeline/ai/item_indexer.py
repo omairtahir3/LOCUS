@@ -14,6 +14,7 @@ the synchronous Tier-1 live camera ingest loop.
 from __future__ import annotations
 
 import os
+import re
 import time
 import queue
 import threading
@@ -275,8 +276,46 @@ class DailyItemIndexer:
     # usually redundant with a strong one, while a false "you had your keys"
     # is actively misleading in a memory aid.
     EXEMPLAR_MATCH_THRESHOLD = 0.74
+
+    # A lower bar, used ONLY when YOLO boxed the object and the class it named
+    # agrees with the enrolled item ("Cell Phone" for an item called "Phone").
+    #
+    # Every false positive behind the 0.74 figure above was a TILE-SCAN match
+    # with a class that did not agree, including the mouse that matched "Phone"
+    # at 0.663. The class-agreeing YOLO path has produced no observed false
+    # positive at all, so it is the one place the bar can come down without
+    # giving up what 0.74 bought.
+    #
+    # It needs to come down because 0.74 is not reachable for every item. The
+    # wearer's phone was matched once, at 0.741, having cleared the bar by
+    # 0.001; its four enrolment photos agree with each other at a mean of only
+    # 0.699, so most views of it score below the threshold and are dropped. An
+    # item cannot be required to match a stranger's view of it more closely
+    # than its own reference photos match each other.
+    #
+    # The trade is explicit: a different phone of the same model, boxed as a
+    # Cell Phone, could now be reported as this person's phone. In a memory aid
+    # that is a much smaller harm than never recording the phone at all, and
+    # tile scans, which is where the false positives actually came from, are
+    # unaffected and still require 0.74.
+    CLASS_AGREE_MATCH_THRESHOLD = 0.65
     # How often (seconds) to refresh the user_items cache from MongoDB
     EXEMPLAR_CACHE_TTL = 300  # 5 minutes
+
+    @staticmethod
+    def _names_agree(class_name: str, item_name: str) -> bool:
+        """Does the detected class plausibly describe the enrolled item?
+
+        Token overlap after crude singularisation, so "Cell Phone" agrees with
+        "Phone" and "Key" with "Car Keys", while "Mouse" agrees with neither.
+        """
+        def tokens(s):
+            return {
+                w[:-1] if len(w) > 3 and w.endswith("s") else w
+                for w in re.findall(r"[a-z]+", str(s).lower())
+                if len(w) > 2 and w not in {"the", "and", "his", "her", "for"}
+            }
+        return bool(tokens(class_name) & tokens(item_name))
 
     def __init__(self, model_path: str = DEFAULT_MODEL_PATH, conf_threshold: float = 0.30):
         self.model_path = model_path
@@ -779,6 +818,11 @@ class DailyItemIndexer:
 
             for item in user_items:
                 thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
+                # YOLO named this box, and the class it chose describes this
+                # item: the one case with no observed false positives.
+                if (item.get("threshold") is None
+                        and self._names_agree(d.get("name", ""), item["name"])):
+                    thresh = min(thresh, self.CLASS_AGREE_MATCH_THRESHOLD)
                 sims = np.asarray(item["embeddings"]) @ crop_emb
                 sim = float(sims.max()) if sims.size else 0.0
                 if sim > best_sim and sim >= thresh:
