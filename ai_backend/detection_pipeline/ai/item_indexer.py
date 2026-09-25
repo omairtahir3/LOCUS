@@ -235,6 +235,21 @@ LOG_ONLY_PLACED_ITEMS = os.environ.get(
 # further behind delays every memory after this one too.
 TILE_SCAN_MAX_BACKLOG = int(os.environ.get("TILE_SCAN_MAX_BACKLOG", 3))
 
+# How many frames may wait to be indexed before the OLDEST are dropped.
+#
+# The queue was bounded by COUNT (100) and not by time, so it absorbed a
+# backlog instead of shedding one. On a saturated machine a single frame took
+# 90 seconds to index, 63 were waiting, and a sighting reached the database 275
+# seconds after the shutter:
+#
+#   Detected 1 items (Phone) ... in 90375.7ms
+#   Logged 'object' memory event ... (274.8s after the frame was taken)
+#
+# Dropping the oldest keeps the lag bounded and keeps what is indexed recent,
+# which is what a memory aid needs: a five-minute-old queue is worth less than
+# the frame being taken right now, and every frame in it delays that one.
+INDEX_QUEUE_HIGH_WATER = int(os.environ.get("INDEX_QUEUE_HIGH_WATER", 8))
+
 
 def _confidences(detections: list[dict]) -> tuple[list[float], list[float]]:
     """Split a frame's detections into identity and class confidences.
@@ -367,6 +382,24 @@ class DailyItemIndexer:
     # tile scans, which is where the false positives actually came from, are
     # unaffected and still require 0.74.
     CLASS_AGREE_MATCH_THRESHOLD = 0.65
+
+    # And a HIGHER bar when YOLO boxed the object and named it something that
+    # is plainly not this item. The agreement rule was only ever applied in one
+    # direction, which left disagreement sitting at the default, and a real run
+    # produced exactly the failure the original calibration had warned about:
+    #
+    #   [DailyItemIndexer] Exemplar MATCH: 'Mouse' -> 'Phone' (sim=0.798 >= 0.74)
+    #
+    # The same gallery matched a genuine 'Cell Phone' at 0.785 in the same run,
+    # so raw similarity cannot separate them: the mouse scored HIGHER than the
+    # phone. The class name is the only thing that distinguishes the two, and it
+    # was being ignored. This sits above the mouse and leaves the class-agreeing
+    # path untouched, where the real matches are.
+    #
+    # It matters beyond a wrong caption. A false sighting refreshes the item's
+    # last-seen time, so "you left your phone behind" can never fire while a
+    # mouse on the desk keeps reporting the phone as present.
+    CLASS_DISAGREE_MATCH_THRESHOLD = 0.85
     # How often (seconds) to refresh the user_items cache from MongoDB
     EXEMPLAR_CACHE_TTL = 300  # 5 minutes
 
@@ -454,11 +487,34 @@ class DailyItemIndexer:
             "enqueued_at": time.time()
         }
 
+        # Shed the OLDEST waiting frames rather than let the backlog become
+        # minutes of lag (see INDEX_QUEUE_HIGH_WATER).
+        dropped = 0
+        while self._queue.qsize() >= INDEX_QUEUE_HIGH_WATER:
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+                dropped += 1
+            except queue.Empty:
+                break
+        if dropped:
+            # Once the backlog is at the mark it stays there, so every enqueue
+            # drops one and would print. Report at most once every ten seconds,
+            # with the running total, rather than a line per frame in a log
+            # that is already hard to read.
+            self._dropped_total = getattr(self, "_dropped_total", 0) + dropped
+            last = getattr(self, "_dropped_logged_at", 0.0)
+            if (time.monotonic() - last) >= 10.0:
+                self._dropped_logged_at = time.monotonic()
+                print(f"[DailyItemIndexer] backlog at {INDEX_QUEUE_HIGH_WATER}; "
+                      f"dropped {self._dropped_total} stale frame(s) so far so the "
+                      f"newest is indexed promptly")
+
         try:
             self._queue.put_nowait(task)
             return True
         except queue.Full:
-            print(f"[DailyItemIndexer] WARNING: Queue full (100 items), dropping keyframe {keyframe_id}")
+            print(f"[DailyItemIndexer] WARNING: Queue full, dropping keyframe {keyframe_id}")
             return False
 
     def _worker_loop(self):
@@ -923,11 +979,15 @@ class DailyItemIndexer:
 
             for item in user_items:
                 thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
-                # YOLO named this box, and the class it chose describes this
-                # item: the one case with no observed false positives.
-                if (item.get("threshold") is None
-                        and self._names_agree(d.get("name", ""), item["name"])):
-                    thresh = min(thresh, self.CLASS_AGREE_MATCH_THRESHOLD)
+                # YOLO named this box. Whether that name describes this item
+                # moves the bar in BOTH directions: down when it agrees, which
+                # is the one path with no observed false positives, and up when
+                # it plainly does not, which is where every observed false
+                # positive came from.
+                if item.get("threshold") is None:
+                    thresh = (self.CLASS_AGREE_MATCH_THRESHOLD
+                              if self._names_agree(d.get("name", ""), item["name"])
+                              else self.CLASS_DISAGREE_MATCH_THRESHOLD)
                 sims = np.asarray(item["embeddings"]) @ crop_emb
                 sim = float(sims.max()) if sims.size else 0.0
                 if sim > best_sim and sim >= thresh:
