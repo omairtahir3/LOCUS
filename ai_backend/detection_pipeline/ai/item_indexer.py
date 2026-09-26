@@ -1558,13 +1558,45 @@ class DailyItemIndexer:
                 from ai.gesture import GestureDetector
                 self._gesture = GestureDetector()
             result = self._gesture.analyze_frame(image)
-            return list(result.get("all_hand_bboxes") or [])
+            boxes = list(result.get("all_hand_bboxes") or [])
+            if boxes:
+                return boxes
+            # Nothing found. That is reported as "looked, saw no hands", which
+            # the caller reads as real evidence the item is NOT held -- so a miss
+            # here becomes a wrong "put down" and stores the wrong frame.
+            #
+            # MediaPipe misses hands in low light, and these are indoor evening
+            # frames. Measured on a frame with two hands wrapped round the phone
+            # (mean luminance 86.7): the original found 0 hands at every
+            # confidence down to 0.1, and gamma-brightening recovered the right
+            # hand at (744,416)-(1063,722), which is where it actually is. CLAHE
+            # did not help on that frame and cost up to 2.3 s. Gamma costs 6 ms
+            # plus one more detection pass (~300 ms), and only on frames that
+            # found nothing, which are exactly the frames currently getting the
+            # answer wrong.
+            bright = self._brighten(image)
+            retry = self._gesture.analyze_frame(bright)
+            retry_boxes = list(retry.get("all_hand_bboxes") or [])
+            if retry_boxes:
+                print(f"[Items] hands found only after brightening: {len(retry_boxes)}")
+            return retry_boxes
         except Exception as e:
             if not getattr(self, "_warned_no_hands", False):
                 print(f"[DailyItemIndexer] hand detector unavailable, every item "
                       f"will be recorded as put down: {e}")
                 self._warned_no_hands = True
             return None
+
+    # Gamma 1.6, applied only when a first detection pass found nothing. 2.2 was
+    # also tried and found the same single hand, so the gentler curve is used.
+    _GAMMA_LUT = None
+
+    def _brighten(self, image):
+        """A brighter copy of the frame, for a second look at a dark one."""
+        if DailyItemIndexer._GAMMA_LUT is None:
+            DailyItemIndexer._GAMMA_LUT = np.array(
+                [((i / 255.0) ** (1.0 / 1.6)) * 255 for i in range(256)]).astype("uint8")
+        return cv2.LUT(image, DailyItemIndexer._GAMMA_LUT)
 
     def _is_held(self, bbox: dict, hand_boxes: list[dict] | None,
                  frame_w: int, frame_h: int) -> bool:
