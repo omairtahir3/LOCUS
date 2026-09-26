@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import statistics
 import time
 import queue
 import threading
@@ -728,26 +729,58 @@ class DailyItemIndexer:
             print(f"[Items] {str(keyframe_id)[:8]} -> "
                   f"{[d.get('matched_item') or d['name'] for d in detections]} | hands "
                   + ("unavailable" if hand_boxes is None else f"seen {len(hand_boxes)}"))
-        if detections and LOG_ONLY_PLACED_ITEMS and hand_boxes is not None:
+        # ── Held, put down, or not known ─────────────────────────────────────
+        #
+        # "The detector looked and saw no hands" used to mean PUT DOWN, and that
+        # is what stored frames of the wearer holding their own phone. It is not
+        # evidence: measured over all 20 stored frames, MediaPipe found a hand in
+        # only 11, and it missed two hands wrapped round a phone on a frame with
+        # luminance 104.5, which is not a dark frame. Brightening recovers some
+        # of those (see _hand_boxes) but not that one.
+        #
+        # So the hands are believed only when they are actually seen. When they
+        # are not, the fallback is how big the item is, because on a camera worn
+        # on the chest a held thing is about 30 cm away and a thing on a desk is
+        # a metre or more: measured, the phone occupied 8.2, 12.3 and 14.9% of
+        # the frame while held, and about 1.5% sitting on the desk.
+        #
+        # That ratio is per ITEM, never global. A single global fraction is what
+        # made an earlier version call a laptop on a desk "held", because a
+        # laptop is simply bigger than a phone. Each belonging is calibrated from
+        # its own history, and until it has one it reports `unknown` and no frame
+        # is stored -- an unrecorded put-down is recoverable, a memory of the
+        # wearer holding their own phone is the thing being complained about.
+        user_key = str((metadata or {}).get("user_id", "unknown"))
+        frame_area = float(max(1, img_w * img_h))
+        for d in detections:
+            b = d["bbox"]
+            d["area_frac"] = round(
+                max(0, (b["x2"] - b["x1"])) * max(0, (b["y2"] - b["y1"])) / frame_area, 4)
+
+        if not (detections and LOG_ONLY_PLACED_ITEMS) or hand_boxes is None:
             for d in detections:
-                # Held sightings used to be DISCARDED here. That made "you picked
-                # it up and carried it away" and "it was never seen again"
-                # produce byte-identical evidence: nothing at all. Measured on
-                # this database, `in_hand` appeared 0 times in 321 item
-                # sightings, so nothing downstream could tell the two apart, and
-                # "if the wearer takes the item with them, do not alert" was
-                # unanswerable except by waiting and hoping.
-                #
-                # They are recorded now, marked in_hand. They are still not
-                # memories -- the feed filters them out -- but they are the only
-                # proof that a belonging left the surface in a hand, which is
-                # what makes a left-behind alert safe to send immediately.
+                d["placement"] = "unknown"      # could not look, so claim nothing
+                d["hands_seen"] = False
+        elif hand_boxes:
+            # Hands were actually seen. This is the trustworthy branch, and the
+            # only one whose labels are fed back into calibration.
+            for d in detections:
                 held = self._is_held(d["bbox"], hand_boxes, img_w, img_h)
                 d["placement"] = "in_hand" if held else "placed"
+                d["hands_seen"] = True
         else:
+            # Looked, saw nothing, which is unreliable. Fall back to this item's
+            # own size history, or admit we do not know.
             for d in detections:
-                # Recorded honestly: we did not look, so we do not claim.
-                d["placement"] = "unknown" if hand_boxes is None else "placed"
+                d["hands_seen"] = False
+                thr = self._held_size_threshold(user_key, d.get("enrolled_item_id") or d["class_id"])
+                if thr is None:
+                    d["placement"] = "unknown"
+                else:
+                    d["placement"] = "in_hand" if d["area_frac"] >= thr else "placed"
+                    print(f"[Items] no hands seen; {d.get('matched_item', d['name'])} is "
+                          f"{d['area_frac']:.3f} of the frame vs its own {thr:.3f} threshold "
+                          f"-> {d['placement']}")
 
         # Tier-2 Gap-Filling Activity Enrichment
         self._check_and_enrich_activity(keyframe_id, detections, metadata, image.shape[:2])
@@ -846,22 +879,39 @@ class DailyItemIndexer:
         match_str = f" ({matched_count} exemplar-matched)" if matched_count else ""
 
         # ── Persist Item Keyframe Evidence into items_storage/ ──
+        #
+        # A frame is stored only when something in it was actually PUT DOWN.
+        # This is the complaint itself: every frame under objects showed the
+        # wearer holding their phone, because a frame was stored whenever an
+        # item was matched, whatever the placement said. in_hand sightings are
+        # still recorded in the database -- the left-behind check needs them to
+        # know the item was carried, and they are what resets the fifteen-minute
+        # window -- but they are not memories of where anything was left, so
+        # they get no picture and never reach the feed.
         import uuid
-        item_keyframe_id = str(uuid.uuid4())
+        placed_now = [d for d in detections if d.get("placement") == "placed"]
+        item_keyframe_id = str(uuid.uuid4()) if placed_now else None
         try:
             storage = self._get_item_storage()
-            if storage is not None:
+            if storage is not None and item_keyframe_id is not None:
                 storage.save(item_keyframe_id, image, {
                     **(metadata or {}),
                     "user_id": user_key,
                     "type": "item_detection",
-                    "items": item_names,
-                    "matched_count": matched_count
+                    # Only what was put down. The frame is a record of where
+                    # these were left, and naming a held item here would put it
+                    # back into the feed by the side door.
+                    "items": sorted({d.get("matched_item", d["name"]) for d in placed_now}),
+                    "matched_count": len(placed_now),
                 })
         except Exception as e:
             print(f"[DailyItemIndexer] Error saving item evidence keyframe: {e}")
 
-        print(f"[DailyItemIndexer] Keyframe {item_keyframe_id}: Detected {len(detections)} items ({', '.join(item_names)}){match_str} in {elapsed_ms:.1f}ms{extra}")
+        if item_keyframe_id:
+            print(f"[DailyItemIndexer] Keyframe {item_keyframe_id}: Detected {len(detections)} items ({', '.join(item_names)}){match_str} in {elapsed_ms:.1f}ms{extra}")
+        else:
+            states = ', '.join(f"{d.get('matched_item', d['name'])}={d.get('placement')}" for d in detections)
+            print(f"[DailyItemIndexer] Nothing put down, so no frame kept ({states}) in {elapsed_ms:.1f}ms{extra}")
 
         # Persist to MongoDB referencing the exact item_keyframe_id
         self._persist_to_db(item_keyframe_id, detections, item_names, metadata)
@@ -1586,6 +1636,78 @@ class DailyItemIndexer:
                       f"will be recorded as put down: {e}")
                 self._warned_no_hands = True
             return None
+
+    # How many confidently-labelled sightings a belonging needs, of EACH kind,
+    # before its own size threshold is trusted. Three is small, but these labels
+    # come only from frames where hands were actually seen, so they accumulate
+    # slowly and a higher bar would leave the fallback inert for weeks.
+    _SIZE_MIN_SAMPLES = 3
+    _SIZE_CACHE_SECONDS = 300.0
+
+    def _held_size_threshold(self, user_key, item_identity):
+        """How big this particular belonging looks when held, as a frame fraction.
+
+        Returns the midpoint between its own median held size and its own median
+        put-down size, or None when it has not been seen enough of both ways.
+        None means "no opinion", and the caller records `unknown` rather than
+        guessing, which is the whole point of doing this per item: a laptop on a
+        desk is larger than a phone in a hand, so one global number cannot serve
+        both and a previous global rule called exactly that laptop "held".
+
+        Only sightings where hands were actually SEEN are used, because those are
+        the only labels not produced by this rule itself. Feeding its own output
+        back in would let one mistake harden into a threshold.
+        """
+        key = (user_key, str(item_identity))
+        now_ts = time.monotonic()
+        if not hasattr(self, "_size_cache"):
+            self._size_cache = {}
+        hit = self._size_cache.get(key)
+        if hit and (now_ts - hit[0]) < self._SIZE_CACHE_SECONDS:
+            return hit[1]
+
+        thr = None
+        try:
+            from bson import ObjectId
+            db = get_client()[get_db_name()]
+            try:
+                uid = ObjectId(user_key)
+            except Exception:
+                uid = None
+            if uid is not None:
+                sizes = {"in_hand": [], "placed": []}
+                cur = db.eventlogs.find(
+                    {"user_id": uid, "event_type": "object",
+                     "details.items": {"$elemMatch": {
+                         "enrolled_item_id": str(item_identity), "hands_seen": True}}},
+                    {"details.items": 1}).sort("timestamp", -1).limit(200)
+                for ev in cur:
+                    for it in (ev.get("details", {}).get("items") or []):
+                        if str(it.get("enrolled_item_id")) != str(item_identity):
+                            continue
+                        if not it.get("hands_seen"):
+                            continue
+                        a, p = it.get("area_frac"), it.get("placement")
+                        if isinstance(a, (int, float)) and p in sizes:
+                            sizes[p].append(float(a))
+                if (len(sizes["in_hand"]) >= self._SIZE_MIN_SAMPLES
+                        and len(sizes["placed"]) >= self._SIZE_MIN_SAMPLES):
+                    held_med = statistics.median(sizes["in_hand"])
+                    down_med = statistics.median(sizes["placed"])
+                    # Only meaningful if held really is the larger of the two.
+                    # A belonging that looks the same either way (something small
+                    # always at arm's length) gets no threshold rather than a
+                    # coin toss.
+                    if held_med > down_med * 1.5:
+                        thr = (held_med * down_med) ** 0.5      # geometric midpoint
+                        print(f"[Items] size threshold for {item_identity}: "
+                              f"held~{held_med:.3f} placed~{down_med:.3f} -> {thr:.3f} "
+                              f"(from {len(sizes['in_hand'])}+{len(sizes['placed'])} labelled sightings)")
+        except Exception as e:
+            print(f"[Items] size calibration unavailable: {e}")
+
+        self._size_cache[key] = (now_ts, thr)
+        return thr
 
     # Gamma 1.6, applied only when a first detection pass found nothing. 2.2 was
     # also tried and found the same single hand, so the gentler curve is used.

@@ -296,8 +296,12 @@ router.get('/timeline', auth, async (req, res) => {
         // records held sightings because the routine monitor needs them to tell
         // "you carried it away" from "you left it" -- they are evidence, not
         // timeline entries.
-        const held = (i) => (i.placement || d.placement) === 'in_hand';
-        const named = (d.items || []).filter(i => i.matched_item && !held(i)).map(i => i.matched_item);
+        // Only what was actually PUT DOWN. in_hand is the wearer holding their
+        // own phone, and unknown is the indexer saying it could not tell --
+        // neither is a memory of where something was left, and showing either
+        // as "Spotted" is the complaint this answers.
+        const wasPutDown = (i) => (i.placement || d.placement) === 'placed';
+        const named = (d.items || []).filter(i => i.matched_item && wasPutDown(i)).map(i => i.matched_item);
         if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
         // A sighting, not a departure. "Left" belongs to the routine monitor's
         // left_behind finding, which knows the wearer moved away and the item
