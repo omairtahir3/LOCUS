@@ -179,12 +179,28 @@ router.post('/acknowledge', auth, async (req, res) => {
 // GET /api/relationships/:id/interactions
 router.get('/:id/interactions', auth, async (req, res) => {
   try {
-    const interactions = await EventLog.find({ 
+    // Whose person is this? The id came from the URL and nothing checked it, so
+    // any signed-in account could read anyone's social history by id. That
+    // mattered less while the page was reachable only by caregivers; it is now
+    // reachable by every role, and who somebody has been seeing is exactly the
+    // kind of thing this app must not hand to a stranger.
+    const relationship = await Relationship.findById(req.params.id);
+    if (!relationship) return res.status(404).json({ error: 'Not found' });
+
+    const allowed = [String(req.user.id)];
+    if (req.user.role === 'caregiver') {
+      const caregiver = await User.findById(req.user.id).select('monitoring_users').lean();
+      for (const u of (caregiver?.monitoring_users || [])) allowed.push(String(u));
+    }
+    if (!allowed.includes(String(relationship.user_id))) {
+      // 404 rather than 403: whether a given id exists is itself not their business.
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const interactions = await EventLog.find({
       person_id: req.params.id,
       event_type: 'social_interaction'
     }).sort({ timestamp: -1 });
-
-    const relationship = await Relationship.findById(req.params.id);
 
     res.json({ relationship, interactions });
   } catch (error) {
