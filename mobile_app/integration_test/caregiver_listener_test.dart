@@ -13,6 +13,10 @@
 // exactly what a second physical device would send) so a single emulator can
 // exercise the full caregiver-side listener lifecycle bug.
 import 'dart:convert';
+// find.byType(TextField) and find.byType(ElevatedButton) below need the widget
+// classes themselves. flutter_test does not re-export them, so without this the
+// file does not compile and the whole test was unrunnable rather than failing.
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';

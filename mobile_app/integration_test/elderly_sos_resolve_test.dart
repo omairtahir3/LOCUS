@@ -12,6 +12,9 @@
 // against the locally running backend before this test runs — see
 // seed_sos_test_accounts.js. Credentials below are copied from its output.
 import 'dart:convert';
+// Same as the caregiver test: the widget types used by find.byType come from
+// material, which flutter_test does not re-export.
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';

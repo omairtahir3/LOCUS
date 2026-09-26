@@ -58,8 +58,6 @@ function App() {
               <Route path="family/:userId" element={<CaregiverOnlyRoute element={<FamilyMemberDetail />} />} />
               <Route path="medications" element={<CaregiverOnlyRoute element={<Medications />} />} />
               <Route path="location" element={<CaregiverOnlyRoute element={<LocationMap />} />} />
-              <Route path="interactions/:id" element={<CaregiverOnlyRoute element={<PastInteractions />} />} />
-              <Route path="relationships" element={<CaregiverOnlyRoute element={<RelationshipsManage />} />} />
 
               {/* Shared monitoring & settings routes */}
               <Route path="activity" element={<ActivityFeed />} />
@@ -67,6 +65,16 @@ function App() {
               <Route path="keyframes" element={<KeyframeAudit />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="memory-search" element={<MemorySearch />} />
+              {/* Shared, not caregiver-only. Both of these were reached from
+                  pages every role can see -- "Saw <name>" in Memory Search and
+                  "Manage relationships" in Settings -- but were gated to
+                  caregivers, so a wearer who tapped either was bounced to
+                  /my-dashboard and it looked like the link went to the dashboard
+                  on purpose. The API never had that restriction: GET
+                  /api/relationships reads req.user.id and only overrides it FOR
+                  caregivers, so these are the wearer's own people. */}
+              <Route path="interactions/:id" element={<PastInteractions />} />
+              <Route path="relationships" element={<RelationshipsManage />} />
 
               {/* Normal user routes */}
               <Route path="my-dashboard" element={<UserOnlyRoute element={<UserDashboard />} />} />
