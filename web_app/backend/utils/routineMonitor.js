@@ -59,10 +59,26 @@ const WAKING_END_HOUR = 23;
 const LEFT_BEHIND_WINDOW_MIN = 10;
 
 // How long an item must have been out of view, having last been seen PUT DOWN,
-// before it counts as left behind rather than momentarily out of shot. Ten
-// minutes is long enough that the wearer has plainly moved on, and short enough
-// to still be useful while they are in the same building.
+// before it counts as left behind. Used only when the indexer has NOT refreshed
+// visibility, which is the pre-existing situation and the cautious direction:
+// without a refresh, "not logged again" is weak evidence, because a sighting is
+// logged once per fifteen minutes whether or not the item is still in view.
 const LEFT_BEHIND_AFTER_MIN = 10;
+
+// The same claim, once visibility IS being refreshed. Much shorter, because the
+// evidence is much stronger: the indexer stamps "still visible" on every sighting
+// it suppresses, so an item in view on the desk in front of a seated wearer keeps
+// its timestamp moving and cannot look absent. Silence for this long therefore
+// means the item genuinely left the view.
+//
+// 2 minutes, not seconds: motion cannot be used to confirm the wearer walked off
+// -- measured over 571 samples, the known walk-off (mean 18.9, median 12.5) is
+// indistinguishable from every other minute of the day (mean 17.2, median 10.5),
+// because a chest camera moves whenever the torso does. Sightings also arrive
+// irregularly, a median 17 s apart but with long gaps, so a window under a minute
+// would fire on the gaps themselves. Two minutes clears the gaps while still
+// telling the wearer while they are only a room or a floor away.
+const ITEM_GONE_MIN = Number(process.env.ITEM_GONE_MIN || 2);
 
 // How long after a room session ends a sighting may still count as having
 // happened in that room. One keyframe's worth, no more: a session ends at its
@@ -278,7 +294,6 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
   // whenever the wearer is up; the gate meant a 22:52 sighting could only have
   // alerted at 23:02, by which time the gate had closed and the alert was lost.
   const out = [];
-  const cutoff = minutesAgo(LEFT_BEHIND_AFTER_MIN, now);
 
   const sightings = await EventLog.find({
     user_id: { $in: idForms(user._id) }, event_type: 'object',
@@ -291,16 +306,28 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
   // new, the oldest one ends up winning, and the alert cites a sighting the
   // wearer has long since walked back to. It also means an item picked up again
   // still reports as left behind.
+  // Every belonging is tracked independently, so two or three things left on the
+  // same desk each get their own alert. Nothing here is restricted to phones.
   const lastSeen = new Map();
   for (const o of sightings) {
     for (const it of (o.details?.items || [])) {
       if (!it.enrolled_item_id || !it.matched_item) continue;
       if (lastSeen.has(String(it.enrolled_item_id))) continue;
+      const placement = it.placement || o.details?.placement;
       lastSeen.set(String(it.enrolled_item_id), {
         name: it.matched_item,
         at: new Date(o.timestamp),
         keyframe_id: o.keyframe_id || null,
-        placed: it.placement === 'placed' || o.details?.placement === 'placed',
+        placed: placement === 'placed',
+        // Refreshed by the indexer on every suppressed sighting, so it means
+        // "last moment we could actually SEE it", not "last moment we logged it".
+        lastVisible: o.details?.last_visible_at ? new Date(o.details.last_visible_at) : null,
+        // The newest sighting is the one that decides. If the last thing we saw
+        // was the item in a hand, it went with them, and that is now a recorded
+        // fact rather than an assumption: the indexer used to discard held
+        // sightings, so "carried away" and "never seen again" were the same
+        // silence and this could only be guessed at.
+        inHand: placement === 'in_hand',
       });
     }
   }
@@ -345,12 +372,32 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
     }
   }
 
-  // ── Trigger 2: no room was recognised, so fall back to elapsed time ──────
+  // ── Trigger 2: no room needed. The item stopped being visible ────────────
+  //
+  // Rooms are not available: 0 of the 60 most recent item events fell inside a
+  // named room session, so Trigger 1 above is a bonus that almost never fires,
+  // and this is the path that actually has to work. It uses no environment at
+  // all, by design, so it behaves the same upstairs, downstairs and in any room
+  // the classifier will never learn to name.
+  //
+  // "Still visible" is refreshed by the indexer every time a sighting is
+  // suppressed as a duplicate, so a belonging in view on the desk in front of a
+  // seated wearer keeps its timestamp moving. Absence therefore means the item
+  // left the view, not merely that it was logged once and never again, and it
+  // can be trusted after ITEM_GONE_MIN rather than ten minutes.
   for (const [itemId, s] of lastSeen) {
     if (alerted.has(itemId)) continue;
-    // In hand when last seen means it went with them.
+    // Last seen in a hand: it went with them. Recorded now, not assumed.
+    if (s.inHand) continue;
     if (!s.placed) continue;
-    if (s.at > cutoff) continue;
+    // Strong evidence gets the short window, weak evidence keeps the long one.
+    // With a refresh, silence means the item left the view. Without one, silence
+    // only means it has not been logged again, which a fifteen-minute dedup
+    // guarantees anyway, so the cautious threshold still applies.
+    const refreshed = s.lastVisible && s.lastVisible > s.at;
+    const goneSince = refreshed ? s.lastVisible : s.at;
+    const wait = refreshed ? ITEM_GONE_MIN : LEFT_BEHIND_AFTER_MIN;
+    if (goneSince > minutesAgo(wait, now)) continue;
 
     // The camera has to have been running since. Otherwise "not seen again"
     // only means nobody was looking, which is not evidence of anything.
@@ -572,5 +619,5 @@ module.exports = {
   checkMedicationGap, checkInactivityAndCamera, checkDeviation, checkLeftBehind, checkHabitualItems,
   checkOutdoorItemLost, escalateUnacknowledgedItemLoss,
   MED_GAP_DAYS, INACTIVITY_HOURS, MOTION_FLOOR, STREAM_ALIVE_MIN, CAMERA_OFF_HOURS, LEFT_BEHIND_WINDOW_MIN,
-  ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN, LEFT_BEHIND_AFTER_MIN,
+  ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN, LEFT_BEHIND_AFTER_MIN, ITEM_GONE_MIN,
 };

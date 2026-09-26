@@ -221,6 +221,12 @@ ITEM_HELD_OVERLAP_FRAC = float(os.environ.get("ITEM_HELD_OVERLAP_FRAC", 0.15))
 ITEM_HELD_NEAR_FRAC = float(os.environ.get("ITEM_HELD_NEAR_FRAC", 0.06))
 ITEM_HELD_MAX_AREA_FRAC = float(os.environ.get("ITEM_HELD_MAX_AREA_FRAC", 0.30))
 
+# Whether to consult the hands at all. The name is historical: it once meant
+# "drop held sightings", and held sightings are now RECORDED as in_hand rather
+# than dropped, because a belonging seen leaving the surface in a hand is the
+# only evidence that the wearer took it with them. What the flag still decides
+# is whether placement is judged (placed vs in_hand) or left as "unknown".
+#
 # When the hand detector is unavailable, every sighting is treated as put down
 # rather than dropped. Losing the record entirely is the worse failure: a
 # missing "where did I leave it" is the thing this feature exists to prevent.
@@ -723,17 +729,21 @@ class DailyItemIndexer:
                   f"{[d.get('matched_item') or d['name'] for d in detections]} | hands "
                   + ("unavailable" if hand_boxes is None else f"seen {len(hand_boxes)}"))
         if detections and LOG_ONLY_PLACED_ITEMS and hand_boxes is not None:
-            kept = []
             for d in detections:
-                if self._is_held(d["bbox"], hand_boxes, img_w, img_h):
-                    print(f"[Items] {d.get('matched_item', d['name'])} is in hand, "
-                          f"not recorded as put down")
-                    continue
-                d["placement"] = "placed"
-                kept.append(d)
-            detections = kept
-            if not detections:
-                return
+                # Held sightings used to be DISCARDED here. That made "you picked
+                # it up and carried it away" and "it was never seen again"
+                # produce byte-identical evidence: nothing at all. Measured on
+                # this database, `in_hand` appeared 0 times in 321 item
+                # sightings, so nothing downstream could tell the two apart, and
+                # "if the wearer takes the item with them, do not alert" was
+                # unanswerable except by waiting and hoping.
+                #
+                # They are recorded now, marked in_hand. They are still not
+                # memories -- the feed filters them out -- but they are the only
+                # proof that a belonging left the surface in a hand, which is
+                # what makes a left-behind alert safe to send immediately.
+                held = self._is_held(d["bbox"], hand_boxes, img_w, img_h)
+                d["placement"] = "in_hand" if held else "placed"
         else:
             for d in detections:
                 # Recorded honestly: we did not look, so we do not claim.
@@ -753,24 +763,56 @@ class DailyItemIndexer:
         #    (an accepted design limitation since unenrolled objects lack unique signatures).
         user_key = str((metadata or {}).get("user_id", "unknown"))
         now_ts = time.monotonic()
-        # The room the wearer is in right now. It is part of the dedup key, so
-        # carrying an item from one room to another records it again in the new
-        # one instead of being swallowed as a repeat. Where a thing was last put
-        # down is the whole question this feature answers, and a fifteen-minute
-        # window that spans two rooms cannot answer it.
-        tracker = self._scene_trackers.get(user_key)
-        current_room = getattr(tracker, "_current", None) if tracker else None
+        # 3. MOVED: an item put down again after being carried is news, whatever
+        #    the clock says, because where a belonging is NOW is the only thing
+        #    this feature exists to answer.
+        #
+        # The third rule replaces keying on the room. The room was in the key so
+        # that carrying something next door recorded it again, but measured on
+        # this database 0 of the 60 most recent item events fell inside a named
+        # room session: current_room is None almost always, so every sighting
+        # shared one bucket and moving an item anywhere was swallowed as a
+        # repeat for fifteen minutes. The pick-up is the signal instead. It needs
+        # no room, which is also what makes this work upstairs and downstairs, in
+        # rooms the classifier will never name.
+        #
+        # in_hand and placed dedup in separate buckets. A held sighting must not
+        # be able to claim the placed slot, or the moment the wearer actually put
+        # the thing down would be suppressed as a duplicate -- turning the one
+        # sighting worth keeping into the one sighting dropped.
         fresh = []
         suppressed = []
         for d in detections:
             item_identity = d.get("enrolled_item_id") or d["class_id"]
-            k = (user_key, item_identity, current_room)
+            placement = d.get("placement", "placed")
+            k = (user_key, item_identity, placement)
             last = self._last_item_seen.get(k)
-            if last is None or (now_ts - last) >= ITEM_DEDUP_SECONDS:
+            held_k = (user_key, item_identity, "in_hand")
+            last_held = self._last_item_seen.get(held_k)
+            # Picked up since we last recorded it down? Then this is a new place.
+            moved = (placement == "placed" and last is not None
+                     and last_held is not None and last_held > last)
+            if last is None or (now_ts - last) >= ITEM_DEDUP_SECONDS or moved:
                 self._last_item_seen[k] = now_ts
+                if moved:
+                    print(f"[Items] {d.get('matched_item', d['name'])} was carried "
+                          f"and put down again; recording where it is now")
                 fresh.append(d)
             else:
                 suppressed.append(d.get("matched_item", d["name"]))
+                # Suppression used to write nothing at all, and that is why an
+                # alert could not be immediate. A phone sitting in view on the
+                # desk in front of a seated wearer and a phone two floors away
+                # produced identical records: one sighting, then silence. The
+                # only way to be sure the wearer had gone was to wait ten
+                # minutes.
+                #
+                # A suppressed sighting still means "it is still here, I can see
+                # it". Stamping that onto the existing event is one small update
+                # instead of a keyframe write plus an insert, so the dedup gate
+                # keeps doing its job for storage while absence becomes
+                # measurable in seconds. No room is involved.
+                self._touch_item_visibility(user_key, item_identity, placement)
 
         if not fresh:
             # All items suppressed within dedup window (zero disk writes, zero DB inserts)
@@ -823,6 +865,42 @@ class DailyItemIndexer:
 
         # Persist to MongoDB referencing the exact item_keyframe_id
         self._persist_to_db(item_keyframe_id, detections, item_names, metadata)
+
+    def _touch_item_visibility(self, user_key, item_identity, placement):
+        """Record that a suppressed item is still in view, on its existing event.
+
+        Written as an update to the newest event for that belonging, not as a new
+        event, so the dedup gate still prevents the flooding it exists to
+        prevent while absence becomes measurable in seconds instead of minutes.
+
+        Cheap by construction: one indexed update, no keyframe, no insert. Never
+        raises -- a missed refresh only costs freshness, and the alert path falls
+        back to the sighting timestamp, which is the old behaviour.
+        """
+        try:
+            from bson import ObjectId
+            client = get_client()
+            db = client[get_db_name()]
+            try:
+                uid = ObjectId(user_key)
+            except Exception:
+                return
+            # The newest event is resolved first and then updated by _id.
+            # update_one(..., sort=...) only exists on PyMongo 4.7 with a
+            # MongoDB 8 server, and silently doing the wrong document here would
+            # stamp freshness onto an old sighting.
+            latest = db.eventlogs.find_one(
+                {"user_id": uid, "event_type": "object",
+                 "details.items.enrolled_item_id": str(item_identity)},
+                {"_id": 1}, sort=[("timestamp", -1)])
+            if not latest:
+                return
+            db.eventlogs.update_one(
+                {"_id": latest["_id"]},
+                {"$set": {"details.last_visible_at": datetime.now(timezone.utc),
+                          "details.last_visible_placement": placement}})
+        except Exception as e:
+            print(f"[Items] visibility refresh skipped: {e}")
 
     def _get_item_storage(self):
         """Lazy-load the ItemStorage for persisting item detection keyframes."""
