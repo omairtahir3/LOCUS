@@ -54,7 +54,27 @@ router.get('/memory-search', auth, async (req, res) => {
       // stays in the database for the verification screen to act on. Other
       // event types are unaffected: only medication makes a claim that the
       // person is expected to confirm before it counts.
-      $nor: [{ event_type: 'medication_intake', verification_status: { $ne: 'confirmed' } }],
+      $nor: [
+        { event_type: 'medication_intake', verification_status: { $ne: 'confirmed' } },
+        // An item in the wearer's own hand is not a memory of where they left
+        // something, and `unknown` is the indexer saying it could not tell.
+        // Neither has a picture any more either, so without this they appeared
+        // here as a "Spotted Phone" row with nothing to show.
+        //
+        // Written as "has a non-placed item AND has no placed item", so a frame
+        // that caught one thing put down and another in hand is still kept. The
+        // $ne on an array field matches documents where NO element equals it,
+        // which is the "none of them" this needs.
+        //
+        // Deliberately NOT "placement must be placed": 317 of 321 historical
+        // sightings predate the field entirely, and requiring it would erase
+        // every memory recorded before this was added.
+        {
+          event_type: 'object',
+          'details.items.placement': { $in: ['in_hand', 'unknown'] },
+          $and: [{ 'details.items.placement': { $ne: 'placed' } }],
+        },
+      ],
     };
 
     if (type && query.event_type.$in.includes(type)) {
@@ -300,8 +320,12 @@ router.get('/timeline', auth, async (req, res) => {
         // own phone, and unknown is the indexer saying it could not tell --
         // neither is a memory of where something was left, and showing either
         // as "Spotted" is the complaint this answers.
-        const wasPutDown = (i) => (i.placement || d.placement) === 'placed';
-        const named = (d.items || []).filter(i => i.matched_item && wasPutDown(i)).map(i => i.matched_item);
+        // Drop what we KNOW is not a put-down, rather than requiring proof that
+        // it is. 317 of 321 historical sightings carry no placement at all, and
+        // demanding 'placed' would have erased every memory older than the
+        // field itself.
+        const notPutDown = (i) => ['in_hand', 'unknown'].includes(i.placement || d.placement);
+        const named = (d.items || []).filter(i => i.matched_item && !notPutDown(i)).map(i => i.matched_item);
         if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
         // A sighting, not a departure. "Left" belongs to the routine monitor's
         // left_behind finding, which knows the wearer moved away and the item
