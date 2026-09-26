@@ -290,7 +290,14 @@ router.get('/timeline', auth, async (req, res) => {
         items.push({ at: e.timestamp, kind: 'social', title: 'An unfamiliar face',
           detail: 'Not matched to anyone you know', keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'object' && d.action === 'item_seen') {
-        const named = (d.items || []).filter(i => i.matched_item).map(i => i.matched_item);
+        // An item in the wearer's own hand is not a memory of where they left
+        // something, it is just them holding their phone, and "Spotted phone"
+        // for every glance would bury the sightings that matter. The indexer
+        // records held sightings because the routine monitor needs them to tell
+        // "you carried it away" from "you left it" -- they are evidence, not
+        // timeline entries.
+        const held = (i) => (i.placement || d.placement) === 'in_hand';
+        const named = (d.items || []).filter(i => i.matched_item && !held(i)).map(i => i.matched_item);
         if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
         // A sighting, not a departure. "Left" belongs to the routine monitor's
         // left_behind finding, which knows the wearer moved away and the item
