@@ -21,7 +21,16 @@ const MedicationLog = require('../models/MedicationLog');
 const { expectation } = require('./routineLearner');
 const { dateWords, timeWords, hourWords, distanceWords, item: itemWords, firstName } = require('./friendly');
 
-const MONITOR_INTERVAL_MS = 15 * 60 * 1000;
+// Must be SHORTER than the shortest thing being waited for, or the wait and the
+// poll add up. At 15 minutes with LEFT_BEHIND_AFTER_MIN at 10, a phone left on a
+// desk could not be reported for up to 25 minutes, which is long past the point
+// the wearer could turn round and fetch it: measured, a wearer who walked off at
+// 19:39 had had no alert by 19:53. One full pass over all 17 users in this
+// database costs 820 ms, so the old interval was never a performance decision.
+// 2 minutes puts the alert within about a minute of coming due, for 0.7% of one
+// core. Every check is dedup-keyed, so running them more often cannot duplicate
+// an alert; it only notices sooner.
+const MONITOR_INTERVAL_MS = 2 * 60 * 1000;
 
 // ── Medication gap (elderly) ────────────────────────────────────────────────
 // Alert when this many consecutive days end with no verified dose. Re-alert only
@@ -550,7 +559,12 @@ async function runOnce(now = new Date()) {
 function init() {
   console.log(`[RoutineMonitor] active — every ${MONITOR_INTERVAL_MS / 60000} min; ` +
     `med gap ${MED_GAP_DAYS}d, inactivity ${INACTIVITY_HOURS}h @ motion<${MOTION_FLOOR}, camera-off ${CAMERA_OFF_HOURS}h`);
-  setInterval(() => runOnce().catch(e => console.error('[RoutineMonitor]', e.message)), MONITOR_INTERVAL_MS);
+  const pass = () => runOnce().catch(e => console.error('[RoutineMonitor]', e.message));
+  // setInterval alone means the first pass is a whole interval away, so a
+  // restart left anything already overdue unreported until then, and a restart
+  // is exactly when something is most likely to be waiting. Run once now.
+  pass();
+  setInterval(pass, MONITOR_INTERVAL_MS);
 }
 
 module.exports = {
