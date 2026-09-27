@@ -6,6 +6,12 @@ import { formatClockTime } from '../utils/dateUtils';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
 
+// How often today's memories are re-fetched while the tab is visible. The query
+// behind it measures 6-8 ms and the images are immutable-cached, so a poll
+// costs a request and almost nothing else; 15 s is well inside the time it
+// takes to put something down and walk back.
+const REFRESH_MS = 15000;
+
 /** Local YYYY-MM-DD. toISOString() would shift the day by the UTC offset. */
 const localDay = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -39,8 +45,10 @@ export default function MemorySearch() {
   // behaviour of showing the most recent memories regardless of date.
   const [date, setDate] = useState(todayStr);
 
-  const fetchEvents = async () => {
-    setLoading(true);
+  // `quiet` refreshes in place, without the spinner: a background poll that
+  // blanks the list every few seconds is worse than not polling at all.
+  const fetchEvents = async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try {
       // No limit when a day is chosen: every memory from that day is the
       // point of asking for the day.
@@ -49,13 +57,38 @@ export default function MemorySearch() {
     } catch (e) {
       console.error('Failed to load events:', e);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchEvents();
   }, [date]);
+
+  // This page used to fetch on mount and when the date changed, and never
+  // again. While a camera is running that makes it a snapshot of the moment it
+  // was opened: a belonging put down two minutes ago was recorded, served
+  // correctly by the API, and still absent from the page, because nothing had
+  // asked for it. Anyone testing the system watches this page and concludes the
+  // sighting was never logged.
+  //
+  // Only while looking at TODAY, and only while the tab is actually visible.
+  // A past day cannot gain new memories, and a hidden tab polling every few
+  // seconds is pure waste. Refreshing on becoming visible again covers the case
+  // where the wearer walks back to the laptop after moving something.
+  const isToday = !date || date === todayStr;
+  useEffect(() => {
+    if (!isToday) return;
+    const refresh = () => {
+      if (document.visibilityState === 'visible') fetchEvents({ quiet: true });
+    };
+    const id = setInterval(refresh, REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [isToday, date]);
 
   const handleToggleFlag = async (eventId, currentFlag) => {
     if (!eventId) return;
@@ -68,7 +101,7 @@ export default function MemorySearch() {
     }
   };
 
-  const formattedEvents = events.map((ev, i) => {
+  const formattedEvents = events.map((ev) => {
     const dt = new Date(ev.timestamp);
     const now = new Date();
     let timeLabel = '-';

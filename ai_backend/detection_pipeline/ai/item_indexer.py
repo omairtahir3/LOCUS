@@ -226,6 +226,16 @@ OUTDOOR_STATUS_CACHE_S = 60.0     # one DB lookup per user per minute, not per k
 # which is the flooding this gate exists to prevent.
 ITEM_DEDUP_SECONDS = 900  # 15 minutes
 
+# The same gate for a HELD sighting, which is a different kind of record. A held
+# sighting writes no keyframe and never reaches the feed; it exists so the
+# monitor can tell "carried away" from "left behind", and so a put-down that
+# follows a pick-up is recognised as a new place rather than a repeat. Rate
+# limiting that on the fifteen-minute window meant a phone carried to another
+# room six minutes later had its pick-up suppressed, and the put-down in the new
+# room was then indistinguishable from the old one. 60 s is enough to stop a row
+# per frame, which is all this needs to prevent.
+ITEM_HELD_DEDUP_SECONDS = float(os.environ.get("ITEM_HELD_DEDUP_SECONDS", 60))
+
 # ── Held, or put down? ──────────────────────────────────────────────────────
 #
 # A memory aid does not need to tell somebody they are holding their phone;
@@ -887,12 +897,34 @@ class DailyItemIndexer:
             placement = d.get("placement", "placed")
             k = (user_key, item_identity, placement)
             last = self._last_item_seen.get(k)
-            held_k = (user_key, item_identity, "in_hand")
-            last_held = self._last_item_seen.get(held_k)
+            # Two different clocks, deliberately. `k` is when this KIND of
+            # sighting was last WRITTEN, and drives the dedup window. The held
+            # STATE below is when the item was last actually seen in a hand, and
+            # drives the move rule. Folding them together made an item held
+            # continuously push its own write clock forward on every frame, so
+            # the window never elapsed and a second pick-up was never logged.
+            held_state_k = (user_key, item_identity, "_held_at")
+            last_held = self._last_item_seen.get(held_state_k)
+            # "It is in a hand" is STATE, not a log entry, and it must track
+            # reality even when the sighting itself is a duplicate. Otherwise the
+            # window silently breaks the move rule below: the phone was recorded
+            # in hand at 12:20:36 and put down at 12:21:01, and when it was
+            # carried to another room at 12:27 that pick-up fell inside the
+            # fifteen minutes, was suppressed, and never advanced last_held. The
+            # put-down in the new room then looked like a repeat of the old one
+            # and produced nothing at all, even though the tile scan had found
+            # the phone on the bed at 0.749.
+            if placement == "in_hand":
+                self._last_item_seen[held_state_k] = now_ts
+                last_held = now_ts
             # Picked up since we last recorded it down? Then this is a new place.
             moved = (placement == "placed" and last is not None
                      and last_held is not None and last_held > last)
-            if last is None or (now_ts - last) >= ITEM_DEDUP_SECONDS or moved:
+            # Held sightings cost no keyframe and no disk, so they are rate
+            # limited only enough to stop a row per frame. Keeping them frequent
+            # is what lets the monitor tell "carried away" from "left behind".
+            window = ITEM_HELD_DEDUP_SECONDS if placement == "in_hand" else ITEM_DEDUP_SECONDS
+            if last is None or (now_ts - last) >= window or moved:
                 self._last_item_seen[k] = now_ts
                 if moved:
                     print(f"[Items] {d.get('matched_item', d['name'])} was carried "
