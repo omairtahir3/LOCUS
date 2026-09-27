@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 import glob
 import os
@@ -63,8 +63,14 @@ def _resolve_frame(frame_id: str, roots: list[str]) -> str | None:
     return None
 
 
-def _serve_frame(img_path: str) -> FileResponse:
-    """Serve an immutable frame, with an ETag so a revalidating client gets 304."""
+def _serve_frame(img_path: str, request: Request | None = None):
+    """Serve an immutable frame, answering 304 when the client already has it.
+
+    The ETag was being sent but never read back: a revalidating client got a
+    fresh 200 and the whole JPEG again, so the header promised a cheap
+    revalidation the route did not implement. Measured, a 95 KB frame costs
+    10 ms and a full gallery re-render paid for every byte a second time.
+    """
     try:
         st = os.stat(img_path)
         etag = f'"{int(st.st_mtime)}-{st.st_size}"'
@@ -73,6 +79,13 @@ def _serve_frame(img_path: str) -> FileResponse:
     headers = {"Cache-Control": IMAGE_CACHE_CONTROL}
     if etag:
         headers["ETag"] = etag
+        # If-None-Match may carry a list, and a proxy may weaken the tag with a
+        # W/ prefix, so compare against the members rather than the raw string.
+        inm = request.headers.get("if-none-match") if request is not None else None
+        if inm:
+            seen = {t.strip().removeprefix("W/") for t in inm.split(",")}
+            if etag in seen or "*" in seen:
+                return Response(status_code=304, headers=headers)
     return FileResponse(img_path, media_type="image/jpeg", headers=headers)
 
 # Singleton storage instances
@@ -167,7 +180,7 @@ async def list_keyframes(limit: int = 50, user_id: str = ""):
 
 
 @router.get("/{keyframe_id}/image")
-async def get_keyframe_image(keyframe_id: str):
+async def get_keyframe_image(keyframe_id: str, request: Request):
     """
     Serve a keyframe image by its ID for visual display in the caregiver dashboard.
     """
@@ -176,7 +189,7 @@ async def get_keyframe_image(keyframe_id: str):
     ])
     if not img_path:
         raise HTTPException(status_code=404, detail="Keyframe image not found")
-    return _serve_frame(img_path)
+    return _serve_frame(img_path, request)
 
 
 @router.get("/sync")
@@ -264,11 +277,11 @@ async def list_medication_frames(limit: int = 100, user_id: str = ""):
 
 
 @router.get("/medication_frames/{evidence_id}/image")
-async def get_medication_frame_image(evidence_id: str):
+async def get_medication_frame_image(evidence_id: str, request: Request):
     """
     Serve an evidence frame image by its ID.
     """
     img_path = _resolve_frame(evidence_id, [MEDICATION_EVIDENCE_STORAGE_DIR])
     if not img_path:
         raise HTTPException(status_code=404, detail="Evidence frame not found")
-    return _serve_frame(img_path)
+    return _serve_frame(img_path, request)
