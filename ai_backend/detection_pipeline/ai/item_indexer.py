@@ -185,6 +185,28 @@ ITEM_LOCATION_MAX_STALENESS_MIN = 10.0
 # as the Node monitor (utils/outdoor.js) so both sides agree. Nothing about the
 # environment is classified or logged; this only tunes item detection.
 OUTDOOR_CONF_THRESHOLD = 0.25
+
+# The bar a box must clear to be CONSIDERED as one of the wearer's belongings.
+# Far below the bar for reporting an unidentified object, because identity is
+# decided by the exemplar gallery afterwards and the gallery is much better at
+# it: on real frames a phone on a desk scored 0.885 and 0.891 against the
+# gallery while YOLO rated the same boxes 0.117 and 0.276, and a genuine
+# non-match scored 0.416. Confidence tracks how BIG and near a thing is; the
+# gallery tracks whether it is the right thing.
+ENROLLED_CANDIDATE_CONF = float(os.environ.get("ENROLLED_CANDIDATE_CONF", 0.08))
+
+# What a faint box must score against the gallery to be believed. Set from the
+# gap in the measured data: the two genuine put-downs the old bar discarded
+# scored 0.885 and 0.891, and the marginal junk alongside them scored 0.663 and
+# 0.666. 0.75 sits in that gap with room either side.
+LOW_CONF_MATCH_THRESHOLD = float(os.environ.get("LOW_CONF_MATCH_THRESHOLD", 0.75))
+
+# How many candidates may be embedded per frame. Batched at a measured 61 ms
+# each, so this is the frame's embedding budget: 8 is about half a second in the
+# worst case, on a background worker with its own queue. Boxes above the normal
+# confidence bar are taken first, so the behaviour that already worked cannot be
+# crowded out by the faint boxes this cap exists to bound.
+MAX_CANDIDATES_PER_FRAME = int(os.environ.get("MAX_CANDIDATES_PER_FRAME", 8))
 OUTDOOR_HOME_RADIUS_M = 150.0
 OUTDOOR_MAX_FIX_ACCURACY_M = 100.0
 OUTDOOR_MAX_FIX_AGE_MIN = 10.0
@@ -620,7 +642,29 @@ class DailyItemIndexer:
         # FE-14: loosen the candidate bar when GPS says the wearer is outdoors.
         _uid = str((metadata or {}).get("user_id", ""))
         _conf = OUTDOOR_CONF_THRESHOLD if self._is_outdoors_gps(_uid) else self.conf_threshold
-        results = self._model(image, conf=_conf, iou=0.45, verbose=False)
+        # For ENROLLED belongings the detector's confidence is the wrong gate,
+        # and it was throwing away the sightings that matter most.
+        #
+        # YOLO is least confident about small distant objects, which is exactly
+        # what a phone on a desk across the room is, and exactly the sighting
+        # this feature exists to record. Measured over the 04:40-04:50 window,
+        # where two put-downs produced no event at all:
+        #
+        #   04:41:23  Cell Phone  conf=0.117  area=0.0059  similarity 0.885
+        #   04:48:16  Cell Phone  conf=0.276  area=0.0067  similarity 0.891
+        #
+        # Both are the phone on a surface, both would have been recognised by
+        # the gallery outright, and both were discarded before the gallery was
+        # ever asked. Seven of sixteen candidates in that window went the same
+        # way. Meanwhile a genuine non-match scored 0.416, far below the 0.65
+        # bar, so identity is doing the discriminating and confidence is only
+        # discarding distance.
+        #
+        # Candidates therefore come in at a much lower bar and the exemplar
+        # match decides. _conf still governs what may be logged WITHOUT an
+        # identity match, so unenrolled clutter is unaffected.
+        _cand_conf = min(_conf, ENROLLED_CANDIDATE_CONF)
+        results = self._model(image, conf=_cand_conf, iou=0.45, verbose=False)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         if not results or len(results) == 0:
@@ -647,7 +691,7 @@ class DailyItemIndexer:
             if cls_id not in PERSONAL_ITEM_CLASS_IDS:
                 continue
             conf = float(box.conf[0].item())
-            if conf < _conf:   # same bar as the inference call (outdoor-aware)
+            if conf < _cand_conf:   # candidate bar; identity is the real gate
                 continue
             cls_name = self._model.names.get(cls_id, f"class_{cls_id}")
             xyxy = box.xyxy[0].tolist()
@@ -675,6 +719,21 @@ class DailyItemIndexer:
                     "y2": int(min(orig_h, xyxy[3]))
                 }
             })
+
+        # Bounded, highest confidence first. Each candidate costs one MobileNet
+        # pass in the matcher below, and dropping the bar to consider distant
+        # belongings also lets in more clutter, so a cluttered frame must not be
+        # able to queue dozens of embeddings.
+        if len(detections) > MAX_CANDIDATES_PER_FRAME:
+            # Confident boxes first, so nothing that already worked is displaced
+            # by a faint one; the cap then bounds how many faint ones follow.
+            detections.sort(key=lambda d: d["confidence"], reverse=True)
+            dropped = [d for d in detections[MAX_CANDIDATES_PER_FRAME:]]
+            detections = detections[:MAX_CANDIDATES_PER_FRAME]
+            print(f"[Items] {len(dropped)} candidate(s) past the per-frame cap of "
+                  f"{MAX_CANDIDATES_PER_FRAME} were not embedded "
+                  f"(weakest kept {detections[-1]['confidence']:.3f}, "
+                  f"strongest dropped {dropped[0]['confidence']:.3f})")
 
         # ── Environment session tracking ─────────────────────────────────────
         # Runs on every keyframe, before any item-related early return: the room
@@ -869,7 +928,13 @@ class DailyItemIndexer:
         # queue instead, surfacing as "we noticed an unenrolled wallet" on the
         # enrollment screen and expiring on their own.
         matched = [d for d in detections if d.get("matched_item")]
-        unmatched = [d for d in detections if not d.get("matched_item")]
+        # Unmatched detections have no identity behind them, so the ONLY thing
+        # vouching for them is the detector's confidence. They keep the original
+        # bar: the lowered one exists so the gallery gets a look at faint boxes,
+        # not so faint boxes can become suggestions. Without this, dropping the
+        # candidate bar would flood the enrolment screen with 0.08 guesses.
+        unmatched = [d for d in detections
+                     if not d.get("matched_item") and d.get("confidence", 0) >= _conf]
 
         if unmatched:
             self._write_enrollment_suggestions(unmatched, metadata)
@@ -1174,6 +1239,16 @@ class DailyItemIndexer:
                     thresh = (self.CLASS_AGREE_MATCH_THRESHOLD
                               if self._names_agree(d.get("name", ""), item["name"])
                               else self.CLASS_DISAGREE_MATCH_THRESHOLD)
+                # Faint boxes must prove themselves harder. Candidates now come
+                # in from ENROLLED_CANDIDATE_CONF rather than conf_threshold, so
+                # the gallery sees boxes the detector barely believes in, and on
+                # those the ordinary bar is too generous: over the 04:40-04:50
+                # window the two real put-downs scored 0.885 and 0.891 while the
+                # marginal junk scored 0.663 and 0.666, straddling this bar
+                # exactly. One source of evidence being weak is a reason to
+                # demand more of the other, not to shrug.
+                if d.get("confidence", 1.0) < self.conf_threshold:
+                    thresh = max(thresh, LOW_CONF_MATCH_THRESHOLD)
                 sims = np.asarray(item["embeddings"]) @ crop_emb
                 sim = float(sims.max()) if sims.size else 0.0
                 if sim > best_sim and sim >= thresh:
