@@ -761,26 +761,34 @@ class DailyItemIndexer:
             for d in detections:
                 d["placement"] = "unknown"      # could not look, so claim nothing
                 d["hands_seen"] = False
-        elif hand_boxes:
-            # Hands were actually seen. This is the trustworthy branch, and the
-            # only one whose labels are fed back into calibration.
-            for d in detections:
-                held = self._is_held(d["bbox"], hand_boxes, img_w, img_h)
-                d["placement"] = "in_hand" if held else "placed"
-                d["hands_seen"] = True
         else:
-            # Looked, saw nothing, which is unreliable. Fall back to this item's
-            # own size history, or admit we do not know.
             for d in detections:
-                d["hands_seen"] = False
                 thr = self._held_size_threshold(user_key, d.get("enrolled_item_id") or d["class_id"])
-                if thr is None:
-                    d["placement"] = "unknown"
+                overlap_held = bool(hand_boxes) and self._is_held(d["bbox"], hand_boxes, img_w, img_h)
+                # Size is an OVERRIDE, not only a fallback. At 04:34 a frame of
+                # the phone plainly in the wearer's hand was stored as put down:
+                # hands WERE seen (an arm resting on the laptop), none of them
+                # overlapped the phone's box, and that was taken as proof. It is
+                # not proof. The hand holding a phone is routinely behind it, cut
+                # off at the frame edge, or simply missed, and the phone was
+                # 10.1% of the frame at the time -- squarely in its own held
+                # range of 8.2 to 14.9%, against 0.6% on a desk.
+                size_held = thr is not None and d["area_frac"] >= thr
+                if overlap_held or size_held:
+                    d["placement"] = "in_hand"
+                elif thr is not None or hand_boxes:
+                    d["placement"] = "placed"
                 else:
-                    d["placement"] = "in_hand" if d["area_frac"] >= thr else "placed"
-                    print(f"[Items] no hands seen; {d.get('matched_item', d['name'])} is "
-                          f"{d['area_frac']:.3f} of the frame vs its own {thr:.3f} threshold "
-                          f"-> {d['placement']}")
+                    # No hands seen and no size opinion yet: nothing is known.
+                    d["placement"] = "unknown"
+                # Only overlap-derived labels may train the size threshold. A
+                # size-derived label feeding back would let one mistake harden
+                # into the very number that produced it.
+                d["hands_seen"] = bool(hand_boxes) and not (size_held and not overlap_held)
+                if size_held and not overlap_held:
+                    print(f"[Items] {d.get('matched_item', d['name'])} is {d['area_frac']:.3f} of the "
+                          f"frame against its own {thr:.3f} held threshold, so it is in a hand "
+                          f"even though no hand box covered it")
 
         # Tier-2 Gap-Filling Activity Enrichment
         self._check_and_enrich_activity(keyframe_id, detections, metadata, image.shape[:2])
@@ -1318,7 +1326,7 @@ class DailyItemIndexer:
         except Exception as e:
             print(f"[DailyItemIndexer] [Tier-2 Enrichment] DB write note: {e}")
 
-    def _persist_to_db(self, keyframe_id: str, detections: list[dict], item_names: list[str], metadata: dict):
+    def _persist_to_db(self, keyframe_id: str | None, detections: list[dict], item_names: list[str], metadata: dict):
         """Update keyframemetas and write object eventlog to MongoDB."""
         try:
             from pymongo import MongoClient
@@ -1675,21 +1683,51 @@ class DailyItemIndexer:
             except Exception:
                 uid = None
             if uid is not None:
-                sizes = {"in_hand": [], "placed": []}
+                sizes = {"in_hand": [], "placed": [], "unlabelled": []}
+                # EVERY sighting of this belonging, not only the confidently
+                # labelled ones: the labelled two feed the precise threshold, and
+                # all of them together feed the bootstrap below.
                 cur = db.eventlogs.find(
                     {"user_id": uid, "event_type": "object",
-                     "details.items": {"$elemMatch": {
-                         "enrolled_item_id": str(item_identity), "hands_seen": True}}},
+                     "details.items.enrolled_item_id": str(item_identity)},
                     {"details.items": 1}).sort("timestamp", -1).limit(200)
                 for ev in cur:
                     for it in (ev.get("details", {}).get("items") or []):
                         if str(it.get("enrolled_item_id")) != str(item_identity):
                             continue
-                        if not it.get("hands_seen"):
+                        a = it.get("area_frac")
+                        if not isinstance(a, (int, float)):
                             continue
-                        a, p = it.get("area_frac"), it.get("placement")
-                        if isinstance(a, (int, float)) and p in sizes:
+                        p = it.get("placement")
+                        if it.get("hands_seen") and p in ("in_hand", "placed"):
                             sizes[p].append(float(a))
+                        else:
+                            sizes["unlabelled"].append(float(a))
+                # Bootstrap, when there are not yet three confident labels of
+                # each kind. Waiting for them stalls: a `placed` label only
+                # comes from a frame where hands were seen and did NOT cover the
+                # item, which is the ambiguous case, so the real database sat at
+                # three in_hand and one placed and the threshold stayed None --
+                # leaving the 04:34 misclassification unfixed in practice.
+                #
+                # The sizes alone carry the signal without needing labels: a
+                # belonging that is sometimes held and sometimes put down is
+                # large in some frames and small in others, and the split is the
+                # threshold. Same per-item reasoning, same refusal to guess when
+                # the two clusters are not clearly apart.
+                unlabelled = sizes["in_hand"] + sizes["placed"] + sizes["unlabelled"]
+                if (len(sizes["in_hand"]) < self._SIZE_MIN_SAMPLES
+                        or len(sizes["placed"]) < self._SIZE_MIN_SAMPLES) and len(unlabelled) >= 4:
+                    srt = sorted(unlabelled)
+                    lo = statistics.median(srt[:max(1, len(srt) // 3)])
+                    hi = statistics.median(srt[-max(1, len(srt) // 3):])
+                    if hi > lo * 3:          # a clear gap, not gentle variation
+                        thr = (hi * lo) ** 0.5
+                        print(f"[Items] size threshold for {item_identity} from {len(unlabelled)} "
+                              f"unlabelled sightings: small~{lo:.3f} large~{hi:.3f} -> {thr:.3f}")
+                        self._size_cache[key] = (now_ts, thr)
+                        return thr
+
                 if (len(sizes["in_hand"]) >= self._SIZE_MIN_SAMPLES
                         and len(sizes["placed"]) >= self._SIZE_MIN_SAMPLES):
                     held_med = statistics.median(sizes["in_hand"])
