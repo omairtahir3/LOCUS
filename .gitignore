@@ -58,6 +58,8 @@ ai_backend/keyframe_backend/activities_storage/
 ai_backend/keyframe_backend/medications_storage/
 ai_backend/keyframe_backend/social_audio_storage/
 ai_backend/keyframe_backend/items_storage/
+# Generated on first request from the frames above, and regenerable at any time.
+ai_backend/keyframe_backend/thumb_cache/
 scratch/
 *.bak
 .claudecode-instructions.md

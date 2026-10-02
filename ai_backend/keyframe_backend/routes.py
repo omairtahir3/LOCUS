@@ -32,6 +32,61 @@ _PATH_CACHE_LOCK = threading.Lock()
 # served. Well above any single dashboard page.
 _PATH_CACHE_MAX = 4096
 
+# ── Thumbnails ──────────────────────────────────────────────────────────────
+#
+# The memory page draws these frames 100 px wide. It was being sent the full
+# 1280x720 capture for each one: measured, 196 frames is 16 MB and takes 19 s to
+# load at a browser's six connections, 97 ms per frame. That is the whole of
+# "the keyframes take too long", and it is the thing that would not survive more
+# than one viewer, because the cost is bytes per page view.
+#
+# A width-bounded copy is written once, beside nothing else, and served
+# thereafter. Thumbnails live in their own directory rather than next to the
+# original because _resolve_frame globs by id and a sibling file would be found
+# instead of the frame itself.
+THUMB_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "thumb_cache")
+# What a caller may ask for. An open integer would let anyone fill the disk with
+# one file per width.
+THUMB_WIDTHS = (160, 240, 480)
+
+
+def _thumb_path(img_path: str, width: int) -> str | None:
+    """A width-bounded JPEG for this frame, generated on first request.
+
+    Returns None if the thumbnail cannot be made, so the caller falls back to
+    the original rather than failing: a slow image beats a broken one.
+    """
+    if width not in THUMB_WIDTHS:
+        return None
+    try:
+        import cv2
+        st = os.stat(img_path)
+        # The source mtime and size are in the name, so a frame replaced at the
+        # same path can never be served from a stale thumbnail.
+        key = f"{os.path.basename(img_path).rsplit('.', 1)[0]}.{int(st.st_mtime)}.{st.st_size}.w{width}.jpg"
+        out = os.path.join(THUMB_CACHE_DIR, key)
+        if os.path.exists(out):
+            return out
+        img = cv2.imread(img_path)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        if w <= width:
+            return img_path        # already small enough; no copy worth making
+        small = cv2.resize(img, (width, max(1, round(h * width / w))), interpolation=cv2.INTER_AREA)
+        os.makedirs(THUMB_CACHE_DIR, exist_ok=True)
+        # The temp name must still end in .jpg: OpenCV chooses its encoder from
+        # the extension and refuses a ".tmp" outright, which is how this silently
+        # served every full frame instead of a thumbnail.
+        tmp = f"{out}.{os.getpid()}.tmp.jpg"
+        if not cv2.imwrite(tmp, small, [int(cv2.IMWRITE_JPEG_QUALITY), 80]):
+            return None
+        os.replace(tmp, out)       # atomic, so a concurrent reader never sees a partial file
+        return out
+    except Exception as e:
+        print(f"[Keyframes] thumbnail failed for {os.path.basename(img_path)}: {e}")
+        return None
+
 
 def _resolve_frame(frame_id: str, roots: list[str]) -> str | None:
     """Find the JPEG for a frame id, remembering where it was.
@@ -63,7 +118,7 @@ def _resolve_frame(frame_id: str, roots: list[str]) -> str | None:
     return None
 
 
-def _serve_frame(img_path: str, request: Request | None = None):
+def _serve_frame(img_path: str, request: Request | None = None, width: int | None = None):
     """Serve an immutable frame, answering 304 when the client already has it.
 
     The ETag was being sent but never read back: a revalidating client got a
@@ -71,6 +126,13 @@ def _serve_frame(img_path: str, request: Request | None = None):
     revalidation the route did not implement. Measured, a 95 KB frame costs
     10 ms and a full gallery re-render paid for every byte a second time.
     """
+    # Resolve the thumbnail BEFORE the ETag, so the tag describes the bytes
+    # actually sent. Tagging the original and sending a thumbnail would let a
+    # client cache the small one under the full one's identity.
+    if width:
+        thumb = _thumb_path(img_path, width)
+        if thumb:
+            img_path = thumb
     try:
         st = os.stat(img_path)
         etag = f'"{int(st.st_mtime)}-{st.st_size}"'
@@ -180,16 +242,19 @@ async def list_keyframes(limit: int = 50, user_id: str = ""):
 
 
 @router.get("/{keyframe_id}/image")
-async def get_keyframe_image(keyframe_id: str, request: Request):
+async def get_keyframe_image(keyframe_id: str, request: Request, w: int | None = None):
     """
     Serve a keyframe image by its ID for visual display in the caregiver dashboard.
+
+    `w` asks for a width-bounded copy, for lists that draw these small. Anything
+    not in THUMB_WIDTHS is ignored and the full frame is sent.
     """
     img_path = _resolve_frame(keyframe_id, [
         KEYFRAME_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR,
     ])
     if not img_path:
         raise HTTPException(status_code=404, detail="Keyframe image not found")
-    return _serve_frame(img_path, request)
+    return _serve_frame(img_path, request, w)
 
 
 @router.get("/sync")

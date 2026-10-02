@@ -92,7 +92,10 @@ export const detectionAPI = {
   getKeyframes:      (params) => api.get('/detection/keyframes', { params }),
   syncKeyframes:     (userId) => api.get('/detection/keyframes/sync', { params: { user_id: userId } }),
   confirmSync:       (keyframeIds) => api.post('/detection/keyframes/sync/confirm', { keyframe_ids: keyframeIds }),
-  getKeyframeImage:  (id) => `${API_BASE}/detection/keyframes/${id}/image`,
+  // `width` asks for a thumbnail. Lists draw these around 100px and were being
+  // sent the full capture, which is most of what made the memory page slow.
+  // Omit it for the full-size viewer. Supported: 160, 240, 480.
+  getKeyframeImage:  (id, width) => `${API_BASE}/detection/keyframes/${id}/image${width ? `?w=${width}` : ''}`,
   getMedicationFrames:       (params) => api.get('/detection/medication_frames', { params }),
   getMedicationFrameImage:  (id) => `${API_BASE}/detection/medication_frames/${id}/image`,
 };

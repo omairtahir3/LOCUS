@@ -46,8 +46,14 @@ async function pipeFrame(req, res, url, missing) {
 
 // GET /api/detection/keyframes/:id/image — serve keyframe image (binary pipe)
 // Unprotected because standard <img> tags cannot send Authorization headers
-router.get('/keyframes/:id/image', (req, res) =>
-  pipeFrame(req, res, `${AI_BACKEND}/api/keyframes/${req.params.id}/image`, 'Keyframe'));
+// ?w= asks the AI backend for a width-bounded copy. A list that draws these
+// 100px wide was being sent the full 1280x720 capture: 196 frames is 16 MB and
+// 19 s at a browser's six connections. Only the whitelisted widths over there
+// are honoured, so this cannot be used to generate arbitrary files.
+router.get('/keyframes/:id/image', (req, res) => {
+  const w = /^\d+$/.test(String(req.query.w || '')) ? `?w=${req.query.w}` : '';
+  return pipeFrame(req, res, `${AI_BACKEND}/api/keyframes/${req.params.id}/image${w}`, 'Keyframe');
+});
 
 // GET /api/detection/medication_frames/:id/image — serve medication frame image (binary pipe)
 // Unprotected because <img> tags cannot send Authorization headers
