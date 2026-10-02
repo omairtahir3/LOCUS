@@ -1184,13 +1184,24 @@ class DailyItemIndexer:
                     else:
                         mean_internal_sim = 1.0
 
-                    item_thresh = 0.72 if mean_internal_sim >= 0.96 else self.EXEMPLAR_MATCH_THRESHOLD
+                    # A FLOOR for this item, not a replacement for the class
+                    # rules, and only when the item has earned one. It used to be
+                    # set unconditionally to 0.72 or EXEMPLAR_MATCH_THRESHOLD,
+                    # and because the matcher only consults the class when this
+                    # is None, that made CLASS_AGREE and CLASS_DISAGREE dead code
+                    # for every item that has ever existed. The consequence was
+                    # on the wearer's own frames: a box YOLO called "Laptop"
+                    # matched the Phone at 0.750, because 0.750 clears 0.74, and
+                    # the 0.85 bar meant for a disagreeing class never ran. It is
+                    # also exactly the "Mouse -> Phone at 0.798" the comments
+                    # above record as already fixed.
+                    item_floor = 0.72 if mean_internal_sim >= 0.96 else None
 
                     items.append({
                         "id": str(doc["_id"]),
                         "name": doc.get("item_name", "Unknown Item"),
                         "embeddings": embs_arr,
-                        "threshold": item_thresh
+                        "threshold_floor": item_floor,
                     })
         except Exception as e:
             print(f"[DailyItemIndexer] Error fetching user items for {user_id_str}: {e}")
@@ -1261,16 +1272,22 @@ class DailyItemIndexer:
             best_thresh = self.EXEMPLAR_MATCH_THRESHOLD
 
             for item in user_items:
-                thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
                 # YOLO named this box. Whether that name describes this item
                 # moves the bar in BOTH directions: down when it agrees, which
                 # is the one path with no observed false positives, and up when
                 # it plainly does not, which is where every observed false
-                # positive came from.
-                if item.get("threshold") is None:
-                    thresh = (self.CLASS_AGREE_MATCH_THRESHOLD
-                              if self._names_agree(d.get("name", ""), item["name"])
-                              else self.CLASS_DISAGREE_MATCH_THRESHOLD)
+                # positive came from. This is the BASE bar and it always applies;
+                # it was previously skipped whenever the item carried a stored
+                # threshold, which was always, so it never applied at all.
+                thresh = (self.CLASS_AGREE_MATCH_THRESHOLD
+                          if self._names_agree(d.get("name", ""), item["name"])
+                          else self.CLASS_DISAGREE_MATCH_THRESHOLD)
+                # An item with almost no surface texture matches ambient clutter
+                # too easily, so it carries a floor of its own. A floor can only
+                # raise the bar, never lower it below what the class demands.
+                floor = item.get("threshold_floor")
+                if floor:
+                    thresh = max(thresh, floor)
                 # Faint boxes must prove themselves harder. Candidates now come
                 # in from ENROLLED_CANDIDATE_CONF rather than conf_threshold, so
                 # the gallery sees boxes the detector barely believes in, and on
@@ -1301,6 +1318,43 @@ class DailyItemIndexer:
                 d["generic_name"] = generic_name
                 d["name"] = best_match_name
                 print(f"[DailyItemIndexer] Exemplar MATCH: '{generic_name}' -> '{best_match_name}' (sim={best_sim:.3f} >= {best_thresh})")
+
+        # ── One belonging cannot be in two places in one frame ───────────────
+        #
+        # A single keyframe matched the wearer's phone TWICE: once at 0.168 of
+        # the frame scoring 0.750, and once at 0.013 scoring 0.866. One of those
+        # is the phone and the other is something that resembles it, and keeping
+        # both is worse than keeping either, because the two carry opposite
+        # placements. The large one was read as "in hand" and the small one as
+        # "put down", and that contradiction drove everything the wearer
+        # reported: the spurious pick-up made the next genuine put-down look
+        # like a move, so it bypassed the fifteen-minute window and stored
+        # another frame -- five of them -- and the newest sighting kept reading
+        # in_hand, which tells the left-behind check the item was carried away
+        # and no alert is needed.
+        #
+        # The strongest match wins. Lowering the candidate bar to find distant
+        # belongings is what made duplicates common enough to matter: more boxes
+        # reach the gallery, so the same object is now offered to it several
+        # times over.
+        best_per_item: dict[str, dict] = {}
+        for d in detections:
+            iid = d.get("enrolled_item_id")
+            if not iid:
+                continue
+            prev = best_per_item.get(str(iid))
+            if prev is None or d.get("exemplar_similarity", 0) > prev.get("exemplar_similarity", 0):
+                best_per_item[str(iid)] = d
+        for d in detections:
+            iid = d.get("enrolled_item_id")
+            if iid and best_per_item.get(str(iid)) is not d:
+                print(f"[DailyItemIndexer] dropping a weaker second match for "
+                      f"{d.get('matched_item')} in the same frame "
+                      f"(sim={d.get('exemplar_similarity')} vs "
+                      f"{best_per_item[str(iid)].get('exemplar_similarity')})")
+                for k in ("matched_item", "enrolled_item_id", "exemplar_similarity"):
+                    d.pop(k, None)
+                d["name"] = d.get("generic_name", d.get("name"))
 
     def _check_and_enrich_activity(self, keyframe_id: str, detections: list[dict], metadata: dict,
                                    frame_shape: tuple | None = None):
