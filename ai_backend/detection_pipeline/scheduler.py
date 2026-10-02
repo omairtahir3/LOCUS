@@ -242,19 +242,68 @@ def _is_time_match(scheduled_time, current_time, tolerance_minutes=180):
         return False
 
 
+#: Live stream paths, cached briefly. A medication minute can wake six users at
+#: once and they would otherwise each ask MediaMTX the same question.
+_STREAMING_CACHE: tuple[float, set] = (0.0, set())
+_STREAMING_CACHE_SECONDS = 5.0
+
+
+async def _streaming_user_ids() -> set:
+    """Which users are publishing a stream right now, from MediaMTX."""
+    import time as _t
+    import httpx
+    global _STREAMING_CACHE
+    at, cached = _STREAMING_CACHE
+    if (_t.monotonic() - at) < _STREAMING_CACHE_SECONDS:
+        return cached
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("http://127.0.0.1:9997/v3/paths/list", timeout=3)
+        out = set()
+        for p in resp.json().get("items", []):
+            name = p.get("name", "")
+            if name.startswith("live/"):
+                uid = name.split("live/", 1)[1]
+                if len(uid) == 24 and all(c in "0123456789abcdef" for c in uid):
+                    out.add(uid)
+        _STREAMING_CACHE = (_t.monotonic(), out)
+        return out
+    except Exception:
+        # Unreachable MediaMTX must not block medication verification. Returning
+        # None would need handling at every call site; an empty set would claim
+        # nobody is streaming. The previous value is the honest answer: it is
+        # what we last knew to be true.
+        return cached
+
+
 async def _start_pipeline_for_session(session, user_id):
     """
     Ensure a pipeline is running for this user and update it with the
     current session's medication context.
     """
     pipeline = _get_pipeline_for_user(user_id)
-    
+
     # Also check legacy pipeline as fallback
     if not pipeline or not pipeline.is_running:
         if _legacy_pipeline and _legacy_pipeline.is_running:
             pipeline = _legacy_pipeline
         else:
-            # Need to spawn a new pipeline for this user
+            # Only if the wearer is actually streaming. A medication time used to
+            # spawn a full pipeline regardless, and at 01:30 six users were due
+            # at once: six insightface models (2.5-4.7 s each), six pill ONNX
+            # models and six YOLO loads, every one of them for an RTSP path that
+            # answered 404, each then retrying thirty times over a minute before
+            # giving up. That work competes with the item indexer for the same
+            # CPU, and the indexer was taking 31 s on a keyframe that costs 1.3 s
+            # on an idle machine, keeping up with 11 of 66 captured frames.
+            #
+            # Nothing is lost by waiting: _watch_streams starts the pipeline the
+            # moment a stream appears, and the next scheduler tick syncs this
+            # session's medication context onto it.
+            if user_id not in await _streaming_user_ids():
+                print(f"[Scheduler] {user_id[:8]}… is not streaming; medication session "
+                      f"recorded, pipeline will start when the camera does")
+                return
             camera_url = await _get_camera_url_for_user(user_id)
             pipeline = _spawn_pipeline_for_user(user_id, camera_url)
             # Give the pipeline a moment to start connecting
