@@ -569,31 +569,63 @@ async function escalateUnacknowledgedItemLoss(user, now = new Date()) {
 
 let lastRunAt = new Date(Date.now() - MONITOR_INTERVAL_MS);
 
+// How many users are checked at once. The checks are almost entirely waiting on
+// the database, so running them strictly one user after another spent the pass
+// idle: measured, 21 users took 1598 ms, which is ~170 round trips in series and
+// grows with the number of users rather than with the work. Bounded rather than
+// unbounded because an unbounded fan-out over a few hundred users would open
+// more concurrent queries than the driver's pool allows and simply queue them
+// somewhere less visible.
+const MONITOR_CONCURRENCY = Number(process.env.MONITOR_CONCURRENCY || 6);
+
 async function runOnce(now = new Date()) {
   const User = require('../models/User');
   const sinceRun = lastRunAt;
   lastRunAt = now;
   const users = await User.find({ role: { $in: ['user', 'elderly'] } }).lean();
-  const findings = [];
-  for (const user of users) {
+
+  // Every profile in one query instead of one query per user. Same data, one
+  // round trip; this was the clearest of the N+1s because it ran for every user
+  // whether or not anything else did.
+  const profiles = new Map();
+  for (const p of await RoutineProfile.find({ user_id: { $in: users.map(u => u._id) } }).lean()) {
+    profiles.set(String(p.user_id), p);
+  }
+
+  const perUser = async (user) => {
+    const out = [];
     try {
-      const profile = await RoutineProfile.findOne({ user_id: user._id }).lean();
+      const profile = profiles.get(String(user._id));
       if (user.role === 'elderly') {
-        const a = await checkMedicationGap(user, now);           if (a) findings.push(a);
-        const b = await checkInactivityAndCamera(user, now);     if (b) findings.push(b);
-        if (profile) findings.push(...await checkDeviation(user, profile, now));
+        const a = await checkMedicationGap(user, now);           if (a) out.push(a);
+        const b = await checkInactivityAndCamera(user, now);     if (b) out.push(b);
+        if (profile) out.push(...await checkDeviation(user, profile, now));
       } else {
-        findings.push(...await checkLeftBehind(user, sinceRun, now));
-        if (profile) findings.push(...await checkHabitualItems(user, profile, now));
+        out.push(...await checkLeftBehind(user, sinceRun, now));
+        if (profile) out.push(...await checkHabitualItems(user, profile, now));
       }
       // Outdoor item tracking applies to both roles: a lost wallet is a lost
       // wallet. Escalation only has somewhere to go when caregivers exist.
-      findings.push(...await checkOutdoorItemLost(user, now));
+      out.push(...await checkOutdoorItemLost(user, now));
       await escalateUnacknowledgedItemLoss(user, now);
     } catch (e) {
       console.error(`[RoutineMonitor] ${user.name}: ${e.message}`);
     }
-  }
+    return out;
+  };
+
+  // Results are collected per user and flattened in user order, so the output
+  // is identical to the sequential version regardless of who finishes first.
+  const results = new Array(users.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(MONITOR_CONCURRENCY, users.length) }, async () => {
+    while (next < users.length) {
+      const i = next++;
+      results[i] = await perUser(users[i]);
+    }
+  }));
+  const findings = results.flat();
+
   if (findings.length) {
     console.log(`[RoutineMonitor] ${findings.length} new finding(s): ` +
       findings.map(f => `${f.kind}(${f.severity})`).join(', '));

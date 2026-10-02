@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
@@ -146,10 +146,11 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'Medicine',
         confidence: conf,
-        status: pending ? '⏳ Needs confirmation' : '✓ Verified',
+        status: pending ? 'â³ Needs confirmation' : 'âœ“ Verified',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null,
+        thumb_url: null,   // medication frames have no thumbnail route yet
         location: ev.location
       };
     } else if (ev.event_type === 'social_interaction') {
@@ -166,10 +167,11 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'People',
         confidence: '',
-        status: ev.verification_status === 'confirmed' ? '✓ Confirmed' : '',
+        status: ev.verification_status === 'confirmed' ? 'âœ“ Confirmed' : '',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        thumb_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id, 240) : null,
         location: ev.location
       };
     } else if (ev.event_type === 'activity') {
@@ -190,6 +192,7 @@ export default function MemorySearch() {
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        thumb_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id, 240) : null,
         location: ev.location
       };
     } else if (ev.event_type === 'object') {
@@ -219,10 +222,11 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'Objects',
         confidence: identity ? `${(identity * 100).toFixed(0)}% match` : '',
-        status: '✓ Logged',
+        status: 'âœ“ Logged',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
+        thumb_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id, 240) : null,
         location: ev.location,
         items: itemsList
       };
@@ -386,8 +390,14 @@ export default function MemorySearch() {
                             }}
                           >
                             <img
-                              src={m.image_url}
+                              // The thumbnail, not the capture. Drawn 100px wide,
+                              // so 240 covers a 2x display and still costs a
+                              // fraction of the full frame. The lightbox above
+                              // opens m.image_url, which is the full one.
+                              src={m.thumb_url || m.image_url}
                               alt=""
+                              loading="lazy"
+                              decoding="async"
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               // The frame has aged out. Fall back to the layout
                               // used by memories that never had one, so every
@@ -560,3 +570,4 @@ export default function MemorySearch() {
     </div>
   );
 };
+
