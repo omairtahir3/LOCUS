@@ -843,18 +843,42 @@ class DailyItemIndexer:
                 # 10.1% of the frame at the time -- squarely in its own held
                 # range of 8.2 to 14.9%, against 0.6% on a desk.
                 size_held = thr is not None and d["area_frac"] >= thr
-                if overlap_held or size_held:
+                # ...and size can VETO a hand overlap as well as assert one.
+                #
+                # _is_held measures the overlap as a fraction of the ITEM's own
+                # area, so a small distant object is trivially "held": a hand
+                # anywhere near it in the flat projection covers 15% of
+                # something 70 px wide without being anywhere near it in the
+                # room. Measured, the phone at 0.0156 of the frame -- its own
+                # put-down cluster sits at 0.013, its held cluster at 0.119 --
+                # was recorded in_hand because a hand was elsewhere in view.
+                # That stored no frame and told the left-behind check the phone
+                # had been carried away, so no alert was raised either.
+                #
+                # A thing in your hand is about 30 cm from a camera on your
+                # chest. If it is far smaller than this item has ever been while
+                # held, it is not in a hand, whatever the boxes overlap.
+                size_says_placed = thr is not None and d["area_frac"] < thr
+                if size_says_placed:
+                    d["placement"] = "placed"
+                elif overlap_held or size_held:
                     d["placement"] = "in_hand"
-                elif thr is not None or hand_boxes:
+                elif hand_boxes:
                     d["placement"] = "placed"
                 else:
                     # No hands seen and no size opinion yet: nothing is known.
                     d["placement"] = "unknown"
-                # Only overlap-derived labels may train the size threshold. A
-                # size-derived label feeding back would let one mistake harden
-                # into the very number that produced it.
-                d["hands_seen"] = bool(hand_boxes) and not (size_held and not overlap_held)
-                if size_held and not overlap_held:
+                # Only labels the HANDS decided may train the size threshold.
+                # Anything size decided, in either direction, would otherwise
+                # feed its own output back and harden one mistake into the number
+                # that produced it.
+                size_decided = size_says_placed or (size_held and not overlap_held)
+                d["hands_seen"] = bool(hand_boxes) and not size_decided
+                if size_says_placed and overlap_held:
+                    print(f"[Items] a hand box overlapped {d.get('matched_item', d['name'])}, but at "
+                          f"{d['area_frac']:.4f} of the frame against its own {thr:.3f} held size it is "
+                          f"too far away to be in one; recorded as put down")
+                elif size_held and not overlap_held:
                     print(f"[Items] {d.get('matched_item', d['name'])} is {d['area_frac']:.3f} of the "
                           f"frame against its own {thr:.3f} held threshold, so it is in a hand "
                           f"even though no hand box covered it")
