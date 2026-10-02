@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
@@ -146,7 +146,7 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'Medicine',
         confidence: conf,
-        status: pending ? 'â³ Needs confirmation' : 'âœ“ Verified',
+        status: pending ? '⏳ Needs confirmation' : '✓ Verified',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getMedicationFrameImage(ev.keyframe_id) : null,
@@ -167,7 +167,7 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'People',
         confidence: '',
-        status: ev.verification_status === 'confirmed' ? 'âœ“ Confirmed' : '',
+        status: ev.verification_status === 'confirmed' ? '✓ Confirmed' : '',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
@@ -222,7 +222,7 @@ export default function MemorySearch() {
         group: groupLabel,
         category: 'Objects',
         confidence: identity ? `${(identity * 100).toFixed(0)}% match` : '',
-        status: 'âœ“ Logged',
+        status: '✓ Logged',
         hasImage: !!ev.keyframe_id,
         is_flagged: !!ev.is_flagged,
         image_url: ev.keyframe_id ? detectionAPI.getKeyframeImage(ev.keyframe_id) : null,
