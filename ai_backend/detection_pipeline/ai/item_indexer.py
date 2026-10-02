@@ -289,6 +289,18 @@ TILE_SCAN_MAX_BACKLOG = int(os.environ.get("TILE_SCAN_MAX_BACKLOG", 3))
 # the frame being taken right now, and every frame in it delays that one.
 INDEX_QUEUE_HIGH_WATER = int(os.environ.get("INDEX_QUEUE_HIGH_WATER", 8))
 
+# The oldest a frame may be, at the moment the worker picks it up, and still be
+# worth running detection on. Depth alone does not bound lag: eight frames at the
+# 1.3 s they cost on an idle machine is ten seconds, but at the 31 s per frame
+# reached under load it is four minutes, and measured write lag hit 172 s.
+#
+# A put-down noticed three minutes late cannot produce a useful "you left this
+# behind": the wearer has been in another room for two of those minutes, and the
+# alert either never fires or arrives about somewhere they have long since left.
+# Detection has to land inside the window an alert can still act on, so a frame
+# past this age is dropped unprocessed rather than delaying every newer one.
+MAX_INDEX_AGE_SECONDS = float(os.environ.get("MAX_INDEX_AGE_SECONDS", 45))
+
 # ── Learning the item from the camera that has to recognise it ──────────────
 #
 # An enrolment photo is taken with a phone camera, close up, in one room. The
@@ -608,6 +620,30 @@ class DailyItemIndexer:
                 continue
 
             try:
+                # Age, not queue depth, is what makes a sighting useless.
+                #
+                # The backlog was already capped at INDEX_QUEUE_HIGH_WATER
+                # frames, which bounds the lag only if each frame costs what it
+                # should: eight frames at 1.3 s is ten seconds, but at the 31 s
+                # per frame this machine was actually reaching it is four
+                # minutes. Measured write lag reached 172 s, and a put-down
+                # noticed three minutes after it happened cannot produce a
+                # useful "you left this behind" -- by then the wearer has been
+                # in another room for two of those minutes.
+                #
+                # So a frame older than this is dropped unprocessed. Skipping it
+                # costs one sighting; processing it delays every newer frame
+                # behind it and answers a question nobody can still act on.
+                age = time.time() - task.get("enqueued_at", time.time())
+                if age > MAX_INDEX_AGE_SECONDS:
+                    self._stale_total = getattr(self, "_stale_total", 0) + 1
+                    last = getattr(self, "_stale_logged_at", 0.0)
+                    if (time.monotonic() - last) >= 10.0:
+                        self._stale_logged_at = time.monotonic()
+                        print(f"[DailyItemIndexer] skipped {self._stale_total} frame(s) older than "
+                              f"{MAX_INDEX_AGE_SECONDS:.0f}s on dequeue; newest first keeps detection "
+                              f"within the window an alert can still act on")
+                    continue
                 self._process_keyframe_task(task)
             except Exception as e:
                 print(f"[DailyItemIndexer] Error processing keyframe {task.get('keyframe_id')}: {e}")

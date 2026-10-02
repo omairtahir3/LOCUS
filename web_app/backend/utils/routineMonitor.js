@@ -24,13 +24,27 @@ const { dateWords, timeWords, hourWords, distanceWords, item: itemWords, firstNa
 // Must be SHORTER than the shortest thing being waited for, or the wait and the
 // poll add up. At 15 minutes with LEFT_BEHIND_AFTER_MIN at 10, a phone left on a
 // desk could not be reported for up to 25 minutes, which is long past the point
-// the wearer could turn round and fetch it: measured, a wearer who walked off at
-// 19:39 had had no alert by 19:53. One full pass over all 17 users in this
-// database costs 820 ms, so the old interval was never a performance decision.
-// 2 minutes puts the alert within about a minute of coming due, for 0.7% of one
-// core. Every check is dedup-keyed, so running them more often cannot duplicate
-// an alert; it only notices sooner.
-const MONITOR_INTERVAL_MS = 2 * 60 * 1000;
+// the wearer could turn round and fetch it.
+//
+// 2 minutes was still too slow. Measured end to end on a real put-down:
+//
+//   frame captured      02:07:17
+//   indexed and written     +68s
+//   last seen in view      +112s
+//   finding raised         +285s     <- nearly five minutes
+//   push sent              +287s
+//
+// The alert did fire and the push did arrive; it simply arrived long after the
+// wearer had left the room, which reads as nothing happening. Of those 285
+// seconds, up to 120 were spent waiting for the next tick. One pass over all 21
+// users costs 594 ms, so 30 s is about 2% of one core and removes a minute and a
+// half of that. Every check is dedup-keyed, so running more often cannot
+// duplicate an alert; it only notices sooner.
+//
+// What remains is ITEM_GONE_MIN, which is the guard against alerting while the
+// wearer is sitting right next to the thing. That one is a judgement about false
+// alarms, not a latency bug, and is left alone.
+const MONITOR_INTERVAL_MS = Number(process.env.MONITOR_INTERVAL_MS || 30 * 1000);
 
 // ── Medication gap (elderly) ────────────────────────────────────────────────
 // Alert when this many consecutive days end with no verified dose. Re-alert only
