@@ -236,6 +236,24 @@ ITEM_DEDUP_SECONDS = 900  # 15 minutes
 # per frame, which is all this needs to prevent.
 ITEM_HELD_DEDUP_SECONDS = float(os.environ.get("ITEM_HELD_DEDUP_SECONDS", 60))
 
+# Is a put-down in the same place as the last one that kept a frame?
+#
+# Overlap alone cannot answer it. Measured across one real session, the repeats
+# of a stationary phone overlapped 1.000 (four frames, the box (377,518)-(519,600)
+# reproduced exactly) and 0.322 (two frames a second apart, the camera drifting),
+# while the genuine moves overlapped 0.000, 0.026 and 0.338. A repeat at 0.322
+# and a move at 0.338 leave no threshold between them.
+#
+# Time separates what overlap cannot: the 0.322 repeat was ONE SECOND after its
+# predecessor, the 0.338 move was twenty-six minutes. So two rules, and either
+# is enough:
+#   a box that plainly is the previous one, whenever it was seen;
+#   a roughly similar box seen again within moments, which is camera drift
+#   around a thing that has not gone anywhere.
+SAME_SPOT_IOU = float(os.environ.get("SAME_SPOT_IOU", 0.50))
+SAME_SPOT_DRIFT_IOU = float(os.environ.get("SAME_SPOT_DRIFT_IOU", 0.25))
+SAME_SPOT_DRIFT_SECONDS = float(os.environ.get("SAME_SPOT_DRIFT_SECONDS", 30))
+
 # ── Held, or put down? ──────────────────────────────────────────────────────
 #
 # A memory aid does not need to tell somebody they are holding their phone;
@@ -1055,6 +1073,23 @@ class DailyItemIndexer:
         # they get no picture and never reach the feed.
         import uuid
         placed_now = [d for d in detections if d.get("placement") == "placed"]
+        # ── One frame per place ──────────────────────────────────────────────
+        #
+        # A belonging resting in one spot was keeping several frames of that one
+        # spot: 01:05:35, :40 and :54 all stored a picture of the phone at the
+        # identical box (377,518)-(519,600), and 02:28:36 and :37 stored two
+        # more a second apart. The memory page then fills with the same shelf
+        # photographed over and over.
+        #
+        # The window gate above cannot prevent this on its own. It keys on
+        # time.monotonic() inside the worker, which is PROCESSING time, while
+        # frames are queued and may be handled far apart and in a process that
+        # has since been replaced -- and its state is gone with it. Asking the
+        # database what was last stored survives all of that.
+        #
+        # A put-down whose box lands where this item's last stored put-down was
+        # is the same place, not a new one, so it needs no second picture.
+        placed_now = [d for d in placed_now if not self._already_have_this_spot(user_key, d)]
         item_keyframe_id = str(uuid.uuid4()) if placed_now else None
         try:
             storage = self._get_item_storage()
@@ -1080,6 +1115,57 @@ class DailyItemIndexer:
 
         # Persist to MongoDB referencing the exact item_keyframe_id
         self._persist_to_db(item_keyframe_id, detections, item_names, metadata)
+
+    def _already_have_this_spot(self, user_key, det) -> bool:
+        """Is there already a stored frame of this belonging in this place?
+
+        Compares against the last PUT-DOWN of this item that actually kept a
+        frame, read from the database so a restarted worker still knows. Returns
+        False on any problem: a duplicate picture is a smaller harm than losing
+        the record of where something was left.
+        """
+        iid = det.get("enrolled_item_id")
+        box = det.get("bbox")
+        if not iid or not box:
+            return False
+        try:
+            from bson import ObjectId
+            db = get_client()[get_db_name()]
+            try:
+                uid = ObjectId(user_key)
+            except Exception:
+                return False
+            prev = db.eventlogs.find_one(
+                {"user_id": uid, "event_type": "object", "keyframe_id": {"$ne": None},
+                 "details.items": {"$elemMatch": {
+                     "enrolled_item_id": str(iid), "placement": "placed"}}},
+                {"details.items": 1, "timestamp": 1}, sort=[("timestamp", -1)])
+            if not prev:
+                return False
+            # Only compare against a RECENT one. Something put back on the same
+            # shelf tomorrow is a new memory of today, not a repeat.
+            age = (datetime.now(timezone.utc) - prev["timestamp"].replace(
+                tzinfo=prev["timestamp"].tzinfo or timezone.utc)).total_seconds()
+            if age > ITEM_DEDUP_SECONDS:
+                return False
+            for it in (prev.get("details", {}) or {}).get("items") or []:
+                if str(it.get("enrolled_item_id")) != str(iid):
+                    continue
+                if it.get("placement") != "placed" or not it.get("bbox"):
+                    continue
+                o = self._box_iou(box, it["bbox"])
+                same = o >= SAME_SPOT_IOU or (
+                    o >= SAME_SPOT_DRIFT_IOU and age <= SAME_SPOT_DRIFT_SECONDS)
+                if same:
+                    why = ("the same box" if o >= SAME_SPOT_IOU
+                           else f"the same box give or take drift, {age:.0f}s later")
+                    print(f"[Items] {det.get('matched_item', det.get('name'))} is in {why} "
+                          f"(overlap {o:.2f}); keeping the frame already stored rather than "
+                          f"another of the same place")
+                    return True
+        except Exception as e:
+            print(f"[Items] same-spot check skipped: {e}")
+        return False
 
     def _touch_item_visibility(self, user_key, item_identity, placement):
         """Record that a suppressed item is still in view, on its existing event.
