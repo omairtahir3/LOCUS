@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useSelectedUser } from '../../context/SelectedUserContext';
 import { authAPI } from '../../services/api';
-import { Send, X, AlertCircle, MessageCircle } from 'lucide-react';
+import { Send, X, AlertCircle, MessageCircle, Phone } from 'lucide-react';
 import { formatClockTime } from '../../utils/dateUtils';
 
-const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose }) => {
+const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
+                     onCall, callState }) => {
   const { user } = useAuth();
   const selectedUserContext = useSelectedUser();
   const globalSelectedUser = selectedUserContext?.selectedUser;
@@ -98,9 +99,28 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose })
             </div>
           )}
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {onCall && (
+          <button
+            onClick={onCall}
+            disabled={callState && callState !== 'idle' && callState !== 'ended'}
+            title={isEmergency ? 'Call now' : 'Voice call'}
+            style={{
+              background: 'none', border: 'none', padding: '8px', borderRadius: '50%',
+              cursor: 'pointer',
+              // Red during an emergency, so the quickest way to a voice is the
+              // thing the eye lands on.
+              color: isEmergency ? '#EF4444' : '#0D9488',
+              opacity: (callState && callState !== 'idle' && callState !== 'ended') ? 0.4 : 1,
+            }}
+          >
+            <Phone size={20} />
+          </button>
+        )}
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#94A3B8', borderRadius: '50%', transition: 'background-color 0.2s' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#F1F5F9'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
           <X size={20} />
         </button>
+        </div>
       </div>
 
       {/* Messages Area */}

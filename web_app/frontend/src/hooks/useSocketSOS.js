@@ -10,7 +10,12 @@ export function useSocketSOS() {
   const [activeSOS, setActiveSOS] = useState(null);
 
   useEffect(() => {
-    if (!user || user.role !== 'caregiver') return;
+    // Everyone signed in gets a socket now, not just caregivers. The elderly
+    // side needs one to be CALLED: a voice channel has to be reachable from
+    // the other end, and a client with no connection cannot be rung. The SOS
+    // handlers below stay caregiver-only, since those are alerts about someone
+    // rather than alerts for them.
+    if (!user) return;
 
     const token = localStorage.getItem('locus_token');
     const newSocket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', {
@@ -27,6 +32,11 @@ export function useSocketSOS() {
     newSocket.on('connect_error', (err) => {
       console.error('[Socket] Connection Error:', err.message);
     });
+
+    if (user.role !== 'caregiver') {
+      // Connected and reachable, but not listening for alerts about others.
+      return () => { newSocket.disconnect(); };
+    }
 
     newSocket.on('sos_alert', (data) => {
       console.warn('[Socket] SOS Alert Received:', data);
