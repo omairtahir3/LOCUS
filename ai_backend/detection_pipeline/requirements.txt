@@ -16,3 +16,7 @@ numpy>=1.26.4
 onnxruntime>=1.18.0
 httpx>=0.27.0
 requests>=2.31.0
+# Module A FE-3: speech to text, run LOCALLY so household audio never
+# leaves the machine. Pulls ctranslate2 and av; deliberately NOT torch.
+# The model weights download on first use (tiny is ~39 MB).
+faster-whisper>=1.2.1

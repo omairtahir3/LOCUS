@@ -148,6 +148,37 @@ class MedicationDetectionPipeline:
         self.event_plugin = _plugin(ActionType.MEDICATION_INTAKE)
         self.face_plugin = _plugin(ActionType.SOCIAL_INTERACTION)
         self.activity_plugin = _plugin(ActionType.ACTIVITY)
+        # ── Module A FE-1 and FE-3: audio and speech to text ─────────
+        # OFF unless asked for. Turning on a microphone inside someone's home
+        # is not a default anybody should get by upgrading, so AUDIO_CAPTURE=1
+        # is the whole switch. When off, nothing is imported, no device is
+        # opened and no model is downloaded.
+        #
+        # The audio itself is never written to disk: the ring buffer lives in
+        # memory and only the TEXT reaches the database, where it ages out on
+        # the same clock as the keyframes beside it.
+        self.transcriber = None
+        self.audio_context = None
+        if os.environ.get("AUDIO_CAPTURE", "0") == "1":
+            try:
+                from .transcriber import Transcriber
+                from .core.context_providers import AudioContext
+                self.transcriber = Transcriber(user_id=self.user_id or "")
+                self.transcriber.ensure_ttl_index()
+                self.audio_context = AudioContext(self.transcriber)
+                if self.transcriber.start():
+                    print("[Pipeline] Audio capture on, transcribing locally "
+                          f"({self.transcriber.model_size})")
+                else:
+                    print(f"[Pipeline] Audio capture unavailable: {self.transcriber.last_error}")
+                    self.transcriber = None
+                    self.audio_context = None
+            except Exception as e:
+                # Audio is an addition to the pipeline, never a requirement.
+                print(f"[Pipeline] Audio capture disabled: {type(e).__name__}: {e}")
+                self.transcriber = None
+                self.audio_context = None
+
         self.api_base  = api_base_url
         self.is_running = False
         self.last_result = None  # Store last analysis result
@@ -1140,6 +1171,11 @@ class MedicationDetectionPipeline:
             user_id=self.user_id,
             timestamp=result.get("timestamp", ""),
             medication_ids=list(self.medication_ids),
+            # EventRecord has carried a transcript_id since the contracts were
+            # written and never had one to put in it, because the only thing
+            # that could supply it returned None.
+            transcript_id=(self.transcriber.recent_id(30)
+                           if self.transcriber is not None else None),
         )
         detection = self.event_plugin.from_pipeline_result(result, context, evidence_frames)
         status = self.event_policy.status_for(detection.confidence)
@@ -2292,6 +2328,13 @@ class MedicationDetectionPipeline:
 
     def stop(self):
         self.is_running = False
+        # Before anything else: a live InputStream holds the microphone open
+        # for as long as the process lives, whatever else goes wrong below.
+        try:
+            if self.transcriber is not None:
+                self.transcriber.stop()
+        except Exception as e:
+            print(f"[Pipeline] Audio stop error: {e}")
         # Close the activity session that is still open. Same reason the scene
         # flush below exists: a session is written when the activity CHANGES, so
         # whatever the wearer was doing when the camera stopped would otherwise
