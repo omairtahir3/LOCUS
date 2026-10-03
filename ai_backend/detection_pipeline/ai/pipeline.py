@@ -690,6 +690,41 @@ class MedicationDetectionPipeline:
         except Exception as e:
             print(f"[Pipeline] [DB-Log-Batch] Fatal error: {e}")
 
+    # How close two detections of the same dose can be before the second is
+    # treated as the same intake seen again rather than a new one. The passes
+    # that duplicated a dose were 55 s apart; a person does not take the same
+    # medicine twice inside five minutes.
+    EVIDENCE_DEDUP_SECONDS = 300
+
+    def _evidence_already_saved(self, store, status, now_ts=None):
+        """Whether this dose already has a stored evidence set."""
+        try:
+            from datetime import timezone as _tz
+            now_ts = now_ts or datetime.utcnow()
+            recent = store.list_evidence(user_id=str(self.user_id), limit=12) or []
+            med_ids = {str(m) for m in (self.medication_ids or [])}
+            for e in recent:
+                if str(e.get("medication_id")) not in med_ids:
+                    continue
+                if e.get("detection_status") != status:
+                    continue
+                saved = e.get("saved_at") or e.get("detected_at")
+                if not saved:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(str(saved))
+                    if ts.tzinfo is not None:
+                        ts = ts.astimezone(_tz.utc).replace(tzinfo=None)
+                except Exception:
+                    continue
+                if abs((now_ts - ts).total_seconds()) <= self.EVIDENCE_DEDUP_SECONDS:
+                    return True
+        except Exception as e:
+            # Never block saving evidence because the check itself failed: a
+            # duplicate set is a smaller harm than no record of a real intake.
+            print(f"[Pipeline] Evidence dedup check failed, saving anyway: {e}")
+        return False
+
     def _tag_detection_keyframes(self, result, confidence, status, frames=None):
         """
         After a successful detection, save the 3 best-evidence keyframes
@@ -755,6 +790,24 @@ class MedicationDetectionPipeline:
                 evidence_store = self._evidence_storage
             else:
                 evidence_store = None
+
+            # One dose, one set of evidence.
+            #
+            # Overlapping analysis passes re-detect the same intake from a buffer
+            # that still holds the same frames, and while the DB write dedupes
+            # (the log for a dose is updated, not inserted again) this did not:
+            # a single Panadol at 01:36 produced two full sets of phase 1/2/3,
+            # 55 seconds apart, and the two phase-3 frames were byte for byte the
+            # same image. The audit page lists evidence, so one dose looked like
+            # two intakes.
+            #
+            # Checked against the store rather than an instance flag so it also
+            # holds across a restart, which is exactly when a buffer gets
+            # re-analysed.
+            if evidence_store is not None and self._evidence_already_saved(
+                    evidence_store, status, now_ts=datetime.utcnow()):
+                print("[Pipeline] Evidence for this dose is already stored — not saving a second set")
+                return
 
             # --- Iterate over the evidence_frames list (already has unique IDs
             # and correct phase_role assigned by analyze_keyframes_batch) ---

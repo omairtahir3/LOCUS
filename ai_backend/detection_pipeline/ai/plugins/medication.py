@@ -18,6 +18,7 @@ class MedicationIntakePlugin(DetectorPlugin):
         self.model_path = model_path
         self._detector = None
         self._gesture = None
+        self._objects = None
 
     def _ensure_models_loaded(self) -> None:
         if self._detector is None:
@@ -26,6 +27,70 @@ class MedicationIntakePlugin(DetectorPlugin):
         if self._gesture is None:
             from ..gesture import GestureDetector
             self._gesture = GestureDetector()
+
+    # Objects365 classes that have a lit screen on them. A round pale shape on
+    # one of these is part of the display, not something anybody swallows.
+    _SCREEN_CLASSES = {37: "Monitor/TV", 61: "Cell Phone", 73: "Laptop",
+                       123: "Telephone", 243: "Tablet"}
+
+    def _screen_boxes(self, frame):
+        """Screens in this frame, as (name, bbox) pairs.
+
+        Loaded lazily and shared with the item indexer's weights, and only ever
+        called on a frame that has ALREADY produced a pill-in-hand candidate, so
+        a session where nobody takes anything never runs it at all.
+        """
+        try:
+            if self._objects is None:
+                from ultralytics import YOLO
+                from ..item_indexer import DEFAULT_MODEL_PATH
+                self._objects = YOLO(DEFAULT_MODEL_PATH)
+            r = self._objects.predict(frame, conf=0.25, verbose=False)[0]
+            out = []
+            for box in r.boxes:
+                cid = int(box.cls[0])
+                if cid in self._SCREEN_CLASSES:
+                    x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
+                    out.append((self._SCREEN_CLASSES[cid],
+                                {"x1": x1, "y1": y1, "x2": x2, "y2": y2}))
+            return out
+        except Exception as e:
+            # No veto is better than no detection: an object model that fails to
+            # load must not stop a real intake being recorded.
+            print(f"[MedicationIntakePlugin] screen check unavailable: {e}")
+            return []
+
+    @staticmethod
+    def _within(inner, outer, slack=0.10):
+        w = outer["x2"] - outer["x1"]
+        h = outer["y2"] - outer["y1"]
+        return (inner["x1"] >= outer["x1"] - w * slack
+                and inner["y1"] >= outer["y1"] - h * slack
+                and inner["x2"] <= outer["x2"] + w * slack
+                and inner["y2"] <= outer["y2"] + h * slack)
+
+    def _drop_screen_artifacts(self, frame, detections):
+        """Remove pill candidates that are really part of a screen.
+
+        A phone held in both hands put a round pale record button under the
+        detector at 0.96 confidence, and the hand check passed it because the
+        phone genuinely was in the hands. Every test of "is this a pill" was
+        satisfied; the thing simply was not one. Nothing about the candidate
+        itself distinguishes it, so the surrounding object has to.
+        """
+        if not detections:
+            return detections, None
+        screens = self._screen_boxes(frame)
+        if not screens:
+            return detections, None
+        kept, blamed = [], None
+        for d in detections:
+            hit = next((n for n, box in screens if self._within(d["bbox"], box)), None)
+            if hit:
+                blamed = hit
+            else:
+                kept.append(d)
+        return kept, blamed
 
     def supports(self, context: EventContext) -> bool:
         return bool(context.medication_ids)
@@ -73,6 +138,20 @@ class MedicationIntakePlugin(DetectorPlugin):
                 in_hand_count = 0
                 if detections and hands > 0:
                     pih, overlap, in_hand_count = self._is_pill_in_hand(detections, gesture)
+                    # Only once something looks like a pill in a hand is it worth
+                    # asking what the hand is actually holding. A phone is in the
+                    # hands exactly as a pill would be, so the hand test cannot
+                    # tell them apart and the object around the candidate must.
+                    if pih:
+                        detections, screen = self._drop_screen_artifacts(raw, detections)
+                        if screen is not None:
+                            best_pill = max((d["confidence"] for d in detections), default=0.0)
+                            if detections:
+                                pih, overlap, in_hand_count = self._is_pill_in_hand(detections, gesture)
+                            else:
+                                pih, overlap, in_hand_count = False, 0.0, 0
+                            print(f"[MedicationIntakePlugin] Ignored a pill candidate on a "
+                                  f"{screen}; it is part of the display, not a dose")
 
                 hand_y = 1.0
                 hbox = gesture.get("hand_bbox")
