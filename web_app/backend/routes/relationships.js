@@ -23,6 +23,58 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+/**
+ * What happens to the conversation when an unknown face is finally named.
+ *
+ * A face nobody has named has, by definition, never been seen before, so the
+ * conversation captured alongside it is that person's FIRST interaction and the
+ * only record of what was said the first time they appeared. Naming them keeps
+ * it: the event becomes a social_interaction belonging to the new relationship,
+ * and the relationship records that this is where it started.
+ *
+ * The transcript still expires on the keyframe clock. The summary does not,
+ * because the summary IS the memory of the conversation; the verbatim words are
+ * only how it was obtained.
+ */
+async function keepFirstConversation(event, relationship) {
+  const convo = event.details?.conversation;
+  if (!convo?.summary && !convo?.transcript) return;
+  relationship.first_interaction = {
+    event_id: event._id,
+    at: event.timestamp,
+    summary: convo.summary || null,
+    topics: convo.topics || null,
+  };
+  await relationship.save();
+}
+
+/**
+ * ...and what happens when they are dismissed instead.
+ *
+ * Dismissing a face says it should never have been recorded, so nothing of the
+ * conversation survives it: not the summary, not the transcript on the event,
+ * and not the transcripts row the text was written to. The event itself stays,
+ * marked rejected, because the audit trail of what the camera did is separate
+ * from the content it captured.
+ */
+async function discardConversation(event) {
+  const convo = event.details?.conversation;
+  if (!convo) return;
+  if (convo.transcript_id) {
+    try {
+      const mongoose = require('mongoose');
+      await mongoose.connection.db.collection('transcripts')
+        .deleteOne({ _id: new mongoose.Types.ObjectId(String(convo.transcript_id)) });
+    } catch (e) {
+      // A transcript that has already expired is gone, which is the same
+      // outcome. Never fail the dismissal over it.
+      console.warn('[relationships] transcript already gone:', e.message);
+    }
+  }
+  await EventLog.updateOne({ _id: event._id },
+    { $unset: { 'details.conversation': '' } });
+}
+
 // POST /api/relationships/confirm
 router.post('/confirm', auth, async (req, res) => {
   try {
@@ -69,6 +121,7 @@ router.post('/confirm', auth, async (req, res) => {
         event.verification_status = 'confirmed';
         event.person_id = rel._id;
         await event.save();
+        await keepFirstConversation(event, rel);
 
         return res.json({ message: 'Merged with existing face', relationship: rel, event });
       }
@@ -109,6 +162,9 @@ router.post('/confirm', auth, async (req, res) => {
     event.verification_status = 'confirmed';
     event.person_id = relationship._id;
     await event.save();
+    // The conversation heard when nobody knew who this was becomes the first
+    // thing this relationship remembers.
+    await keepFirstConversation(event, relationship);
 
     res.json({ message: 'Face confirmed', relationship, event });
   } catch (error) {
@@ -140,6 +196,9 @@ router.post('/dismiss', auth, async (req, res) => {
     event.verification_status = 'rejected';
     event.pending_notification = req.user.role === 'caregiver'; // Alert elderly user
     await event.save();
+    // Dismissing the face discards what was said with it: the summary, the
+    // transcript on the event, and the transcripts row behind it.
+    await discardConversation(event);
 
     res.json({ message: 'Face dismissed', event });
   } catch (error) {

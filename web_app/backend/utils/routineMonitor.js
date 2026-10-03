@@ -502,6 +502,56 @@ async function checkHabitualItems(user, profile, now = new Date()) {
 // Outdoor item tracking (both roles)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Summarise conversations the pipeline heard but nobody has read.
+ *
+ * Not a finding: it raises no alert and notifies nobody. It turns a verbatim
+ * transcript into the one or two sentences that are actually useful for
+ * remembering who came round, and it runs here because this is the pass that
+ * already wakes every 30 s with a database connection open.
+ *
+ * The summary is written onto the event and stays there. The transcript it came
+ * from expires on the keyframe clock, so what lasts is the memory of the
+ * conversation and not a recording of the words.
+ */
+async function summarisePendingConversations(user, limit = 5) {
+  const events = await EventLog.find({
+    user_id: user._id,
+    event_type: { $in: ['social_interaction', 'unknown_face'] },
+    'details.conversation.summary_status': 'pending',
+  }).sort({ timestamp: -1 }).limit(limit).lean();
+  if (!events.length) return 0;
+
+  const { summariseConversation } = require('./conversationAgent');
+  const Relationship = require('../models/Relationship');
+  let done = 0;
+
+  for (const ev of events) {
+    const convo = ev.details.conversation;
+    // A recognised face has a name to use; an unknown one must stay unnamed,
+    // and passing null is what tells the agent to refuse to guess.
+    let personName = null;
+    if (ev.person_id) {
+      const rel = await Relationship.findById(ev.person_id).select('person_name').lean();
+      personName = rel?.person_name ? String(rel.person_name).trim().split(/\s+/)[0] : null;
+    }
+    const r = await summariseConversation(convo.transcript, personName);
+    await EventLog.updateOne({ _id: ev._id }, {
+      $set: {
+        'details.conversation.summary': r.summary,
+        'details.conversation.topics': r.topics,
+        'details.conversation.summary_status': r.status,
+        'details.conversation.summarised_at': new Date(),
+        ...(r.reason ? { 'details.conversation.summary_reason': r.reason } : {}),
+      },
+    });
+    if (r.status === 'done') done++;
+    else console.log(`[RoutineMonitor] conversation ${ev._id}: ${r.status}` +
+      (r.reason ? ` (${r.reason})` : ''));
+  }
+  return done;
+}
+
 async function checkOutdoorItemLost(user, now = new Date()) {
   const { outdoorStatus, haversineM } = require('./outdoor');
   const status = await outdoorStatus(user, now);
@@ -622,6 +672,9 @@ async function runOnce(now = new Date()) {
       // wallet. Escalation only has somewhere to go when caregivers exist.
       out.push(...await checkOutdoorItemLost(user, now));
       await escalateUnacknowledgedItemLoss(user, now);
+      // Not a finding and never an alert: it only fills in the summary of a
+      // conversation that was already heard and stored.
+      await summarisePendingConversations(user);
     } catch (e) {
       console.error(`[RoutineMonitor] ${user.name}: ${e.message}`);
     }
@@ -661,6 +714,7 @@ function init() {
 }
 
 module.exports = {
+  summarisePendingConversations,
   init, runOnce,
   checkMedicationGap, checkInactivityAndCamera, checkDeviation, checkLeftBehind, checkHabitualItems,
   checkOutdoorItemLost, escalateUnacknowledgedItemLoss,

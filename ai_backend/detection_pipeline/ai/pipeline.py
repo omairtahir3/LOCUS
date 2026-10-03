@@ -469,13 +469,48 @@ class MedicationDetectionPipeline:
             except:
                 person_id_obj = None
             
+            details = dict(face_result.attributes)
+
+            # A social interaction is the ONE event worth hearing. The ring
+            # buffer runs all the time and is read only here, so "audio for
+            # social interactions and nothing else" holds by construction: with
+            # continuous transcription off, no face means no transcription and
+            # nothing stored.
+            #
+            # An unknown face is included deliberately, and is arguably the more
+            # important of the two: a face nobody has named has by definition
+            # never been seen before, so this is the only chance to record what
+            # was said the first time. If the wearer later names them it becomes
+            # that relationship's first interaction; if they dismiss the face,
+            # the transcript and summary go with it.
+            if event_type in ("social_interaction", "unknown_face") and self.transcriber is not None:
+                try:
+                    heard = self.transcriber.capture_conversation()
+                    if heard:
+                        details["conversation"] = {
+                            "transcript": heard["transcript"],
+                            "transcript_id": heard["transcript_id"],
+                            "heard_seconds": heard["heard_seconds"],
+                            # Summarised by the Node agent, which already owns the
+                            # Groq client, the fallback and the output guards.
+                            # Pending rather than absent so a failed pass can be
+                            # found and retried instead of silently never running.
+                            "summary": None,
+                            "summary_status": "pending",
+                        }
+                        print(f"[Pipeline] [Audio] Heard {len(heard['transcript'])} chars "
+                              f"with {event_type}")
+                except Exception as e:
+                    # Never let the audio half stop a face event being recorded.
+                    print(f"[Pipeline] [Audio] Conversation capture failed: {e}")
+
             doc = {
                 "user_id": ObjectId(str(self.user_id)),
                 "event_type": event_type,
                 "timestamp": ts_now,
                 "confidence": confidence,
                 "person_id": person_id_obj,
-                "details": face_result.attributes,
+                "details": details,
                 "keyframe_id": kf_id,
                 "createdAt": ts_now,
                 "updatedAt": ts_now

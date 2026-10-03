@@ -34,6 +34,19 @@ const relationshipSchema = new mongoose.Schema({
   pending_notification: {
     type: Boolean,
     default: false
+  },
+  // The conversation heard the first time this person appeared, while they
+  // were still an unknown face. Declared because mongoose drops undeclared
+  // paths silently under its default strict mode, so writing it without this
+  // would have looked like it worked and saved nothing.
+  //
+  // The summary is kept, not the transcript: the transcript expires on the
+  // keyframe clock and is only how the summary was obtained.
+  first_interaction: {
+    event_id: { type: mongoose.Schema.Types.ObjectId, ref: 'EventLog' },
+    at: Date,
+    summary: String,
+    topics: String
   }
 }, { timestamps: true });
 

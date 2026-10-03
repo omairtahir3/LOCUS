@@ -47,6 +47,17 @@ COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
 # while the event is still recent.
 WINDOW_SECONDS = float(os.environ.get("TRANSCRIBE_WINDOW_SECONDS", 10.0))
 
+# Transcribing EVERYTHING the day contains is off by default, because a
+# transcript of a quiet afternoon is nothing anyone will ever read. The buffer
+# runs continuously; it is only READ when a face is seen, which is the one
+# moment the words are worth keeping. Set to 1 for a running transcript of
+# everything.
+CONTINUOUS = os.environ.get("TRANSCRIBE_CONTINUOUS", "0") == "1"
+
+# How much audio a social interaction keeps. Longer than a WINDOW because a
+# greeting and the sentence after it are what make a summary mean anything.
+CONVERSATION_SECONDS = float(os.environ.get("CONVERSATION_SECONDS", 25.0))
+
 # Transcripts age out on the same clock as the images they sit beside. FE-8 puts
 # that at 24-42 h and the keyframe default is 36, so a transcript never outlives
 # the frame it describes.
@@ -83,11 +94,13 @@ class Transcriber:
     """Turns the audio ring buffer into stored text, on its own thread."""
 
     def __init__(self, user_id: str, capture: AudioCapture | None = None,
-                 model_size: str = MODEL_SIZE, window_seconds: float = WINDOW_SECONDS):
+                 model_size: str = MODEL_SIZE, window_seconds: float = WINDOW_SECONDS,
+                 continuous: bool = CONTINUOUS):
         self.user_id = str(user_id)
         self.capture = capture or AudioCapture()
         self.model_size = model_size
         self.window_seconds = float(window_seconds)
+        self.continuous = bool(continuous)
         self._model = None
         self._thread = None
         self._stop = threading.Event()
@@ -225,6 +238,40 @@ class Transcriber:
                     return seg["id"]
         return None
 
+    def capture_conversation(self, seconds: float = None) -> dict | None:
+        """Transcribe the audio just heard, for a social interaction only.
+
+        This is the single caller that reads the ring buffer when continuous
+        transcription is off, which is what makes "audio for social
+        interactions, nothing else" true by construction rather than by policy:
+        no face event, no transcription, and nothing to store.
+
+        The audio exists only as the numpy array passed to the model. It is
+        never written to a file, so there is no window where a recording of a
+        conversation sits on disk waiting for something to delete it, and a
+        crash mid-transcription leaves nothing behind. The array goes out of
+        scope when this returns.
+
+        Returns {"transcript", "transcript_id", "heard_seconds"} or None when
+        there was no audio, nothing but silence, or no words in it.
+        """
+        seconds = float(seconds if seconds is not None else CONVERSATION_SECONDS)
+        if not self.capture.available:
+            return None
+        samples = self.capture.read_window(seconds)
+        if samples is None:
+            # Less than a window captured: the camera has only just started.
+            return None
+        text = self.transcribe_window(samples)
+        del samples            # explicit, so the intent survives a refactor
+        if not text:
+            return None
+        return {
+            "transcript": text,
+            "transcript_id": self.store(text),
+            "heard_seconds": seconds,
+        }
+
     # -- the loop ---------------------------------------------------------
 
     def _run(self):
@@ -252,6 +299,11 @@ class Transcriber:
             self.last_error = self.capture.last_error or "no audio input device"
             return False
         self._stop.clear()
+        if not self.continuous:
+            # Capture only. Nothing is transcribed until a face event asks for
+            # a window, which is what keeps this from being a recording of the
+            # whole day.
+            return True
         self._thread = threading.Thread(target=self._run, name=f"transcriber-{self.user_id[:6]}",
                                         daemon=True)
         self._thread.start()
