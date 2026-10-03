@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const { protect } = require('../middleware/auth');
+const { frameAccess, issueFrameToken, FRAME_TOKEN_MINUTES } = require('../middleware/frameAccess');
 
 const router = express.Router();
 
@@ -44,20 +45,35 @@ async function pipeFrame(req, res, url, missing) {
   }
 }
 
+// GET /api/detection/image-token — a short-lived, frame-scope-only credential
+// for the web's <img> tags, which cannot send an Authorization header. Issued to
+// the logged-in caller for themselves; it grants no more than the session it
+// came from, and expires in an hour.
+router.get('/image-token', protect, (req, res) => {
+  res.json({
+    token: issueFrameToken(req.user._id),
+    expires_in: FRAME_TOKEN_MINUTES * 60,
+  });
+});
+
 // GET /api/detection/keyframes/:id/image — serve keyframe image (binary pipe)
-// Unprotected because standard <img> tags cannot send Authorization headers
+// Served only to the person the frame was captured from, a caregiver linked to
+// them, or the AI backend. These two routes sit before router.use(protect)
+// because an <img> tag cannot send an Authorization header, which previously
+// meant they were open to anyone holding a keyframe id; frameAccess takes the
+// credential from the header OR from ?t= and checks who owns the frame.
 // ?w= asks the AI backend for a width-bounded copy. A list that draws these
 // 100px wide was being sent the full 1280x720 capture: 196 frames is 16 MB and
 // 19 s at a browser's six connections. Only the whitelisted widths over there
 // are honoured, so this cannot be used to generate arbitrary files.
-router.get('/keyframes/:id/image', (req, res) => {
+router.get('/keyframes/:id/image', frameAccess, (req, res) => {
   const w = /^\d+$/.test(String(req.query.w || '')) ? `?w=${req.query.w}` : '';
   return pipeFrame(req, res, `${AI_BACKEND}/api/keyframes/${req.params.id}/image${w}`, 'Keyframe');
 });
 
-// GET /api/detection/medication_frames/:id/image — serve medication frame image (binary pipe)
-// Unprotected because <img> tags cannot send Authorization headers
-router.get('/medication_frames/:id/image', (req, res) =>
+// GET /api/detection/medication_frames/:id/image — serve medication frame image
+// Same ownership check as above.
+router.get('/medication_frames/:id/image', frameAccess, (req, res) =>
   pipeFrame(req, res, `${AI_BACKEND}/api/keyframes/medication_frames/${req.params.id}/image`,
     'Medication frame'));
 

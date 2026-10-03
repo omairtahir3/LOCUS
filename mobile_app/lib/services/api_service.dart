@@ -51,6 +51,12 @@ class ApiService {
   static Map<String, dynamic>? get user => _user;
   static String get userRole => _user?['role'] ?? _user?['user']?['role'] ?? 'user';
 
+  /// Frame images are authorised now, and Flutter's Image.network DOES accept
+  /// headers, so the phone sends the session token in the header and never puts
+  /// a credential in a URL the way the web has to.
+  static Map<String, String> get imageHeaders =>
+      _token == null ? const {} : {'Authorization': 'Bearer $_token'};
+
   static Map<String, String> get _headers => {
     'Content-Type': 'application/json',
     if (_token != null) 'Authorization': 'Bearer $_token',
