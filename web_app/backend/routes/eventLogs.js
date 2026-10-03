@@ -3,6 +3,36 @@ const router = express.Router();
 const EventLog = require('../models/EventLog');
 const { protect: auth } = require('../middleware/auth');
 
+// POST /api/event-logs/ask
+// Answers a question in the wearer's own words ("where did I last put my
+// keys?"). The agent itself lives in utils/memoryAgent.js; this is only auth,
+// the same caregiver resolution as memory-search, and the shape the page reads.
+//
+// answer === null means no LLM was reachable. The page falls back to the
+// substring filter it used before rather than showing an error, because a
+// typed search must keep working when a free-tier key is rate limited.
+router.post('/ask', auth, async (req, res) => {
+  try {
+    let userId = req.user.id;
+    if (req.user.role === 'caregiver') {
+      if (req.query.userId) {
+        userId = req.query.userId;
+      } else {
+        const User = require('../models/User');
+        const caregiver = await User.findById(req.user.id);
+        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
+          userId = caregiver.monitoring_users[0];
+        }
+      }
+    }
+    const { ask } = require('../utils/memoryAgent');
+    res.json(await ask(req.body?.question, userId));
+  } catch (error) {
+    console.error('Error answering memory question:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET /api/event-logs/memory-search
 // Returns medication_intake, social_interaction and activity, excluding rejected
 router.get('/memory-search', auth, async (req, res) => {

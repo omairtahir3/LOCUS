@@ -42,7 +42,12 @@ KEYFRAME_TTL_HOURS = int(os.environ.get("KEYFRAME_TTL_HOURS", 36))
 # history, the frame that gets kept can PRE-DATE the detector's confirmation --
 # which is what we want, since a pill is clearest a moment before the sequence
 # completes.
-EVENT_WINDOW_SECONDS = float(os.environ.get("EVENT_WINDOW_SECONDS", 3.0))
+# FE-3 asks for 5-10 s around the event; 3.0 sat under that floor. At
+# CAPTURE_FPS=5 this is 30 frames of look-back. Raising it alone is not
+# enough -- EVENT_WINDOW_MAX_BYTES trims the window from the oldest end,
+# so the byte budget below has to admit the full span or the seconds here
+# are silently reduced.
+EVENT_WINDOW_SECONDS = float(os.environ.get("EVENT_WINDOW_SECONDS", 6.0))
 
 # Per-event-kind cooldown. Separate per kind so a chatty detector cannot starve
 # a quiet one: a stream of activity frames must never crowd out the one
@@ -78,7 +83,12 @@ EVENT_BLUR_RATIO = float(os.environ.get("EVENT_BLUR_RATIO", 0.6))
 # 10 FPS is 27 MB of 640x480 frames but 186 MB at 1080p. Frames are dropped from
 # the oldest end once the budget is hit, so the window shortens on a
 # high-resolution camera rather than exhausting memory on a long session.
-EVENT_WINDOW_MAX_BYTES = int(os.environ.get("EVENT_WINDOW_MAX_BYTES", 64 * 1024 * 1024))
+# 64 MB held only 24 of the 30 frames EVENT_WINDOW_SECONDS now asks for at
+# 720p (2.64 MB a frame), which capped the real window at 4.8 s -- under
+# the FE-3 floor, with nothing logged to say so. 96 MB covers the full 6 s
+# up to ~3.2 MB a frame. Above that (1080p is 6.2 MB) the window still
+# shortens, which is the intended trade: bounded memory over a long window.
+EVENT_WINDOW_MAX_BYTES = int(os.environ.get("EVENT_WINDOW_MAX_BYTES", 96 * 1024 * 1024))
 
 # A frame this dark holds no evidence and must not be saved, whatever triggered
 # it. Sharpness does not catch this: a nearly black frame can have perfectly
