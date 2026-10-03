@@ -25,6 +25,9 @@ const mongoose = require('mongoose');
 const EventLog = require('../models/EventLog');
 const { completeJSON, isConfigured } = require('./llmClient');
 const { timeWords, dateWords } = require('./friendly');
+// The same guard the medication notifier uses. A dose the camera could not
+// see is not a dose that was skipped, and the model writes "missed" anyway.
+const { NOT_MISSED } = require('./llmAgent');
 
 const INTENTS = [
   'item_last_location',
@@ -105,7 +108,10 @@ What you must not do:
   is shown next to your answer, so say they can see the spot in the photo.
 - Never change or invent a time, a date or a count. Use only the notes given, in the words given.
 - Never mention a belonging, a person, a room or an event that is not in the notes.
-- If the notes say nothing was found, say plainly that there is no record of it. Never fill the gap.`;
+- If the notes say nothing was found, say plainly that there is no record of it. Never fill the gap.
+- "the camera was off" means the app could not SEE the dose. It does NOT mean the dose was missed.
+  Never write "missed", "skipped" or "forgot" unless the notes say so in those words.
+- When a dose was taken, give the time it was TAKEN, which the notes state, not the time it was due.`;
 
 const idForms = userId => {
   const forms = [userId, String(userId)];
@@ -261,7 +267,20 @@ async function execute(r, userId) {
       .sort({ scheduled_time: -1 }).limit(10).toArray();
     const meds = await db.collection('medications').find({ user_id: { $in: ids } }).toArray();
     const nameOf = id => (meds.find(m => String(m._id) === String(id)) || {}).name || 'your medicine';
-    return { rows: logs.map(l => ({ at: l.scheduled_time, taken_at: l.taken_at, status: l.status, medicine: nameOf(l.medication_id) })) };
+    // `at` is when it actually happened, not when it was due: a dose scheduled
+    // for 1:30 and taken at 1:36 was reported back as 1:30. keyframe_id is on
+    // the log and was being dropped, so the answer had no picture to show even
+    // though the intake was verified visually at 0.97 confidence.
+    return {
+      rows: logs.map(l => ({
+        at: l.taken_at || l.scheduled_time,
+        scheduled_at: l.scheduled_time,
+        taken_at: l.taken_at || null,
+        status: l.status,
+        medicine: nameOf(l.medication_id),
+        keyframe_id: l.keyframe_id || null,
+      })),
+    };
   }
 
   if (r.intent === 'activity_recall') {
@@ -301,7 +320,22 @@ function template(r, rows, need) {
     const taken = rows.filter(x => x.status === 'taken').length;
     // "so far today": the window ends at now, so a dose due this evening is
     // deliberately NOT counted as outstanding.
-    return `${taken} of your ${rows.length} dose${rows.length === 1 ? '' : 's'} so far today ${taken === 1 ? 'is' : 'are'} recorded as taken.`;
+    // One dose needs no ratio: "0 of your 1 dose so far today are recorded as
+    // taken" is both awkward and ungrammatical. Say what happened instead.
+    if (rows.length === 1) {
+      const x = rows[0];
+      if (x.status === 'taken') return `You took ${x.medicine} at ${timeWords(x.taken_at || x.at)}.`;
+      if (x.status === 'camera_off') {
+        return `Your ${x.medicine} dose at ${timeWords(x.scheduled_at)} was not seen by the camera, so there is no record either way.`;
+      }
+      if (x.status === 'scheduled') return `Your ${x.medicine} dose at ${timeWords(x.scheduled_at)} is not recorded as taken yet.`;
+      return `Your ${x.medicine} dose at ${timeWords(x.scheduled_at)} is recorded as ${x.status}.`;
+    }
+    const head = `${taken} of your ${rows.length} dose${rows.length === 1 ? '' : 's'} so far today ${taken === 1 ? 'is' : 'are'} recorded as taken.`;
+    // The time it was TAKEN, which is what someone asking actually wants, and
+    // which is minutes off the time it was due.
+    const one = rows.find(x => x.status === 'taken' && x.taken_at);
+    return one ? `${head} You took ${one.medicine} at ${timeWords(one.taken_at)}.` : head;
   }
   return `I found ${rows.length} thing${rows.length === 1 ? '' : 's'} in that period, most recently on ${when(rows[0].at)}.`;
 }
@@ -323,7 +357,19 @@ async function phrase(question, r, rows, need) {
     // three doses that were never recorded.
     const takenNotes = rows.filter(x => x.status === 'taken').length;
     notes = `${takenNotes} of ${rows.length} doses due so far today are recorded as taken, and ${rows.length - takenNotes} are not. `
-      + rows.map(x => `${x.medicine}, due ${when(x.at)}, recorded as ${x.status}`).join('. ');
+      + rows.map(x => {
+        // Only the time it was TAKEN. Carrying the due time as well let the
+        // model offer 1:30 for a dose taken at 1:36 and still pass the
+        // invented-time check, because both numbers were in the notes.
+        if (x.status === 'taken') return `${x.medicine} taken at ${timeWords(x.taken_at || x.at)}`;
+        // No 'not missed' wording here: NOT_MISSED would then match the notes
+        // and disarm the guard below. That rule lives in ANSWER_RULES instead.
+        if (x.status === 'camera_off') {
+          return `${x.medicine}, due ${when(x.scheduled_at)}, the camera was off and could not see it`;
+        }
+        if (x.status === 'scheduled') return `${x.medicine}, due ${when(x.scheduled_at)}, not yet recorded`;
+        return `${x.medicine}, due ${when(x.scheduled_at)}, recorded as ${x.status}`;
+      }).join('. ');
   } else if (r.intent === 'person_last_interaction') {
     notes = `Last seen with ${rows[0].person} on ${when(rows[0].at)}.`;
   } else if (r.intent === 'activity_recall') {
@@ -355,7 +401,9 @@ async function phrase(question, r, rows, need) {
     // and '\b' in a quoted string are the BACKSPACE escape, so the built
     // regex matched U+0008 and rejected every answer, correct ones included.
     const numbers = out.answer.match(/\d+/g) || [];
-    if (takenN < rows.length && !numbers.includes(String(takenN))) {
+    // Only on a day with more than one dose. With a single dose there is no
+    // ratio to collapse, and demanding the number rejected the clearer answer.
+    if (rows.length > 1 && takenN < rows.length && !numbers.includes(String(takenN))) {
       console.warn('[memoryAgent] medicine answer dropped the count on a partial day, using template');
       return fallback;
     }
@@ -365,6 +413,15 @@ async function phrase(question, r, rows, need) {
   // would have the person stop looking for something the app had found.
   if (rows.length && NO_RECORD.test(out.answer)) {
     console.warn('[memoryAgent] model denied records it was given, using template');
+    return fallback;
+  }
+  // A dose the camera could not see is not a dose that was skipped.
+  // Checked against the row statuses, not the notes text: the notes used to
+  // explain that camera_off is not a miss, which made NOT_MISSED match them
+  // and let the guard pass anything. Only these two statuses mean it.
+  const reallyMissed = rows.some(x => x.status === 'missed' || x.status === 'skipped');
+  if (r.intent === 'medication_check' && NOT_MISSED.test(out.answer) && !reallyMissed) {
+    console.warn('[memoryAgent] model called a dose missed when the notes did not, using template');
     return fallback;
   }
   // A time the notes never mentioned is an invented one.
@@ -402,7 +459,9 @@ async function ask(question, userId) {
     item: r.item ? r.item.name : null,
     person: r.person ? r.person.name : null,
     rows,
-    keyframe_id: rows.length ? rows[0].keyframe_id || null : null,
+    // The newest row is not always the one with a picture: today's latest dose
+    // was a camera_off with no frame, while the one actually taken had one.
+    keyframe_id: (rows.find(x => x.keyframe_id) || {}).keyframe_id || null,
     // The page shows the same answer either way; this is for diagnosing a bad
     // answer later, and for the eval suite to report model vs keyword coverage.
     parsed_by: fromModel ? 'llm' : 'keywords',
