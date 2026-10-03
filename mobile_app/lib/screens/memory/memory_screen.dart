@@ -56,6 +56,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
   bool _listening = false;
   bool _asking = false;
   Map<String, dynamic>? _answer;
+  bool _answerImageBroken = false;
 
   // A memory can appear while the page is open: the wearer puts something down
   // in the next room and the sighting is logged seconds later. The web polls
@@ -148,7 +149,10 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
   Future<void> _askAgent(String question) async {
     final q = question.trim();
     if (q.isEmpty) return;
-    setState(() => _asking = true);
+    setState(() {
+      _asking = true;
+      _answerImageBroken = false;
+    });
     String? selectedId = widget.targetUserId;
     if (selectedId == null && ApiService.userRole == 'caregiver') {
       selectedId = SelectedUserService().selectedUser?['_id']?.toString();
@@ -257,7 +261,10 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
   Widget _buildAnswerCard() {
     final a = _answer!;
     final text = a['answer']?.toString() ?? '';
-    final kf = a['keyframe_id']?.toString();
+    // The backend withholds an id once the frame is past its retention window,
+    // so a null here means the picture is genuinely gone rather than slow. The
+    // flag below covers the race where it goes between answer and fetch.
+    final kf = _answerImageBroken ? null : a['keyframe_id']?.toString();
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(12),
@@ -282,12 +289,17 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                   fit: BoxFit.cover,
                   // A memory routinely outlives its picture under the keyframe
                   // retention window, so a gone frame is normal, not an error.
-                  errorBuilder: (_, __, ___) => Container(
-                    width: 72,
-                    height: 72,
-                    color: AppColors.border,
-                    child: const Icon(Icons.image_not_supported_outlined, size: 20),
-                  ),
+                  // Nothing is drawn in its place: a grey box with a crossed-out
+                  // icon still reads as a photo that failed, and the answer has
+                  // already been written without reference to one.
+                  errorBuilder: (_, __, ___) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && !_answerImageBroken) {
+                        setState(() => _answerImageBroken = true);
+                      }
+                    });
+                    return const SizedBox.shrink();
+                  },
                 ),
               ),
             ),

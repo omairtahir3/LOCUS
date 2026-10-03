@@ -45,6 +45,11 @@ export default function MemorySearch() {
   // which is unchanged. Pressing Enter or speaking sends the question to the
   // agent, which answers from the whole record rather than the rows loaded.
   const [answer, setAnswer] = useState(null);
+  // A frame can be deleted between the answer being written and the image being
+  // fetched, and an <img> that 404s leaves an empty box that reads as a photo
+  // which failed to load rather than one that no longer exists. The backend
+  // already withholds ids past the retention window; this is the race.
+  const [answerImageBroken, setAnswerImageBroken] = useState(false);
   const [asking, setAsking] = useState(false);
   const [listening, setListening] = useState(false);
   // ponytail: the browser's own SpeechRecognition, no speech SDK and no audio
@@ -58,6 +63,7 @@ export default function MemorySearch() {
     const text = String(q || '').trim();
     if (!text) return;
     setAsking(true);
+    setAnswerImageBroken(false);
     try {
       const res = await eventLogsAPI.ask(text);
       setAnswer(res.data && res.data.answer ? res.data : null);
@@ -391,11 +397,12 @@ export default function MemorySearch() {
               padding: 12, marginBottom: 12,
             }}
           >
-            {answer.keyframe_id && (
+            {answer.keyframe_id && !answerImageBroken && (
               <img
                 src={detectionAPI.getKeyframeImage(answer.keyframe_id, 240)}
                 alt=""
                 loading="lazy"
+                onError={() => setAnswerImageBroken(true)}
                 onClick={() => setLightbox({
                   url: detectionAPI.getKeyframeImage(answer.keyframe_id),
                   title: answer.answer,
@@ -412,7 +419,7 @@ export default function MemorySearch() {
               </div>
               {/* The place is deliberately absent: nothing in the record says
                   which room it was, so the photograph is the answer to "where". */}
-              {answer.keyframe_id && (
+              {answer.keyframe_id && !answerImageBroken && (
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
                   Tap the photo to see the spot.
                 </div>
