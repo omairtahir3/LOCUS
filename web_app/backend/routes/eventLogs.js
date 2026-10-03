@@ -25,8 +25,17 @@ router.post('/ask', auth, async (req, res) => {
         }
       }
     }
+    // A caregiver reading about someone else must not be told "you put your
+    // keys down". The subject's name is looked up only when it is NOT the
+    // person asking, so the ordinary case costs no extra query.
+    let subjectName = null;
+    if (String(userId) !== String(req.user.id)) {
+      const User = require('../models/User');
+      const subject = await User.findById(userId).select('name');
+      subjectName = subject?.name || null;
+    }
     const { ask } = require('../utils/memoryAgent');
-    res.json(await ask(req.body?.question, userId));
+    res.json(await ask(req.body?.question, userId, { subjectName }));
   } catch (error) {
     console.error('Error answering memory question:', error);
     res.status(500).json({ message: 'Server error' });
