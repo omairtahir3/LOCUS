@@ -25,7 +25,10 @@
 
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const axios = require('axios');
 const User = require('../models/User');
+
+const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
 
 const FRAME_SCOPE = 'frame';
 const FRAME_TOKEN_MINUTES = 60;
@@ -74,7 +77,40 @@ async function frameOwner(keyframeId) {
   return (await first('eventlogs', { keyframe_id: keyframeId }))
     || (await first('medication_logs', { keyframe_id: keyframeId }))
     || (await first('keyframemetas', { keyframe_id: keyframeId }))
-    || (await first('relationships', { representative_keyframe_id: keyframeId }));
+    || (await first('relationships', { representative_keyframe_id: keyframeId }))
+    || (await ownerFromAiBackend(keyframeId));
+}
+
+// Cheap because it is only ever reached for a frame MongoDB cannot account for,
+// and the answer is cached: an owner does not change.
+const ownerCache = new Map();
+const OWNER_CACHE_MAX = 500;
+
+/**
+ * The last resort, for frames whose owner exists only on the AI backend's disk.
+ *
+ * A medicine intake saves three phase frames per pass, and no event row points
+ * at them: their owner is in the json sidecar beside the image. Resolving only
+ * from MongoDB meant that of the six frames from one intake, the single one a
+ * medication_log happened to reference was authorised and the other five were
+ * refused as unowned, so the audit page showed one picture and five blanks.
+ */
+async function ownerFromAiBackend(keyframeId) {
+  if (ownerCache.has(keyframeId)) return ownerCache.get(keyframeId);
+  let owner = null;
+  try {
+    const res = await axios.get(
+      `${AI_BACKEND}/api/keyframes/medication_frames/${encodeURIComponent(keyframeId)}/owner`,
+      { timeout: 2000, validateStatus: null });
+    if (res.status === 200 && res.data?.user_id) owner = String(res.data.user_id);
+  } catch {
+    // Unreachable or no such frame. Returning null denies, which is the right
+    // way for this to fail: an owner we cannot establish is not one we can
+    // check against.
+  }
+  if (ownerCache.size >= OWNER_CACHE_MAX) ownerCache.clear();
+  ownerCache.set(keyframeId, owner);
+  return owner;
 }
 
 /** True when `viewerId` is the owner, or a caregiver linked to them. */
@@ -115,4 +151,4 @@ async function frameAccess(req, res, next) {
   }
 }
 
-module.exports = { frameAccess, issueFrameToken, frameOwner, mayView, viewerIdFrom, FRAME_TOKEN_MINUTES };
+module.exports = { frameAccess, issueFrameToken, frameOwner, ownerFromAiBackend, mayView, viewerIdFrom, FRAME_TOKEN_MINUTES };

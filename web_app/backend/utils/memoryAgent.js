@@ -104,8 +104,9 @@ How to write:
 
 What you must not do:
 - Never state WHERE something is. You are not told the room, the surface or the furniture, so naming
-  one would be a guess. Give the TIME it was put down and nothing more about the place. A photograph
-  is shown next to your answer, so say they can see the spot in the photo.
+  one would be a guess. Give the TIME it was put down and nothing more about the place.
+- Mention the photograph ONLY if the notes say there is one. When the notes say the photograph is no
+  longer kept, give the time and do not refer to a picture at all. Never apologise for its absence.
 - Never change or invent a time, a date or a count. Use only the notes given, in the words given.
 - Never mention a belonging, a person, a room or an event that is not in the notes.
 - If the notes say nothing was found, say plainly that there is no record of it. Never fill the gap.
@@ -215,6 +216,24 @@ function resolve(parsed, vocab) {
 
 const timeFilter = w => (w ? { timestamp: { $gte: w.from, $lte: w.to } } : {});
 
+// A keyframe is deleted once it passes the retention window (FE-8), so a memory
+// routinely outlives its picture: the 21 September sighting of the car keys is
+// 312 hours old and its frame went days ago. Handing that id to the page anyway
+// rendered an empty box under "You put them down at 3:38 AM", which reads as a
+// photo that failed to load rather than one that no longer exists.
+//
+// Decided by AGE rather than by asking: the AI backend answers 405 to HEAD, so
+// checking would mean downloading a frame per answer to find out whether there
+// is a frame. A flagged event is exempt from the sweep, so it keeps its id and
+// the page's own error handling covers it.
+const KEYFRAME_TTL_HOURS = Number(process.env.KEYFRAME_TTL_HOURS || 36);
+
+function frameStillExists(at, isFlagged = false) {
+  if (isFlagged) return true;
+  if (!at) return false;
+  return (Date.now() - new Date(at).getTime()) < KEYFRAME_TTL_HOURS * 3600e3;
+}
+
 /** Phase 3 (cont): one deterministic query per intent. Every one is bounded by
  *  user_id and event_type, which the {user_id, event_type, timestamp} index
  *  covers, and sorted newest first. */
@@ -246,7 +265,11 @@ async function execute(r, userId) {
     };
     const rows = await EventLog.find(q).sort({ timestamp: -1 })
       .limit(r.intent === 'item_last_location' ? 1 : 10).lean();
-    return { rows: rows.map(e => ({ at: e.timestamp, keyframe_id: e.keyframe_id, item: r.item.name })) };
+    return { rows: rows.map(e => ({
+      at: e.timestamp,
+      keyframe_id: frameStillExists(e.timestamp, e.is_flagged) ? e.keyframe_id : null,
+      item: r.item.name,
+    })) };
   }
 
   if (r.intent === 'person_last_interaction') {
@@ -256,7 +279,11 @@ async function execute(r, userId) {
       event_type: 'social_interaction',
       person_id: { $in: [r.person.id, String(r.person.id), ...(mongoose.Types.ObjectId.isValid(r.person.id) ? [new mongoose.Types.ObjectId(r.person.id)] : [])] },
     }).sort({ timestamp: -1 }).limit(1).lean();
-    return { rows: rows.map(e => ({ at: e.timestamp, keyframe_id: e.keyframe_id, person: r.person.name })) };
+    return { rows: rows.map(e => ({
+      at: e.timestamp,
+      keyframe_id: frameStillExists(e.timestamp, e.is_flagged) ? e.keyframe_id : null,
+      person: r.person.name,
+    })) };
   }
 
   if (r.intent === 'medication_check') {
@@ -278,7 +305,7 @@ async function execute(r, userId) {
         taken_at: l.taken_at || null,
         status: l.status,
         medicine: nameOf(l.medication_id),
-        keyframe_id: l.keyframe_id || null,
+        keyframe_id: frameStillExists(l.taken_at || l.scheduled_time) ? (l.keyframe_id || null) : null,
       })),
     };
   }
@@ -292,7 +319,11 @@ async function execute(r, userId) {
       event_type: 'activity',
       'details.action': { $nin: ['scene_change', 'camera_heartbeat', 'coverage', 'scene_session', 'activity_session', null] },
     }).sort({ timestamp: -1 }).limit(10).lean();
-    return { rows: rows.map(e => ({ at: e.timestamp, keyframe_id: e.keyframe_id, action: e.details && e.details.action })) };
+    return { rows: rows.map(e => ({
+      at: e.timestamp,
+      keyframe_id: frameStillExists(e.timestamp, e.is_flagged) ? e.keyframe_id : null,
+      action: e.details && e.details.action,
+    })) };
   }
 
   return { rows: [], need: 'intent' };
@@ -312,7 +343,9 @@ function template(r, rows, need, subject) {
   const they = subject || 'You';
   const their = subject ? 'their' : 'your';
   if (r.intent === 'item_last_location') {
-    return `${they} put ${their} ${rows[0].item.toLowerCase()} down on ${when(rows[0].at)}. The photo shows the spot.`;
+    const head = `${they} put ${their} ${rows[0].item.toLowerCase()} down on ${when(rows[0].at)}.`;
+    // Only offered when there is actually something to look at.
+    return rows[0].keyframe_id ? `${head} The photo shows the spot.` : head;
   }
   if (r.intent === 'item_history') {
     // Phrased to avoid subject-verb agreement: "your car keys was put down" is
@@ -379,8 +412,15 @@ async function phrase(question, r, rows, need, subject) {
   } else if (r.intent === 'activity_recall') {
     notes = rows.map(x => `${x.action} on ${when(x.at)}`).join('. ');
   } else {
+    // Whether a photograph exists changes what the answer may promise. A frame
+    // past its retention window is gone, and an answer saying "the photo shows
+    // the spot" beside an empty box is worse than one that never mentions it.
+    const anyPhoto = rows.some(x => x.keyframe_id);
     notes = rows.map(x => `${x.item} put down on ${when(x.at)}`).join('. ')
-      + '. A photograph of each spot is shown beside your answer. The room is NOT known.';
+      + (anyPhoto
+        ? '. A photograph of the spot is shown beside your answer. The room is NOT known.'
+        : '. The photograph of the spot is no longer kept, so there is nothing to look at. '
+          + 'The room is NOT known.');
   }
 
   // A caregiver asking about someone else was told "You put the keys down",
@@ -447,6 +487,13 @@ ${notes}`,
     console.warn('[memoryAgent] model called a dose missed when the notes did not, using template');
     return fallback;
   }
+  // Offering a photograph that does not exist. The page shows nothing there, so
+  // "the photo shows the spot" sends someone looking for an image that is gone.
+  if (!rows.some(x => x.keyframe_id) && /\b(photo|photograph|picture|image)\b/i.test(out.answer)) {
+    console.warn('[memoryAgent] model offered a photo that is past retention, using template');
+    return fallback;
+  }
+
   // A time the notes never mentioned is an invented one.
   for (const t of out.answer.match(/\b\d{1,2}:\d{2}\b/g) || []) {
     if (!notes.includes(t)) {
@@ -495,4 +542,4 @@ async function ask(question, userId, { subjectName = null } = {}) {
   };
 }
 
-module.exports = { ask, vocabulary, parse, localParse, resolve, execute, phrase, template, resolveRange, INTENTS, PLACE_WORDS };
+module.exports = { ask, vocabulary, parse, localParse, resolve, frameStillExists, execute, phrase, template, resolveRange, INTENTS, PLACE_WORDS };

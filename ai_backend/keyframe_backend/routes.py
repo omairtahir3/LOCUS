@@ -341,6 +341,28 @@ async def list_medication_frames(limit: int = 100, user_id: str = ""):
     return evidence
 
 
+@router.get("/medication_frames/{evidence_id}/owner")
+async def get_medication_frame_owner(evidence_id: str):
+    """Who a medicine evidence frame belongs to.
+
+    The Node gateway authorises these images by resolving the frame's owner, and
+    it can only look in MongoDB. A medicine phase frame is referenced by no
+    event row: its owner lives in the json sidecar beside the image, written by
+    MedicationEvidenceStorage. So of the six frames from one intake, only the
+    one the medication_log happens to point at could be authorised, and the
+    other five were refused as unowned. This is how the gateway asks.
+
+    Returns the owner only. Nothing about the medicine, the dose or the
+    detection, because authorising an image needs none of it.
+    """
+    storage = _get_evidence_storage()
+    meta = storage.load_metadata(evidence_id) or {}
+    user_id = meta.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=404, detail="Evidence frame not found")
+    return {"user_id": str(user_id)}
+
+
 @router.get("/medication_frames/{evidence_id}/image")
 async def get_medication_frame_image(evidence_id: str, request: Request):
     """
