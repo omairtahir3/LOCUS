@@ -375,6 +375,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                             child: evId.toString().isNotEmpty
                                 ? Image.network(
                                     ApiService.medicationFrameImageUrl(evId.toString()),
+                                    headers: ApiService.imageHeaders,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) => Container(
                                       color: AppColors.borderLight,
@@ -467,6 +468,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
             child: evId.toString().isNotEmpty
                 ? Image.network(
                     ApiService.medicationFrameImageUrl(evId.toString()),
+                    headers: ApiService.imageHeaders,
                     fit: BoxFit.contain,
                     height: 200,
                     width: double.infinity,
@@ -617,6 +619,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                         borderRadius: BorderRadius.circular(8),
                         child: Image.network(
                           '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
+                          headers: ApiService.imageHeaders,
                           fit: BoxFit.contain,
                           height: 250,
                         ),
@@ -692,6 +695,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
                   child: Image.network(
                     '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
+                    headers: ApiService.imageHeaders,
                     height: 200,
                     fit: BoxFit.cover,
                     errorBuilder: (c, e, s) => const SizedBox.shrink(),

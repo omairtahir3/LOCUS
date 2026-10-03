@@ -199,6 +199,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                 child: Image.network(
                   // The 240px thumbnail, not the 125 kB frame: this is a phone.
                   ApiService.keyframeImageUrl(kf, width: 240),
+                  headers: ApiService.imageHeaders,
                   width: 72,
                   height: 72,
                   fit: BoxFit.cover,
@@ -275,6 +276,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
               borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
               child: Image.network(
                 imageUrl,
+                headers: ApiService.imageHeaders,
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => Container(
                   padding: const EdgeInsets.all(32),
@@ -740,6 +742,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                             child: obj.imageUrl != null
                                 ? Image.network(
                                     obj.thumbUrl ?? obj.imageUrl!,
+                                    headers: ApiService.imageHeaders,
                                     width: double.infinity,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) => Container(
@@ -837,6 +840,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                           borderRadius: BorderRadius.circular(10),
                           child: Image.network(
                             m.thumbUrl ?? m.imageUrl!,
+                            headers: ApiService.imageHeaders,
                             fit: BoxFit.cover,
                             errorBuilder: (c, e, s) => Icon(m.icon, color: m.color, size: 20),
                           ),

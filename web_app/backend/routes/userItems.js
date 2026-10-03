@@ -252,6 +252,9 @@ router.get('/:id/last-seen', auth, async (req, res) => {
       return {
         timestamp: ev.timestamp,
         keyframe_id: ev.keyframe_id,
+        // No client reads this yet. When one does: that route is authorised now,
+        // so a browser <img> needs ?t= from /api/detection/image-token, and a
+        // Flutter Image.network needs the Authorization header.
         image_url: ev.keyframe_id ? `/api/detection/keyframes/${ev.keyframe_id}/image` : null,
         location: ev.location || null,           // null when no fresh GPS fix existed at sighting
         similarity: hit.exemplar_similarity ?? null,
