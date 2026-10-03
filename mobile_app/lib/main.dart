@@ -199,7 +199,9 @@ class _MainShellState extends State<MainShell> {
           HomeScreen(key: _homeScreenKey),
           MedicationScreen(key: _medScreenKey),
           const ActivityScreen(),
-          MemoryScreen(key: _memoryScreenKey),
+          // isVisible gates its 15 s refresh: an IndexedStack keeps every tab
+          // mounted, so without this it would poll while the user is elsewhere.
+          MemoryScreen(key: _memoryScreenKey, isVisible: _currentIndex == 3),
           const _NormalUserMoreScreen(),
         ];
 
