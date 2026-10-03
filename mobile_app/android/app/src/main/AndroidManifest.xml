@@ -11,6 +11,12 @@
          plugin requests it on its first initialize() and the microphone button
          stays hidden if it is refused, so typing is unaffected. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- A voice call with a caregiver (D FE-4). RECORD_AUDIO above is shared
+         with speech to text. These two are what WebRTC needs on top: routing
+         the call to the earpiece or speaker, and seeing the network change
+         under it so a call can survive moving between wifi and mobile. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Declared, not required: a phone with no step sensor still installs
          and simply shows no step count. -->
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />

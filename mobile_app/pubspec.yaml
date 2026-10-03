@@ -69,6 +69,15 @@ dependencies:
   # on the handset. Set onDevice: true in _listen() to require local
   # recognition, accepting that the attempt fails where it is unavailable.
   speech_to_text: ^7.0.0
+  # ponytail: Flutter has no WebRTC of its own, so this is the only route to the
+  # implementation the PLATFORM already ships. It is a binding over the same
+  # libwebrtc the browser uses, which is why the phone and the web app can call
+  # each other without either side knowing what the other is.
+  #
+  # Audio only here. The signalling runs over the Socket.IO connection the app
+  # already holds, so no calling service and no second server are involved, and
+  # the audio never passes through the backend at all.
+  flutter_webrtc: ^1.6.2+hotfix.3
 
 dev_dependencies:
   flutter_test:

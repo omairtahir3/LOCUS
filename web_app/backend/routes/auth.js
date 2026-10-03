@@ -112,6 +112,23 @@ router.get('/me', protect, (req, res) => {
 });
 
 
+// GET /api/auth/my-caregivers — who watches this account, with names.
+//
+// /me already returns caregiver_ids, but as bare ObjectIds. A voice call needs
+// a name to put on the ringing screen, and someone in an emergency should not
+// be looking at an id. Looked up live rather than cached on the client, because
+// an account can gain a caregiver after the app started.
+router.get('/my-caregivers', protect, async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id)
+      .populate('caregiver_ids', 'name email role');
+    res.json(me?.caregiver_ids || []);
+  } catch (error) {
+    console.error('Error listing caregivers:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /api/auth/link-caregiver  — user links a caregiver to their account
 router.post('/link-caregiver', protect, async (req, res) => {
   try {

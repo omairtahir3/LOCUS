@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/voice_call_service.dart';
 
 class FamilyDetailScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -61,7 +62,23 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
     final pct = adh?['adherence_percentage'] ?? 0;
 
     return Scaffold(
-      appBar: AppBar(title: Text(name)),
+      appBar: AppBar(
+        title: Text(name),
+        actions: [
+          // The quickest route from "something is wrong" to hearing their
+          // voice. This screen has no emergency state of its own, so the call
+          // is an ordinary one; a call raised FROM an SOS carries the flag and
+          // gets the red treatment in the overlay.
+          IconButton(
+            tooltip: 'Voice call',
+            icon: const Icon(Icons.call),
+            onPressed: () => VoiceCallService().call(
+              widget.user['_id'].toString(),
+              name,
+            ),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _loadData,
         child: SingleChildScrollView(
