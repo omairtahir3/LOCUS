@@ -24,7 +24,7 @@
 const mongoose = require('mongoose');
 const EventLog = require('../models/EventLog');
 const { completeJSON, isConfigured } = require('./llmClient');
-const { timeWords, dateWords } = require('./friendly');
+const { timeWords, dateWords, firstName } = require('./friendly');
 // The same guard the medication notifier uses. A dose the camera could not
 // see is not a dose that was skipped, and the model writes "missed" anyway.
 const { NOT_MISSED } = require('./llmAgent');
@@ -96,7 +96,7 @@ Return ONLY a JSON object: {"answer": "..."}
 
 How to write:
 - One or two short sentences, plain and warm, the way a thoughtful friend would say it. Never clinical.
-- Address them as "you". Normal capitalisation and punctuation.
+- Normal capitalisation and punctuation. Address the reader as the instruction above says.
 - No dashes of any kind as punctuation. Use a comma or a full stop.
 - Belonging names in lower case ("your car keys").
 - Do not guess anyone's gender: use their name or "they/them", never "he" or "she".
@@ -301,21 +301,25 @@ async function execute(r, userId) {
 /** The answer that ships when the model is unreachable or writes something
  *  that fails a guard. Stating the time and pointing at the photo is the whole
  *  useful content, so this is a real answer and not a degraded one. */
-function template(r, rows, need) {
+function template(r, rows, need, subject) {
   if (need === 'item') return "I'm not sure which belonging you mean. You can ask about the things you have enrolled.";
   if (need === 'person') return "I'm not sure who you mean. You can ask about the people you have enrolled.";
   if (need === 'intent') return "I can't answer that one yet. Try asking where you left something, or when you last saw someone.";
   if (!rows.length) return "I don't have a record of that.";
   const when = d => `${dateWords(d)} at ${timeWords(d)}`;
+  // Addressed to whoever is reading. A caregiver asking about a patient was
+  // told "You put your keys down", which they did not do.
+  const they = subject || 'You';
+  const their = subject ? 'their' : 'your';
   if (r.intent === 'item_last_location') {
-    return `You put your ${rows[0].item.toLowerCase()} down on ${when(rows[0].at)}. The photo shows the spot.`;
+    return `${they} put ${their} ${rows[0].item.toLowerCase()} down on ${when(rows[0].at)}. The photo shows the spot.`;
   }
   if (r.intent === 'item_history') {
     // Phrased to avoid subject-verb agreement: "your car keys was put down" is
     // what the obvious wording produces, and half of these names are plural.
-    return `I have ${rows.length} record${rows.length === 1 ? '' : 's'} of your ${rows[0].item.toLowerCase()} being put down, most recently on ${when(rows[0].at)}.`;
+    return `I have ${rows.length} record${rows.length === 1 ? '' : 's'} of ${their} ${rows[0].item.toLowerCase()} being put down, most recently on ${when(rows[0].at)}.`;
   }
-  if (r.intent === 'person_last_interaction') return `You last saw ${rows[0].person} on ${when(rows[0].at)}.`;
+  if (r.intent === 'person_last_interaction') return `${they} last saw ${rows[0].person} on ${when(rows[0].at)}.`;
   if (r.intent === 'medication_check') {
     const taken = rows.filter(x => x.status === 'taken').length;
     // "so far today": the window ends at now, so a dose due this evening is
@@ -343,8 +347,8 @@ function template(r, rows, need) {
 /** Phase 4: the model phrases the rows. The notes are deliberately pre-worded
  *  (times already in words, no ISO dates, no ids) so there is nothing in them
  *  the model could copy out that a person should not read. */
-async function phrase(question, r, rows, need) {
-  const fallback = template(r, rows, need);
+async function phrase(question, r, rows, need, subject) {
+  const fallback = template(r, rows, need, subject);
   if (!isConfigured() || need) return fallback;
 
   const when = d => `${dateWords(d)} at ${timeWords(d)}`;
@@ -379,7 +383,20 @@ async function phrase(question, r, rows, need) {
       + '. A photograph of each spot is shown beside your answer. The room is NOT known.';
   }
 
-  const out = await completeJSON(ANSWER_RULES, `Question: ${question}\n\nNotes (facts already established, write from these only):\n${notes}`,
+  // A caregiver asking about someone else was told "You put the keys down",
+  // which is both wrong and confusing: they did not put them anywhere. The
+  // subject's own name is the only safe way to say it, since guessing a
+  // gender is forbidden and "they" reads oddly when a name is available.
+  const who = subject
+    ? `Write to the person asking ABOUT ${subject}. Call them ${subject}, never "you", and never guess their gender.`
+    : 'Write to the person it happened to. Address them as "you".';
+  const out = await completeJSON(ANSWER_RULES,
+    `${who}
+
+Question: ${question}
+
+Notes (facts already established, write from these only):
+${notes}`,
     ANSWER_SCHEMA, { temperature: 0.3 });
   if (!out) return fallback;
 
@@ -389,6 +406,12 @@ async function phrase(question, r, rows, need) {
     return fallback;
   }
   if (/\b(he|she|him|his|hers?|himself|herself)\b/i.test(out.answer)) return fallback;
+  // Writing ABOUT someone but addressing the reader as the one it happened to
+  // is the same error in reverse, and it reads as if the caregiver did it.
+  if (subject && /\byou(r|rs)?\b/i.test(out.answer)) {
+    console.warn('[memoryAgent] model wrote "you" about a third party, using template');
+    return fallback;
+  }
   // A medicine answer that does not carry the count cannot be trusted to have
   // kept it: "you took your tablets today" came back from a day with one dose
   // taken and three not. Same shape as the mustSay guard in llmAgent.
@@ -441,7 +464,7 @@ async function phrase(question, r, rows, need) {
  * `parsed: null` tells the caller the LLM was unreachable, so the page can
  * fall back to the substring filter it used before.
  */
-async function ask(question, userId) {
+async function ask(question, userId, { subjectName = null } = {}) {
   const q = String(question || '').trim();
   if (!q) return { answer: 'Ask me about something you have put down, or someone you have seen.', intent: 'unknown', rows: [], parsed: null };
 
@@ -452,7 +475,10 @@ async function ask(question, userId) {
   const parsed = fromModel || localParse(q, vocab);
   const r = resolve(parsed, vocab);
   const { rows, need } = await execute(r, userId);
-  const answer = await phrase(q, r, rows, need);
+  // Only a first name reaches the model: it is what a person is called, and a
+  // full name in a one-line answer reads like a medical record.
+  const subject = subjectName ? firstName(subjectName) : null;
+  const answer = await phrase(q, r, rows, need, subject);
   return {
     answer,
     intent: r.intent,

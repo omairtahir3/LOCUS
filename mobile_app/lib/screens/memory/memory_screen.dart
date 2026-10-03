@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/selected_user_service.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 class MemoryScreen extends StatefulWidget {
   final String? targetUserId;
@@ -34,6 +35,65 @@ class _MemoryScreenState extends State<MemoryScreen> {
 
   bool get _isToday => _date != null && DateUtils.isSameDay(_date!, DateTime.now());
 
+  // Asking, as opposed to filtering. Typing still narrows the rows already
+  // loaded, which is unchanged. Submitting the field or speaking sends the
+  // question to the agent, which searches the whole record instead.
+  final _speech = SpeechToText();
+  bool _speechReady = false;
+  bool _listening = false;
+  bool _asking = false;
+  Map<String, dynamic>? _answer;
+
+  Future<void> _initSpeech() async {
+    // Returns false where there is no recognizer or the microphone is refused.
+    // The button is hidden in that case rather than shown and failing.
+    final ok = await _speech.initialize(
+      onError: (_) { if (mounted) setState(() => _listening = false); },
+      onStatus: (st) {
+        if (mounted && st != 'listening') setState(() => _listening = false);
+      },
+    );
+    if (mounted) setState(() => _speechReady = ok);
+  }
+
+  Future<void> _listen() async {
+    if (!_speechReady || _listening) return;
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (r) {
+        if (!r.finalResult) return;
+        _searchCtrl.text = r.recognizedWords;
+        _askAgent(r.recognizedWords);
+      },
+      listenOptions: SpeechListenOptions(
+        // Only the final transcript: a half-recognised question would be sent
+        // to the agent and answered before the sentence was finished.
+        partialResults: false,
+        cancelOnError: true,
+        // Both belong here rather than as arguments to listen(), where they
+        // are deprecated. 3 s of silence ends a question; 12 s caps it.
+        listenFor: const Duration(seconds: 12),
+        pauseFor: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _askAgent(String question) async {
+    final q = question.trim();
+    if (q.isEmpty) return;
+    setState(() => _asking = true);
+    String? selectedId = widget.targetUserId;
+    if (selectedId == null && ApiService.userRole == 'caregiver') {
+      selectedId = SelectedUserService().selectedUser?['_id']?.toString();
+    }
+    final res = await ApiService.askMemory(q, userId: selectedId);
+    if (!mounted) return;
+    setState(() {
+      _answer = res;
+      _asking = false;
+    });
+  }
+
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -60,6 +120,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
     super.initState();
     SelectedUserService().addListener(_onSelectedUserChanged);
     _loadEvents();
+    _initSpeech();
   }
 
   void _onSelectedUserChanged() {
@@ -70,6 +131,8 @@ class _MemoryScreenState extends State<MemoryScreen> {
   void dispose() {
     SelectedUserService().removeListener(_onSelectedUserChanged);
     _searchCtrl.dispose();
+    // Leaving a session running holds the microphone after the screen is gone.
+    if (_listening) _speech.cancel();
     super.dispose();
   }
 
@@ -109,6 +172,74 @@ class _MemoryScreenState extends State<MemoryScreen> {
         );
       }
     }
+  }
+
+  /// The agent's answer, above the filters. It states a TIME and shows a
+  /// PHOTOGRAPH and deliberately names no place: nothing in the record says
+  /// which room it was, so the picture is the answer to "where".
+  Widget _buildAnswerCard() {
+    final a = _answer!;
+    final text = a['answer']?.toString() ?? '';
+    final kf = a['keyframe_id']?.toString();
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (kf != null && kf.isNotEmpty) ...[
+            GestureDetector(
+              onTap: () => _showImagePreview(ApiService.keyframeImageUrl(kf), text),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  // The 240px thumbnail, not the 125 kB frame: this is a phone.
+                  ApiService.keyframeImageUrl(kf, width: 240),
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                  // A memory routinely outlives its picture under the keyframe
+                  // retention window, so a gone frame is normal, not an error.
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 72,
+                    height: 72,
+                    color: AppColors.border,
+                    child: const Icon(Icons.image_not_supported_outlined, size: 20),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(text,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600, height: 1.4)),
+                if (kf != null && kf.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('Tap the photo to see the spot.',
+                        style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () => setState(() => _answer = null),
+            tooltip: 'Dismiss',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 16),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showImagePreview(String imageUrl, String title) {
@@ -216,6 +347,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             group: groupLabel,
             category: 'People',
             imageUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id']) : null,
+            thumbUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id'], width: 240) : null,
             isFlagged: ev['is_flagged'] == true,
             personId: personId,
             location: ev['location'],
@@ -238,6 +370,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             group: groupLabel,
             category: 'Activity',
             imageUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id']) : null,
+            thumbUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id'], width: 240) : null,
             isFlagged: ev['is_flagged'] == true,
             location: ev['location'],
           );
@@ -271,6 +404,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             group: groupLabel,
             category: 'Objects',
             imageUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id']) : null,
+            thumbUrl: ev['keyframe_id'] != null ? ApiService.keyframeImageUrl(ev['keyframe_id'], width: 240) : null,
             isFlagged: ev['is_flagged'] == true,
             location: ev['location'],
             itemNames: itemNames,
@@ -427,27 +561,43 @@ class _MemoryScreenState extends State<MemoryScreen> {
                     child: TextField(
                       controller: _searchCtrl,
                       onChanged: (_) => setState(() {}),
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: _askAgent,
                       decoration: InputDecoration(
-                        hintText: 'Search memories, people, objects...',
+                        hintText: 'Search, or ask where you left something...',
                         prefixIcon: const Icon(Icons.search, size: 20),
                         contentPadding: const EdgeInsets.symmetric(vertical: 10),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(14),
+                  // Hidden where the platform has no recognizer or the
+                  // microphone was refused, so it is never a button that
+                  // does nothing. Typing works either way.
+                  if (_speechReady) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: _listening ? AppColors.danger : AppColors.primary,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: IconButton(
+                        onPressed: _asking ? null : _listen,
+                        tooltip: _listening ? 'Listening' : 'Ask out loud',
+                        icon: Icon(_listening ? Icons.mic : Icons.mic_none,
+                            color: Colors.white, size: 20),
+                      ),
                     ),
-                    child: IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.mic, color: Colors.white, size: 20),
-                    ),
-                  ),
+                  ],
                 ],
               ),
+              if (_asking)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text('Looking through your memories...',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
+                ),
+              if (_answer != null && !_asking) _buildAnswerCard(),
               const SizedBox(height: 10),
               // Filter chips
               SizedBox(
@@ -589,7 +739,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                             borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
                             child: obj.imageUrl != null
                                 ? Image.network(
-                                    obj.imageUrl!,
+                                    obj.thumbUrl ?? obj.imageUrl!,
                                     width: double.infinity,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) => Container(
@@ -686,7 +836,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(10),
                           child: Image.network(
-                            m.imageUrl!,
+                            m.thumbUrl ?? m.imageUrl!,
                             fit: BoxFit.cover,
                             errorBuilder: (c, e, s) => Icon(m.icon, color: m.color, size: 20),
                           ),
@@ -785,6 +935,11 @@ class _MemoryItem {
   final IconData icon;
   final Color color;
   final String? imageUrl;
+  /// The 240px version, for the inline picture. Separate from imageUrl because
+  /// the same value fed BOTH the list thumbnail and the full-size preview, so
+  /// a day of memories pulled a 125 kB frame each over mobile data to render
+  /// them 56px wide. The preview still uses imageUrl.
+  final String? thumbUrl;
   final bool isFlagged;
   final String? personId;
   final Map<String, dynamic>? location;
@@ -793,7 +948,7 @@ class _MemoryItem {
   _MemoryItem({
     required this.id, required this.title, required this.time, 
     required this.icon, required this.color, required this.group,
-    required this.category, this.imageUrl, this.isFlagged = false,
+    required this.category, this.imageUrl, this.thumbUrl, this.isFlagged = false,
     this.personId, this.location, this.itemNames,
   });
 }

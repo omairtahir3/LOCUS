@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode, debugPrint;
 
 class ApiService {
   // Automatically switch between localhost for Web/iOS and 10.0.2.2 for Android emulator
@@ -591,7 +591,11 @@ class ApiService {
   }
 
   static String medicationFrameImageUrl(String frameId) => '$baseUrl/detection/medication_frames/$frameId/image';
-  static String keyframeImageUrl(String frameId) => '$baseUrl/detection/keyframes/$frameId/image';
+  /// `width` asks the backend for a cached thumbnail instead of the full
+  /// frame: 125 kB becomes 6.6 kB, which matters on a phone connection. It
+  /// works for medication frames through this same route as well.
+  static String keyframeImageUrl(String frameId, {int? width}) =>
+      '$baseUrl/detection/keyframes/$frameId/image${width == null ? '' : '?w=$width'}';
 
   // ── Event Logs / Memory Search ──────────────────────────────────────────────
 
@@ -615,6 +619,28 @@ class ApiService {
       return data is List ? data : [];
     }
     return [];
+  }
+
+  /// A question in the wearer's own words: "where did I last put my keys?".
+  /// Answered by the backend's memoryAgent, which understands the question with
+  /// an LLM but finds the facts with a database query, so the answer cannot name
+  /// a place the record does not hold. Returns null on any failure, which the
+  /// caller treats as "keep filtering the rows on screen" rather than an error.
+  static Future<Map<String, dynamic>?> askMemory(String question, {String? userId}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/event-logs/ask${userId == null ? '' : '?userId=$userId'}'),
+        headers: _headers,
+        body: jsonEncode({'question': question}),
+      );
+      if (res.statusCode != 200 || res.body.isEmpty) return null;
+      final data = jsonDecode(res.body);
+      if (data is! Map || data['answer'] == null) return null;
+      return Map<String, dynamic>.from(data);
+    } catch (e) {
+      debugPrint('askMemory failed: $e');
+      return null;
+    }
   }
 
   /// One day of the Core Module's output: timeline, anomalies, insights and

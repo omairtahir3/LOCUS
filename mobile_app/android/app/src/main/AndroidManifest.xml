@@ -7,6 +7,10 @@
          maxSdkVersion entry covers older devices where it was install-time. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" android:maxSdkVersion="28" />
+    <!-- Asking a memory out loud in Memory Search. Runtime permission; the
+         plugin requests it on its first initialize() and the microphone button
+         stays hidden if it is refused, so typing is unaffected. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Declared, not required: a phone with no step sensor still installs
          and simply shows no step count. -->
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
@@ -62,6 +66,13 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" />
+        </intent>
+        <!-- Android 11+ hides other packages unless they are declared here, so
+             without this the speech plugin finds NO recognizer service and
+             initialize() just returns false on a phone that can in fact
+             listen. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 </manifest>

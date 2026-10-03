@@ -58,6 +58,17 @@ dependencies:
   # Android 10+ gates the step sensor behind ACTIVITY_RECOGNITION, and without
   # the grant the stream never emits and never errors.
   permission_handler: ^11.3.1
+  # ponytail: Flutter exposes no speech API of its own, so this is the only way
+  # to reach the ones the PLATFORM already ships -- Android's SpeechRecognizer
+  # and iOS's SFSpeechRecognizer. It is a thin channel over those, not a speech
+  # engine of its own and not a paid service.
+  #
+  # Note what it does NOT promise: SpeechListenOptions.onDevice defaults to
+  # false, so the platform recognizer may send audio to its own cloud. Only the
+  # resulting TEXT ever reaches LOCUS, but the audio is not guaranteed to stay
+  # on the handset. Set onDevice: true in _listen() to require local
+  # recognition, accepting that the attempt fails where it is unavailable.
+  speech_to_text: ^7.0.0
 
 dev_dependencies:
   flutter_test:
