@@ -41,6 +41,53 @@ export default function MemorySearch() {
   const markImageBroken = (id) =>
     setBrokenImages((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
 
+  // Asking, as opposed to filtering. Typing still narrows the day on screen,
+  // which is unchanged. Pressing Enter or speaking sends the question to the
+  // agent, which answers from the whole record rather than the rows loaded.
+  const [answer, setAnswer] = useState(null);
+  const [asking, setAsking] = useState(false);
+  const [listening, setListening] = useState(false);
+  // ponytail: the browser's own SpeechRecognition, no speech SDK and no audio
+  // upload. Recognition happens on the device and only the resulting text
+  // leaves it. Chrome and Edge expose it prefixed; Firefox has neither, which
+  // is why the button is feature-detected rather than shown and failing.
+  const Speech = typeof window !== 'undefined'
+    && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const askAgent = async (q) => {
+    const text = String(q || '').trim();
+    if (!text) return;
+    setAsking(true);
+    try {
+      const res = await eventLogsAPI.ask(text);
+      setAnswer(res.data && res.data.answer ? res.data : null);
+    } catch (e) {
+      console.error('Failed to answer question:', e);
+      setAnswer(null);
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  const listen = () => {
+    if (!Speech || listening) return;
+    const rec = new Speech();
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (ev) => {
+      const said = ev.results[0][0].transcript;
+      setQuery(said);
+      askAgent(said);
+    };
+    // onend fires after onerror too, so clearing the flag in both is harmless
+    // and covers a denied microphone, which emits no result at all.
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    setListening(true);
+    rec.start();
+  };
+
   // A day at a time, like the Activity Feed. "All days" keeps the old
   // behaviour of showing the most recent memories regardless of date.
   const [date, setDate] = useState(todayStr);
@@ -307,15 +354,80 @@ export default function MemorySearch() {
               type="text"
               className="form-input"
               style={{ paddingLeft: 42, height: 46 }}
-              placeholder="Search your memories..."
+              placeholder="Search, or ask where you left something..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') askAgent(query); }}
             />
           </div>
-          <button className="btn btn-primary" style={{ width: 46, height: 46, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Mic size={20} />
-          </button>
+          {Speech && (
+            <button
+              onClick={listen}
+              disabled={listening || asking}
+              title={listening ? 'Listening' : 'Ask out loud'}
+              className="btn btn-primary"
+              style={{
+                width: 46, height: 46, padding: 0, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                background: listening ? 'var(--danger)' : undefined,
+              }}
+            >
+              <Mic size={20} />
+            </button>
+          )}
         </div>
+
+        {asking && (
+          <div style={{ padding: '10px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            Looking through your memories...
+          </div>
+        )}
+
+        {answer && !asking && (
+          <div
+            style={{
+              display: 'flex', gap: 12, alignItems: 'flex-start',
+              background: 'var(--border-light)', borderRadius: 10,
+              padding: 12, marginBottom: 12,
+            }}
+          >
+            {answer.keyframe_id && (
+              <img
+                src={detectionAPI.getKeyframeImage(answer.keyframe_id, 240)}
+                alt=""
+                loading="lazy"
+                onClick={() => setLightbox({
+                  url: detectionAPI.getKeyframeImage(answer.keyframe_id),
+                  title: answer.answer,
+                })}
+                style={{
+                  width: 84, height: 84, borderRadius: 8, objectFit: 'cover',
+                  cursor: 'zoom-in', flexShrink: 0,
+                }}
+              />
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.45 }}>
+                {answer.answer}
+              </div>
+              {/* The place is deliberately absent: nothing in the record says
+                  which room it was, so the photograph is the answer to "where". */}
+              {answer.keyframe_id && (
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Tap the photo to see the spot.
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setAnswer(null)}
+              title="Dismiss"
+              className="btn"
+              style={{ width: 28, height: 28, padding: 0, flexShrink: 0 }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
           {FILTERS.map(f => (
