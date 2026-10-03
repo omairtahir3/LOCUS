@@ -9,6 +9,7 @@ import '../../services/api_service.dart';
 import '../../services/location_service.dart';
 import '../../services/step_service.dart';
 import '../../services/socket_service.dart';
+import '../../services/voice_call_service.dart';
 import '../caregiver/location_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -32,6 +33,9 @@ class HomeScreenState extends State<HomeScreen> {
     
     // Connect to websocket so Elderly users can chat
     SocketService().init();
+    // Listening for calls starts where the socket does: a client that is not
+    // listening cannot be rung, which is the whole feature.
+    VoiceCallService().init();
     SocketService().connect();
     SocketService().addSosResolvedListener(_handleSosResolved);
 
@@ -202,6 +206,33 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Ring the caregiver who watches this account.
+  ///
+  /// Looked up rather than remembered, because an account can gain a caregiver
+  /// after the app started, and someone in an emergency should not have to
+  /// restart it to be able to call for help.
+  Future<void> _callCaregiver() async {
+    try {
+      final caregivers = await ApiService.getLinkedCaregivers();
+      if (caregivers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('No caregiver is linked to your account yet.'),
+          ));
+        }
+        return;
+      }
+      final c = caregivers.first;
+      await VoiceCallService().call(
+        c['_id'].toString(), c['name']?.toString() ?? 'Caregiver', sos: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start the call: $e')));
+      }
+    }
+  }
+
   Widget _buildSOSSection() {
     if (_isEmergencyActive) {
       return Container(
@@ -227,6 +258,22 @@ class HomeScreenState extends State<HomeScreen> {
               spacing: 12,
               runSpacing: 12,
               children: [
+                // D FE-4, where it matters most: during an active emergency the
+                // wearer can reach a voice rather than only being tracked. The
+                // sos flag makes it arrive on the caregiver's side marked as an
+                // emergency instead of as an ordinary call.
+                ElevatedButton.icon(
+                  onPressed: _callCaregiver,
+                  icon: const Icon(Icons.call, size: 18),
+                  label: const Text('Call Caregiver',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.danger,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                ),
                 ElevatedButton(
                   onPressed: () async {
                     try {

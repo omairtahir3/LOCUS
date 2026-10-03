@@ -30,6 +30,7 @@ import 'services/selected_user_service.dart';
 import 'services/fall_detection_service.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'widgets/call_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -73,6 +74,10 @@ class LocusApp extends StatelessWidget {
       title: 'LOCUS',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      // A call can arrive on any screen, which is the whole point of it in an
+      // emergency, so the overlay sits above the navigator rather than on a
+      // page. MaterialApp.builder is the one place that is true of.
+      builder: (context, child) => CallOverlay(child: child ?? const SizedBox.shrink()),
       initialRoute: '/splash',
       routes: {
         '/splash': (_) => const SplashScreen(),

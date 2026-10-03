@@ -627,6 +627,20 @@ class ApiService {
     return [];
   }
 
+  /// Who watches this account, with names, for putting on a ringing screen.
+  /// Returns an empty list rather than throwing when nobody is linked yet.
+  static Future<List<dynamic>> getLinkedCaregivers() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/auth/my-caregivers'), headers: _headers);
+      if (res.statusCode != 200) return [];
+      final data = jsonDecode(res.body);
+      return data is List ? data : [];
+    } catch (e) {
+      debugPrint('getLinkedCaregivers failed: $e');
+      return [];
+    }
+  }
+
   /// A question in the wearer's own words: "where did I last put my keys?".
   /// Answered by the backend's memoryAgent, which understands the question with
   /// an LLM but finds the facts with a database query, so the answer cannot name

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
+import '../../services/voice_call_service.dart';
 import 'location_map_screen.dart';
 import '../chat/chat_screen.dart';
 
@@ -25,6 +26,9 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
 
     // Initialize Socket for Caregiver
     SocketService().init();
+    // Listening for calls starts where the socket does: a client that is not
+    // listening cannot be rung, which is the whole feature.
+    VoiceCallService().init();
     SocketService().connect();
 
     SocketService().addSosAlertListener(_handleSosAlert);
