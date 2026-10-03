@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -8,13 +9,25 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 class MemoryScreen extends StatefulWidget {
   final String? targetUserId;
-  const MemoryScreen({super.key, this.targetUserId});
+  /// Whether this screen is the one the user is actually looking at.
+  ///
+  /// It has to be told, because the bottom nav hosts these in an IndexedStack,
+  /// which keeps every tab mounted and wraps the hidden ones in
+  /// Visibility(maintainAnimation: true) -- so a timer in here keeps firing
+  /// while the user is on Home, and nothing inherited says otherwise. Declared
+  /// as a property rather than set through the GlobalKey so the value is right
+  /// on the first build too.
+  ///
+  /// Defaults to true for the case where this screen is pushed as its own route
+  /// from the More menu, where it is visible for as long as it exists.
+  final bool isVisible;
+  const MemoryScreen({super.key, this.targetUserId, this.isVisible = true});
 
   @override
   State<MemoryScreen> createState() => _MemoryScreenState();
 }
 
-class _MemoryScreenState extends State<MemoryScreen> {
+class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver {
   final _searchCtrl = TextEditingController();
   String _activeFilter = 'All';
   final _filters = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
@@ -44,15 +57,69 @@ class _MemoryScreenState extends State<MemoryScreen> {
   bool _asking = false;
   Map<String, dynamic>? _answer;
 
+  // A memory can appear while the page is open: the wearer puts something down
+  // in the next room and the sighting is logged seconds later. The web polls
+  // every 15 s for this, and the phone did not, so the list went stale until the
+  // tab was tapped again. Same interval, because the query itself measures 6-8 ms
+  // and the images are immutable-cached, so a poll costs a request and little else.
+  //
+  // What makes it affordable on a phone is the gate below, not a longer interval:
+  // nothing polls unless this is the visible tab, the app is in the foreground,
+  // AND the day being viewed is today. A past day cannot gain new memories.
+  static const _refreshInterval = Duration(seconds: 15);
+  Timer? _refreshTimer;
+  bool _foreground = true;
+
+  bool get _shouldPoll => widget.isVisible && _foreground && _isToday;
+
+  void _syncRefreshTimer() {
+    if (_shouldPoll) {
+      _refreshTimer ??= Timer.periodic(_refreshInterval, (_) {
+        // Re-checked on every tick: _date can change under the timer.
+        if (_shouldPoll) _loadEvents(quiet: true);
+      });
+    } else {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final wasForeground = _foreground;
+    _foreground = state == AppLifecycleState.resumed;
+    _syncRefreshTimer();
+    // Coming back to the app is exactly when the list is most likely stale, and
+    // waiting out a whole interval to find out is the wrong way round. This is
+    // the counterpart of the web refreshing on visibilitychange.
+    if (!wasForeground && _foreground && _shouldPoll) _loadEvents(quiet: true);
+  }
+
+  @override
+  void didUpdateWidget(MemoryScreen old) {
+    super.didUpdateWidget(old);
+    // The parent already calls reload() when this tab is tapped, so becoming
+    // visible needs no fetch here, only the timer started or stopped.
+    if (old.isVisible != widget.isVisible) _syncRefreshTimer();
+  }
+
   Future<void> _initSpeech() async {
     // Returns false where there is no recognizer or the microphone is refused.
     // The button is hidden in that case rather than shown and failing.
-    final ok = await _speech.initialize(
-      onError: (_) { if (mounted) setState(() => _listening = false); },
-      onStatus: (st) {
-        if (mounted && st != 'listening') setState(() => _listening = false);
-      },
-    );
+    bool ok = false;
+    try {
+      ok = await _speech.initialize(
+        onError: (_) { if (mounted) setState(() => _listening = false); },
+        onStatus: (st) {
+          if (mounted && st != 'listening') setState(() => _listening = false);
+        },
+      );
+    } catch (e) {
+      // MissingPluginException where the platform channel is absent, which is
+      // every widget test and any platform the plugin does not cover. Without
+      // this the whole screen fails to settle instead of just losing its mic.
+      debugPrint('speech unavailable: $e');
+    }
     if (mounted) setState(() => _speechReady = ok);
   }
 
@@ -103,6 +170,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
     );
     if (picked != null) {
       setState(() => _date = picked);
+      _syncRefreshTimer();
       _loadEvents();
     }
   }
@@ -112,6 +180,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
     final next = base.add(Duration(days: days));
     if (next.isAfter(DateTime.now())) return;
     setState(() => _date = next);
+    _syncRefreshTimer();
     _loadEvents();
   }
 
@@ -119,8 +188,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
   void initState() {
     super.initState();
     SelectedUserService().addListener(_onSelectedUserChanged);
+    WidgetsBinding.instance.addObserver(this);
     _loadEvents();
     _initSpeech();
+    _syncRefreshTimer();
   }
 
   void _onSelectedUserChanged() {
@@ -130,6 +201,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
   @override
   void dispose() {
     SelectedUserService().removeListener(_onSelectedUserChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    // A Timer outlives its State unless cancelled, and would keep calling
+    // setState on a disposed widget.
+    _refreshTimer?.cancel();
     _searchCtrl.dispose();
     // Leaving a session running holds the microphone after the screen is gone.
     if (_listening) _speech.cancel();
@@ -140,8 +215,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
     if (mounted) _loadEvents();
   }
 
-  Future<void> _loadEvents() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadEvents({bool quiet = false}) async {
+    // A background poll must not show the loading state: the list would blink
+    // away under whoever is reading it every 15 seconds.
+    if (!quiet) setState(() => _isLoading = true);
     try {
       String? selectedId = widget.targetUserId;
       if (selectedId == null && ApiService.userRole == 'caregiver') {
@@ -157,7 +234,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
     } catch (e) {
       debugPrint('Error loading memories: $e');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && !quiet) setState(() => _isLoading = false);
     }
   }
 
@@ -544,6 +621,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
                   TextButton(
                     onPressed: () {
                       setState(() => _date = _date == null ? DateTime.now() : null);
+                      _syncRefreshTimer();
                       _loadEvents();
                     },
                     style: TextButton.styleFrom(
