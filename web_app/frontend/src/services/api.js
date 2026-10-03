@@ -125,7 +125,9 @@ export const eventLogsAPI = {
   getKeyframes: (params) => api.get('/event-logs/keyframes', { params }),
   toggleFlag: (id, is_flagged) => api.patch(`/event-logs/${id}/flag`, { is_flagged }),
   // One day of the Core Module's output for the Activity Feed.
-  timeline: (params) => api.get('/event-logs/timeline', { params })
+  timeline: (params) => api.get('/event-logs/timeline', { params }),
+  // A question in the wearer's own words. Answered by utils/memoryAgent.
+  ask: (question, params) => api.post('/event-logs/ask', { question }, { params })
 };
 
 // ── Relationships ────────────────────────────────────────────────────────────
