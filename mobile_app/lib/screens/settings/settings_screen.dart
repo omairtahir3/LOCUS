@@ -35,6 +35,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Change where the app looks for the backend, and say at once whether it is
+  /// there. A wrong address showed up as every screen being empty, with nothing
+  /// anywhere saying the phone could not reach the machine at all.
+  Future<void> _editServer() async {
+    final ctrl = TextEditingController(text: ApiService.serverOverride ?? ApiService.baseUrl);
+    String? status;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Server address'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'The computer running LOCUS, on this wifi. Find it with ipconfig. '
+                'It changes whenever the router hands out a new lease.',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autocorrect: false,
+                decoration: const InputDecoration(hintText: '192.168.1.14', border: OutlineInputBorder()),
+              ),
+              if (status != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    status!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: status!.startsWith('Reachable') ? AppColors.success : AppColors.danger,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                setLocal(() => status = 'Checking...');
+                final ok = await ApiService.pingServer(_normalise(ctrl.text));
+                setLocal(() => status = ok ? 'Reachable' : 'No answer from there');
+              },
+              child: const Text('Test'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) {
+      await ApiService.setServerOverride(ctrl.text);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Now using ${ApiService.baseUrl}')));
+    }
+  }
+
+  /// Accepts what somebody reads off ipconfig and fills in the rest.
+  String? _normalise(String raw) {
+    var v = raw.trim();
+    if (v.isEmpty) return null;
+    if (!v.startsWith('http')) v = 'http://$v';
+    if (!RegExp(r':\d+').hasMatch(v.split('//').last)) v = '$v:5000';
+    if (!v.endsWith('/api')) v = '$v/api';
+    return v;
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final user = _user;
@@ -119,6 +194,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 20),
+
+          // Where the backend is. First, because when this is wrong every other
+          // screen is simply empty and none of them say why.
+          Container(
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+            child: ListTile(
+              leading: const Icon(Icons.dns_outlined, color: AppColors.primary),
+              title: const Text('Server address', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(ApiService.baseUrl, style: const TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _editServer,
+            ),
+          ),
+          const SizedBox(height: 20),
+
 
           // Personal Belongings / Exemplar Items
           Container(

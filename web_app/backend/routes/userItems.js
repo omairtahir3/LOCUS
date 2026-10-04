@@ -1,4 +1,8 @@
 const express = require('express');
+
+// How many photographs an enrolment needs. See the enrol route for why ten.
+const MIN_ENROLL_FRAMES = Number(process.env.MIN_ENROLL_FRAMES || 10);
+const MAX_ENROLL_FRAMES = Number(process.env.MAX_ENROLL_FRAMES || 15);
 const router = express.Router();
 const UserItem = require('../models/UserItem');
 const User = require('../models/User');
@@ -100,11 +104,33 @@ router.post('/enroll', auth, async (req, res) => {
     if (!item_name || !item_name.trim()) {
       return res.status(400).json({ error: 'Item name is required' });
     }
-    if (!frames || !Array.isArray(frames) || frames.length < 1) {
-      return res.status(400).json({ error: 'At least 1 image frame is required' });
+    // Ten is a floor, not a suggestion.
+    //
+    // One enrolled phone had four photographs. Those four agreed with each
+    // other at only 0.699, which is a loose cluster for a 576-D embedding, and
+    // the matcher spent the rest of its life trying to fill the gap: it learned
+    // 156 exemplars from its own sightings, drifted until they scored 0.567
+    // against the real photos, and started claiming anything roughly phone
+    // shaped. A gallery this thin cannot recognise an object across a room, and
+    // it cannot safely teach itself either.
+    //
+    // Fifteen is the ceiling only because beyond it the marginal photograph
+    // adds little and the enrolment becomes a chore people abandon halfway.
+    if (!frames || !Array.isArray(frames) || frames.length < MIN_ENROLL_FRAMES) {
+      return res.status(400).json({
+        error: `At least ${MIN_ENROLL_FRAMES} images are required`,
+        detail: 'Take them from different angles, distances and lighting. '
+          + 'Fewer than this and the item cannot be told apart from similar objects.',
+        received: Array.isArray(frames) ? frames.length : 0,
+        required: MIN_ENROLL_FRAMES,
+      });
     }
-    if (frames.length > 10) {
-      return res.status(400).json({ error: 'Maximum 10 frames allowed' });
+    if (frames.length > MAX_ENROLL_FRAMES) {
+      return res.status(400).json({
+        error: `At most ${MAX_ENROLL_FRAMES} images are allowed`,
+        received: frames.length,
+        allowed: MAX_ENROLL_FRAMES,
+      });
     }
 
     const userId = await resolveUserId(req);

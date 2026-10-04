@@ -19,12 +19,31 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
   final List<String> _base64Frames = [];
   bool _isSubmitting = false;
 
+  // Ten is a floor, not a suggestion. This screen used to cap at five and ask
+  // for three, which is why the enrolled phone had four photographs. Those four
+  // agreed with each other at only 0.699, and the matcher spent the rest of its
+  // life filling that gap from its own sightings until it drifted off the
+  // object entirely. A gallery this thin cannot tell one belonging from another
+  // across a room.
+  static const int minPhotos = 10;
+  static const int maxPhotos = 15;
+
   final List<String> _angleSuggestions = [
     'Front / Main View',
     'Back (Logos/Camera)',
     'Side Profile / Edges',
     'Top / Angled View',
     'Distinctive Marks / Case',
+    'Held in your hand',
+    'Lying on a table',
+    'Further away, across the room',
+    'In dimmer light',
+    'At an angle, partly turned',
+    'Close up on a detail',
+    'Against a different background',
+    'Slightly covered or overlapping',
+    'From below',
+    'Any other angle',
   ];
 
   @override
@@ -34,9 +53,9 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
   }
 
   Future<void> _takePhoto() async {
-    if (_base64Frames.length >= 5) {
+    if (_base64Frames.length >= maxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Maximum 5 photos reached.')),
+        const SnackBar(content: Text('Maximum $maxPhotos photos reached.')),
       );
       return;
     }
@@ -68,9 +87,9 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
   }
 
   Future<void> _pickFromGallery() async {
-    if (_base64Frames.length >= 5) {
+    if (_base64Frames.length >= maxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Maximum 5 photos reached.')),
+        const SnackBar(content: Text('Maximum $maxPhotos photos reached.')),
       );
       return;
     }
@@ -84,7 +103,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
 
       if (picked.isNotEmpty) {
         for (final file in picked) {
-          if (_base64Frames.length >= 5) break;
+          if (_base64Frames.length >= maxPhotos) break;
           final bytes = await file.readAsBytes();
           final b64 = base64Encode(bytes);
           setState(() {
@@ -119,10 +138,15 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
       return;
     }
 
-    if (_base64Frames.length < 3) {
+    if (_base64Frames.length < minPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Please take at least 3 photos from different angles (currently ${_base64Frames.length}).'),
+          duration: const Duration(seconds: 4),
+          content: Text(
+            'At least $minPhotos photos are needed, from different angles, distances '
+            'and lighting (you have ${_base64Frames.length}). Fewer than this and the '
+            'item cannot be told apart from similar objects.',
+          ),
         ),
       );
       return;
@@ -222,7 +246,11 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Take 3 to 5 clear photos of your personal item from different angles. For plain items (like phones, wallets, or bowls), be sure to include distinctive marks such as cases, stickers, logos, camera bumps, or labels to ensure reliable AI visual tracking.',
+                        'Take $minPhotos to $maxPhotos clear photos of your item: different angles, '
+                        'different distances, and a couple in the light you actually live in. '
+                        'For plain items like a phone, a wallet or a bowl, include the marks that make '
+                        'yours yours: a case, a sticker, a logo, a camera bump. The more it sees here, '
+                        'the less it has to guess later.',
                         style: TextStyle(
                           fontSize: 13,
                           color: AppColors.primaryDark.withOpacity(0.9),
@@ -280,7 +308,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '$count / 5 photos ${count >= 3 ? '✓' : '(min 3)'}',
+                        '$count / $maxPhotos photos ${count >= minPhotos ? '✓' : '(need $minPhotos)'}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
