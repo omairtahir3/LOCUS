@@ -34,16 +34,37 @@ const PROMPTS = [
   'From below', 'Any other angle',
 ];
 
-/** How much a gallery agrees with itself, in words. */
+/**
+ * What a gallery's numbers mean, which is not what they first look like.
+ *
+ * A low agreement is NOT automatically bad once there are enough photographs.
+ * Measured on this account: four photos of a phone agreed at 0.699, and fifteen
+ * taken properly agreed at 0.647. The fifteen are the better gallery. Agreement
+ * falls precisely because the photographs differ, and photographs that differ
+ * are the point: the matcher scores a sighting against its BEST exemplar, so a
+ * set spanning near, far, dim and turned recognises more than a tight set of
+ * five taken from one spot in one light.
+ *
+ * What does signal trouble is one photograph sitting far from all the others,
+ * which is usually a blurred shot, a mostly-background shot, or the wrong
+ * object. That is `min`, not `mean`.
+ */
 function healthOf(gallery) {
   if (!gallery || typeof gallery.mean !== 'number') return null;
-  const { mean, photos } = gallery;
+  const { mean, photos, min } = gallery;
   if (photos < MIN_PHOTOS) {
     return { tone: 'bad', text: `${photos} photo${photos === 1 ? '' : 's'}, below the ${MIN_PHOTOS} needed` };
   }
-  if (mean >= 0.8) return { tone: 'good', text: `${photos} photos, agreement ${mean.toFixed(2)}` };
-  if (mean >= 0.7) return { tone: 'ok', text: `${photos} photos, agreement ${mean.toFixed(2)}, a loose set` };
-  return { tone: 'bad', text: `${photos} photos, agreement ${mean.toFixed(2)}, too scattered to match on` };
+  const base = `${photos} photos, agreement ${mean.toFixed(2)}`;
+  // An exemplar this far from the rest is almost always a bad shot rather than
+  // a usefully different view.
+  if (typeof min === 'number' && min < 0.2) {
+    return { tone: 'ok', text: `${base}, but one photo looks unlike the rest (${min.toFixed(2)}); worth replacing` };
+  }
+  if (mean < 0.35) {
+    return { tone: 'bad', text: `${base}, too scattered; some may be of something else` };
+  }
+  return { tone: 'good', text: `${base}, a good spread` };
 }
 
 const TONE = { good: 'var(--success)', ok: 'var(--warning)', bad: 'var(--danger)' };
