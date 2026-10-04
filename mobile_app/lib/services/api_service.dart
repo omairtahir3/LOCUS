@@ -8,7 +8,21 @@ import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode, debugPrint;
 class ApiService {
   // Automatically switch between localhost for Web/iOS and 10.0.2.2 for Android emulator
   // UPDATED: Uses laptop IP for local dev, and Production URL when deployed.
+  /// Where the backend lives, settable at runtime.
+  ///
+  /// This was a compiled-in LAN address, and a compiled-in LAN address is wrong
+  /// the first time the router hands out a different lease. It said
+  /// 192.168.1.5 while the machine was on 192.168.1.14, so the phone was
+  /// talking to nothing and EVERY screen looked broken rather than one.
+  ///
+  /// The stored value wins, so correcting it is a few seconds in Settings
+  /// instead of a rebuild. Nothing else in the app needs to know.
+  static String? _serverOverride;
+
   static String get baseUrl {
+    final o = _serverOverride;
+    if (o != null && o.isNotEmpty) return o;
+
     if (kReleaseMode) {
       // Production URL when deployed
       return const String.fromEnvironment('API_URL', defaultValue: 'https://your-production-server.com/api');
@@ -22,7 +36,45 @@ class ApiService {
     const customUrl = String.fromEnvironment('API_URL');
     if (customUrl.isNotEmpty) return customUrl;
     
-    return 'http://192.168.1.5:5000/api';
+    return 'http://192.168.1.14:5000/api';
+  }
+
+  /// The address the user has set, or null when the built-in one is in use.
+  static String? get serverOverride => _serverOverride;
+
+  /// Point the app at a different machine. Pass null or '' to go back to the
+  /// built-in address. Accepts a bare host or IP and fills in the rest, because
+  /// "192.168.1.14" is what somebody reads off ipconfig, not a full URL.
+  static Future<void> setServerOverride(String? value) async {
+    var v = (value ?? '').trim();
+    if (v.isNotEmpty) {
+      if (!v.startsWith('http://') && !v.startsWith('https://')) v = 'http://$v';
+      v = v.replaceAll(RegExp(r'/+$'), '');
+      if (!RegExp(r':\d+').hasMatch(v.split('//').last)) v = '$v:5000';
+      if (!v.endsWith('/api')) v = '$v/api';
+    }
+    _serverOverride = v.isEmpty ? null : v;
+    if (v.isEmpty) {
+      await _prefs.remove('locus_server_url');
+    } else {
+      await _prefs.setString('locus_server_url', v);
+    }
+  }
+
+  /// Does this address actually answer? Used by the settings screen so somebody
+  /// finds out immediately rather than from a screen that silently shows
+  /// nothing, which is how this went unnoticed.
+  static Future<bool> pingServer([String? url]) async {
+    final target = url ?? baseUrl;
+    try {
+      final res = await http
+          .get(Uri.parse('$target/auth/my-caregivers'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      // 401 is a perfectly good answer here: something is listening and it is us.
+      return res.statusCode == 200 || res.statusCode == 401;
+    } catch (_) {
+      return false;
+    }
   }
 
   static late SharedPreferences _prefs;
@@ -31,6 +83,9 @@ class ApiService {
 
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    // Loaded before anything can call baseUrl, or the first requests go to
+    // the built-in address and fail while the stored one sits unused.
+    _serverOverride = _prefs.getString('locus_server_url');
     _token = _prefs.getString('locus_token');
     final userJson = _prefs.getString('locus_user');
     if (userJson != null) {
