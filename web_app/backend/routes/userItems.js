@@ -96,7 +96,7 @@ async function resolveUserId(req) {
 }
 
 // POST /api/user-items/enroll
-// Enroll a new personal item with 3-5 photos from different angles
+// Enroll a new personal item. See MIN_ENROLL_FRAMES for why ten is the floor.
 router.post('/enroll', auth, async (req, res) => {
   try {
     const { item_name, frames } = req.body;
