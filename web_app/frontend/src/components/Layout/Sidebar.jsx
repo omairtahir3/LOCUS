@@ -2,7 +2,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, Pill, Bell, MapPin, Activity,
-  Settings, LogOut, Shield, Image, Clock, Home, Video, X, Package,
+  Settings, LogOut, Shield, Image, Clock, Home, Video, X,
 } from 'lucide-react';
 
 const caregiverNavItems = [
@@ -16,7 +16,6 @@ const caregiverMonitorItems = [
   { path: '/keyframes', icon: Image,  label: 'Keyframe Audit' },
   { path: '/location',  icon: MapPin,   label: 'Location Map' },
   { path: '/activity',  icon: Activity, label: 'Activity Feed' },
-  { path: '/belongings', icon: Package,  label: 'Belongings' },
 ];
 
 const userNavItems = [
@@ -30,7 +29,6 @@ const userMonitorItems = [
   { path: '/keyframes',      icon: Image,    label: 'Keyframe Audit' },
   { path: '/my-activity',    icon: Activity, label: 'Activity Feed' },
   { path: '/memory-search',  icon: Shield,   label: 'Memory Search' },
-  { path: '/belongings',     icon: Package,  label: 'My Belongings' },
 ];
 
 export default function Sidebar({ isMobileOpen, closeMobile }) {
