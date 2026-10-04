@@ -346,88 +346,43 @@ MAX_INDEX_AGE_SECONDS = float(os.environ.get("MAX_INDEX_AGE_SECONDS", 45))
 # It is the second guard, not the first. Learning only happens on a crop that
 # already MATCHED, and a crop the detector labelled Mouse has to clear 0.85 to
 # match at all, which no mouse in the data comes close to.
-# SELF-LEARNING IS OFF.
+# The item gallery does NOT learn from its own sightings, and must not.
 #
-# The gallery used to grow from its own sightings. The idea was reasonable: the
-# enrolment photographs come from a phone camera and the matching happens on a
-# wearable one, and a sighting the gallery already recognises is a picture of
-# the right object through the right lens. In practice it taught itself in a
-# circle, because the only evidence it ever had was resemblance to itself.
+# It used to. The idea was reasonable: enrolment photographs come from a phone
+# camera and matching happens on a wearable one, so a sighting the gallery
+# already recognises is a picture of the right object through the right lens.
+# In practice it taught itself in a circle, because the only evidence it ever
+# had was resemblance to ITSELF, and resembling the gallery is not evidence of
+# being the object once the gallery is mostly its own output.
 #
-# It ran to the end on this account: 160 phone exemplars of which 156 were the
-# system's own output and 4 were photographs. Those 156 scored 0.567 against the
-# real photographs while the wearer's car keys scored 0.443, so the gallery had
-# stopped describing the phone.
+# It ran to the end on this account: 160 phone exemplars, 156 of them the
+# system's own output and 4 real photographs. The 156 scored 0.567 against those
+# photographs while the wearer's car keys scored 0.443. The gallery had stopped
+# describing the phone.
 #
-# Anchoring to the enrolment photographs fixed that case, and then the fix
-# stopped working for a reason worth recording. Once enrolment became fifteen
-# varied photographs rather than four, the galleries got larger and looser, and
-# a larger looser gallery clears any threshold more easily. Measured on this
-# account AFTER re-enrolment:
+# Anchoring new exemplars to the enrolment photographs fixed that case, and then
+# stopped working, for a reason worth recording. Once enrolment asked for fifteen
+# varied photographs instead of four, the galleries became larger and looser, and
+# a larger looser gallery clears any threshold more easily:
 #
-#     Car Keys photos vs the Phone gallery:   max 0.860
-#     Phone photos vs the Car Keys gallery:   max 0.860
-#     anchor needed to admit a real sighting: 0.78
+#     car keys photos vs the PHONE gallery:  max 0.860
+#     phone photos vs the CAR KEYS gallery:  max 0.860
+#     the anchor meant to separate them:     0.78
 #
-# One belonging now reaches further into another's gallery than the bar meant to
-# keep it out. There is no threshold that separates "same object, new view" from
-# "different object entirely" here, because the two distributions overlap. A
-# higher bar admits nothing; this bar admits the wrong thing.
+# One belonging reached further into another's gallery than the bar meant to
+# exclude it. No threshold separates "same object, new view" from "different
+# object" on this embedding, because the distributions overlap.
 #
-# The problem it existed to solve is solved better elsewhere: enrolment now asks
-# for fifteen photographs including the wearable's own conditions, further away,
-# dimmer light, partly turned, held in a hand. The wearer adding a photograph
-# knows what the object is. The system never did; it only knew what its gallery
-# already looked like.
+# Learning in this system belongs in routine learning, which watches WHEN and
+# WHERE a person does things and has the wearer's own history to be right or
+# wrong against. An item's appearance has no such ground truth: only the person
+# adding a photograph knows what the object is.
 #
-# Left behind the flag rather than deleted, because the measurements above are
-# the reason and are worth keeping with the code they justify.
-SELF_ENRICH_ENABLED = os.environ.get("SELF_ENRICH_ENABLED", "0") == "1"
-
-SELF_ENRICH_MIN_SIM = float(os.environ.get("SELF_ENRICH_MIN_SIM", 0.70))
-SELF_ENRICH_MAX_VECTORS = int(os.environ.get("SELF_ENRICH_MAX_VECTORS", 160))
-
-# A sighting is learned only if it looks like the wearer's OWN PHOTOS, not
-# merely like the gallery.
-#
-# This is the guard that was missing, and without it the thing teaches itself in
-# a circle: the match was scored against the whole gallery, learned vectors
-# included, so each slightly-wrong addition widened what counted as a match,
-# which admitted something wronger. Measured on this account before the fix: of
-# 160 phone exemplars, 156 were self-learned and 4 were real photos, and the
-# learned ones scored 0.567 against those photos while the wearer's car keys
-# scored 0.443. The gallery had stopped describing the phone.
-#
-# Anchoring to the enrolment photos breaks the circle: drift cannot bootstrap
-# itself, because the only thing that ever grants entry is the fixed set of
-# pictures the wearer took.
-# 0.78 is measured, not chosen. On this account's 156 drifted vectors the bar
-# admits 9 of them; at 0.72 it admitted 81, which is still a runaway. It also
-# sits far above the cross-item ceiling, where the wearer's car keys reach only
-# 0.623 against their phone photos, so one belonging cannot be learned into
-# another's gallery.
-#
-# Note what it demands: the wearer's 4 phone photos agree with EACH OTHER at
-# 0.699, so a sighting must resemble one of them more closely than they resemble
-# one another. That is deliberately hard, and it means this feature will rarely
-# fire on a thin gallery. The answer to that is more enrolment photos, not a
-# lower bar; a gallery of four cannot be both the teacher and the thing taught.
-SELF_ENRICH_ANCHOR_SIM = float(os.environ.get("SELF_ENRICH_ANCHOR_SIM", 0.78))
-
-# ...and the gallery may not drown them. 160 learned vectors against 4 photos is
-# not a model of an object, it is a model of whatever the camera kept seeing.
-SELF_ENRICH_PER_PHOTO = int(os.environ.get("SELF_ENRICH_PER_PHOTO", 8))
-
-# A crop that another class also claims is not safe to learn from. In frame
-# c2f03780 the detector drew a "Cell Phone" box at 0.77 and a "Mouse" box at
-# 0.34 over the SAME pixels, IoU 0.97. Seeding from a box like that teaches the
-# gallery whichever object it really is, and the other name comes free with it.
-SELF_ENRICH_MAX_IOU = float(os.environ.get("SELF_ENRICH_MAX_IOU", 0.5))
-
-# Marks a vector as learned from the wearable rather than enrolled by hand, so
-# gallery coherence keeps measuring the ENROLMENT photos and does not quietly
-# start reporting on the system's own output.
-LEARNED_SOURCE_BASE = 1000
+# LEARNED_SOURCE_BASE is gone with it. It marked which exemplars the system had
+# taught itself, and nothing writes one any more. The Node side still reads
+# embedding_sources when it reports gallery health, which is harmless and stays:
+# it keeps grading older galleries honestly, since vectors learned before this
+# are still in some of them.
 
 
 def _confidences(detections: list[dict]) -> tuple[list[float], list[float]]:
@@ -1521,10 +1476,6 @@ class DailyItemIndexer:
                     best_item_id = item["id"]
                     best_thresh = thresh
 
-            if SELF_ENRICH_ENABLED and best_match_name and best_sim >= SELF_ENRICH_MIN_SIM:
-                self._maybe_learn_from_sighting(
-                    best_item_id, best_match_name, d, detections, image, best_sim)
-
             if best_match_name:
                 generic_name = d["name"]
                 d["matched_item"] = best_match_name
@@ -1886,144 +1837,6 @@ class DailyItemIndexer:
         union = aa + ab - inter
         return inter / float(union) if union > 0 else 0.0
 
-    def _maybe_learn_from_sighting(self, item_id, item_name, det, all_dets,
-                                   image, sim: float):
-        """Add a confident sighting back into the item's own gallery.
-
-        The gallery is built from photos taken with a phone camera and then
-        matched against a wearable one; that gap cost more than half of the
-        wearer's real phone sightings. A sighting the gallery already
-        recognises confidently is, by definition, a picture of the right object
-        through the right lens, so it is the best possible addition to it.
-
-        Guarded three ways, because a gallery that teaches itself can also
-        teach itself something wrong:
-          - only a confident match is learned from at all;
-          - never from a box another class also claims, which is exactly how a
-            mouse and a phone came to share one set of pixels;
-          - and the gallery is capped, so it cannot grow without end.
-        """
-        if not SELF_ENRICH_ENABLED:
-            # Refused here as well as at the call site, so turning it back on is
-            # one deliberate decision rather than whichever path happens to run.
-            return
-        try:
-            bbox = det.get("bbox")
-            if not bbox or not item_id:
-                return
-
-            for other in all_dets:
-                if other is det or not other.get("bbox"):
-                    continue
-                if other.get("name") == det.get("name"):
-                    continue
-                if self._box_iou(bbox, other["bbox"]) >= SELF_ENRICH_MAX_IOU:
-                    print(f"[DailyItemIndexer] not learning {item_name} from a box "
-                          f"{other.get('name')!r} also claims")
-                    return
-
-            from bson import ObjectId
-            if self._db_client is None:
-                self._db_client = get_client(serverSelectionTimeoutMS=2000)
-            db = self._db_client[get_db_name()]
-            try:
-                oid = ObjectId(str(item_id))
-            except Exception:
-                return
-            doc = db.useritems.find_one({"_id": oid}, {"item_embeddings": 1,
-                                                       "embedding_sources": 1})
-            if not doc:
-                return
-            existing = doc.get("item_embeddings") or []
-            if len(existing) >= SELF_ENRICH_MAX_VECTORS:
-                return
-
-            # Which of these are the wearer's own photographs, and which did the
-            # gallery grow itself. Items enrolled before the mapping existed have
-            # no sources, and every one of those is a real photo.
-            srcs = list(doc.get("embedding_sources") or [])
-            enrolled_idx = [i for i in range(len(existing))
-                            if i >= len(srcs)
-                            or not isinstance(srcs[i], (int, float))
-                            or srcs[i] < LEARNED_SOURCE_BASE]
-            learned_count = len(existing) - len(enrolled_idx)
-            if not enrolled_idx:
-                # Nothing to anchor to. Learning from a gallery that is already
-                # entirely its own output is how this went wrong.
-                return
-            if learned_count >= len(enrolled_idx) * SELF_ENRICH_PER_PHOTO:
-                return
-
-            x1, y1 = max(0, int(bbox["x1"])), max(0, int(bbox["y1"]))
-            x2 = min(image.shape[1], int(bbox["x2"]))
-            y2 = min(image.shape[0], int(bbox["y2"]))
-            if (x2 - x1) < 15 or (y2 - y1) < 15:
-                return
-            crop = image[y1:y2, x1:x2]
-            if crop.size == 0:
-                return
-
-            backbone = self._get_embedding_backbone()
-            if backbone is None:
-                return
-
-            # The anchor check. `sim` was scored against the WHOLE gallery, so a
-            # crop can reach it by resembling the gallery's own drift rather than
-            # the object. Scored again here against the enrolment photos only,
-            # which is the one set that cannot drift.
-            probe = np.asarray(backbone.extract_batch([crop])[0], dtype=float)
-            pn = float(np.linalg.norm(probe))
-            if pn == 0:
-                return
-            anchor = 0.0
-            for i in enrolled_idx:
-                v = np.asarray(existing[i], dtype=float)
-                vn = float(np.linalg.norm(v))
-                if vn == 0:
-                    continue
-                anchor = max(anchor, float(np.dot(probe, v)) / (pn * vn))
-            if anchor < SELF_ENRICH_ANCHOR_SIM:
-                print(f"[DailyItemIndexer] not learning {item_name}: matched the "
-                      f"gallery at {sim:.3f} but the wearer's own photos at only "
-                      f"{anchor:.3f}")
-                return
-
-            # Augmented, for the same reason enrolment photos are: one sighting
-            # in one light should teach the gallery about that object in many.
-            variants = augment_for_enrollment(crop)
-            vecs = [np.asarray(v, dtype=float).tolist()
-                    for v in backbone.extract_batch(variants)]
-            room = min(SELF_ENRICH_MAX_VECTORS - len(existing),
-                       len(enrolled_idx) * SELF_ENRICH_PER_PHOTO - learned_count)
-            vecs = vecs[:max(0, room)]
-            if not vecs:
-                return
-
-            sources = list(doc.get("embedding_sources") or [])
-            # Items enrolled before the mapping existed have no sources at all.
-            # The two arrays must stay the same length or the mapping is ignored
-            # wholesale, and the health check silently starts grading the
-            # system's own output instead of the wearer's photos.
-            if len(sources) < len(existing):
-                sources = list(range(len(existing) - len(sources))) + sources
-                db.useritems.update_one({"_id": oid},
-                                        {"$set": {"embedding_sources": sources}})
-            next_source = LEARNED_SOURCE_BASE + sum(
-                1 for s in sources if isinstance(s, (int, float)) and s >= LEARNED_SOURCE_BASE)
-            db.useritems.update_one({"_id": oid}, {"$push": {
-                "item_embeddings": {"$each": vecs},
-                "embedding_sources": {"$each": [next_source] * len(vecs)},
-            }})
-            # The matcher holds a cached copy; drop it so the next frame sees
-            # what was just learned.
-            self._user_items_cache.pop(str(det.get("_user_id", "")), None)
-            self._user_items_cache.clear()
-            print(f"[DailyItemIndexer] learned {item_name} from a sighting at "
-                  f"sim={sim:.3f}: gallery {len(existing)} -> {len(existing) + len(vecs)}")
-        except Exception as e:
-            print(f"[DailyItemIndexer] could not learn from sighting: {e}")
-
-    # ── Held, or put down? ───────────────────────────────────────────────────
     def _hand_boxes(self, image) -> list[dict] | None:
         """The wearer's hand boxes in this frame, or None if unavailable.
 

@@ -30,7 +30,23 @@ const EXPECTED_RATIO = 0.6;
 
 // Below this many observed days the profile cannot support any "expected"
 // claim, and the monitor's deviation checks stay off.
-const MIN_DAYS_FOR_EXPECTATIONS = 14;
+// How many days of a given KIND must be seen before this will claim anything.
+//
+// One number for both was a bug that could never fire. It is checked against
+// days_observed.weekday or days_observed.weekend separately, but the baseline
+// window is 30 days, which contains about 21 weekdays and only about 9 weekend
+// days. Requiring 14 of each meant weekend expectations were mathematically
+// unreachable: a weekend deviation could not be raised, ever, no matter how
+// long anyone wore the camera.
+//
+// Roughly half the days of that kind that a 30-day window can hold. Half is the
+// judgement; the asymmetry is arithmetic.
+const MIN_DAYS_FOR_EXPECTATIONS = { weekday: 10, weekend: 5 };
+
+/** The bar for this kind of day. */
+function minDaysFor(type) {
+  return MIN_DAYS_FOR_EXPECTATIONS[type] ?? 10;
+}
 
 const dayKey = d => d.toISOString().slice(0, 10);
 const dayType = d => (d.getDay() === 0 || d.getDay() === 6) ? 'weekend' : 'weekday';
@@ -162,7 +178,7 @@ function expectation(profile, signalKey, when = new Date()) {
   const type = dayType(when);
   const observed = profile.days_observed?.[type] || 0;
   const sig = (profile.signals || []).find(s => s.key === signalKey);
-  if (!sig || observed < MIN_DAYS_FOR_EXPECTATIONS) {
+  if (!sig || observed < minDaysFor(type)) {
     return { expected: false, ratio: 0, support: observed, insufficient: true };
   }
   const seen = sig.hist?.[type]?.[when.getHours()] || 0;
@@ -202,5 +218,5 @@ function init() {
 
 module.exports = {
   init, buildProfile, rebuildAllProfiles, expectation,
-  BASELINE_DAYS, EXPECTED_RATIO, MIN_DAYS_FOR_EXPECTATIONS,
+  BASELINE_DAYS, EXPECTED_RATIO, MIN_DAYS_FOR_EXPECTATIONS, minDaysFor,
 };
