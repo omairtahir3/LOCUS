@@ -346,6 +346,44 @@ MAX_INDEX_AGE_SECONDS = float(os.environ.get("MAX_INDEX_AGE_SECONDS", 45))
 # It is the second guard, not the first. Learning only happens on a crop that
 # already MATCHED, and a crop the detector labelled Mouse has to clear 0.85 to
 # match at all, which no mouse in the data comes close to.
+# SELF-LEARNING IS OFF.
+#
+# The gallery used to grow from its own sightings. The idea was reasonable: the
+# enrolment photographs come from a phone camera and the matching happens on a
+# wearable one, and a sighting the gallery already recognises is a picture of
+# the right object through the right lens. In practice it taught itself in a
+# circle, because the only evidence it ever had was resemblance to itself.
+#
+# It ran to the end on this account: 160 phone exemplars of which 156 were the
+# system's own output and 4 were photographs. Those 156 scored 0.567 against the
+# real photographs while the wearer's car keys scored 0.443, so the gallery had
+# stopped describing the phone.
+#
+# Anchoring to the enrolment photographs fixed that case, and then the fix
+# stopped working for a reason worth recording. Once enrolment became fifteen
+# varied photographs rather than four, the galleries got larger and looser, and
+# a larger looser gallery clears any threshold more easily. Measured on this
+# account AFTER re-enrolment:
+#
+#     Car Keys photos vs the Phone gallery:   max 0.860
+#     Phone photos vs the Car Keys gallery:   max 0.860
+#     anchor needed to admit a real sighting: 0.78
+#
+# One belonging now reaches further into another's gallery than the bar meant to
+# keep it out. There is no threshold that separates "same object, new view" from
+# "different object entirely" here, because the two distributions overlap. A
+# higher bar admits nothing; this bar admits the wrong thing.
+#
+# The problem it existed to solve is solved better elsewhere: enrolment now asks
+# for fifteen photographs including the wearable's own conditions, further away,
+# dimmer light, partly turned, held in a hand. The wearer adding a photograph
+# knows what the object is. The system never did; it only knew what its gallery
+# already looked like.
+#
+# Left behind the flag rather than deleted, because the measurements above are
+# the reason and are worth keeping with the code they justify.
+SELF_ENRICH_ENABLED = os.environ.get("SELF_ENRICH_ENABLED", "0") == "1"
+
 SELF_ENRICH_MIN_SIM = float(os.environ.get("SELF_ENRICH_MIN_SIM", 0.70))
 SELF_ENRICH_MAX_VECTORS = int(os.environ.get("SELF_ENRICH_MAX_VECTORS", 160))
 
@@ -1483,7 +1521,7 @@ class DailyItemIndexer:
                     best_item_id = item["id"]
                     best_thresh = thresh
 
-            if best_match_name and best_sim >= SELF_ENRICH_MIN_SIM:
+            if SELF_ENRICH_ENABLED and best_match_name and best_sim >= SELF_ENRICH_MIN_SIM:
                 self._maybe_learn_from_sighting(
                     best_item_id, best_match_name, d, detections, image, best_sim)
 
@@ -1865,6 +1903,10 @@ class DailyItemIndexer:
             mouse and a phone came to share one set of pixels;
           - and the gallery is capped, so it cannot grow without end.
         """
+        if not SELF_ENRICH_ENABLED:
+            # Refused here as well as at the call site, so turning it back on is
+            # one deliberate decision rather than whichever path happens to run.
+            return
         try:
             bbox = det.get("bbox")
             if not bbox or not item_id:
