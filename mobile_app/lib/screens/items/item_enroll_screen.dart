@@ -194,7 +194,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
   @override
   Widget build(BuildContext context) {
     final count = _base64Frames.length;
-    final isReady = count >= 3 && _nameController.text.trim().isNotEmpty;
+    final isReady = count >= minPhotos && _nameController.text.trim().isNotEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -234,7 +234,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                           const SizedBox(width: 12),
                           const Expanded(
                             child: Text(
-                              '3-5 Multi-Angle Photos Required',
+                              '$minPhotos-$maxPhotos Multi-Angle Photos Required',
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15,
@@ -304,7 +304,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: count >= 3 ? AppColors.successLight : AppColors.warningLight,
+                        color: count >= minPhotos ? AppColors.successLight : AppColors.warningLight,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -312,7 +312,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: count >= 3 ? AppColors.success : AppColors.warning,
+                          color: count >= minPhotos ? AppColors.success : AppColors.warning,
                         ),
                       ),
                     ),
@@ -415,8 +415,13 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                   ),
                 const SizedBox(height: 16),
 
-                // Capture buttons
-                if (count < 5)
+                // Capture buttons.
+                //
+                // This hid them at five while every other number said ten,
+                // so the screen asked for ten photographs and then removed
+                // the means of taking them. It reads the same constant as
+                // everything else now.
+                if (count < maxPhotos)
                   Row(
                     children: [
                       Expanded(
