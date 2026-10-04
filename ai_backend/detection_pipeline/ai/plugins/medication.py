@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+import cv2
+
 import time
 
 from ..core.contracts import ActionType, DetectionResult, EventContext, ModelReference
@@ -68,6 +72,65 @@ class MedicationIntakePlugin(DetectorPlugin):
                 and inner["y1"] >= outer["y1"] - h * slack
                 and inner["x2"] <= outer["x2"] + w * slack
                 and inner["y2"] <= outer["y2"] + h * slack)
+
+    # A finger is the one false positive no context can catch: it is pale,
+    # rounded, tablet-sized, and BY DEFINITION inside a hand, so the hand test
+    # and the screen test both pass it by design. A thumb under a phone was
+    # called a tablet at 0.513 and carried a whole detection.
+    #
+    # Measured on the CENTRE of the candidate, not the whole box. The box around
+    # that thumb was only 54% skin because it also caught the dark phone edge and
+    # the trousers behind; its middle was 78%. Every other false positive seen so
+    # far scores 0.00 to 0.04 in the middle, so the separation is wide.
+    SKIN_CENTRE_FRACTION = 0.6
+    SKIN_REJECT_AT = float(os.environ.get("PILL_SKIN_REJECT_AT", 0.70))
+    # Below this many pixels the fraction is noise rather than a measurement.
+    SKIN_MIN_PIXELS = 200
+
+    @staticmethod
+    def _skin_fraction(bgr):
+        """How much of this patch is skin-coloured, in YCrCb.
+
+        YCrCb rather than HSV: in the warm, dim light these frames are shot in,
+        the HSV test scored that same thumb at 0.02 and was useless. It is not a
+        skin DETECTOR -- bare wood scores 0.94 -- which is exactly why this is
+        only ever applied to the middle of something the pill model already
+        claimed, never to a whole frame.
+        """
+        ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
+        return float(cv2.inRange(ycrcb, (0, 133, 77), (255, 173, 127)).mean()) / 255.0
+
+    def _drop_skin_artifacts(self, frame, detections):
+        """Remove pill candidates whose middle is simply a finger.
+
+        KNOWN RISK: a beige or tan tablet held against skin could score high
+        here and be refused. A white tablet does not -- white sits outside the
+        Cr range entirely, and plain wall measures 0.09 -- and the medicine on
+        this account is white. The failure mode is a missed dose rather than a
+        false one, which is the right way round: a missed dose is recorded as
+        unseen and asked about, while a false one asserts something untrue.
+        """
+        if not detections:
+            return detections, None
+        kept, blamed = [], None
+        h, w = frame.shape[:2]
+        for d in detections:
+            b = d["bbox"]
+            cx, cy = (b["x1"] + b["x2"]) / 2, (b["y1"] + b["y2"]) / 2
+            hw = max(1, int((b["x2"] - b["x1"]) * self.SKIN_CENTRE_FRACTION / 2))
+            hh = max(1, int((b["y2"] - b["y1"]) * self.SKIN_CENTRE_FRACTION / 2))
+            x1, y1 = max(0, int(cx - hw)), max(0, int(cy - hh))
+            x2, y2 = min(w, int(cx + hw)), min(h, int(cy + hh))
+            core = frame[y1:y2, x1:x2]
+            if core.size // 3 < self.SKIN_MIN_PIXELS:
+                kept.append(d)
+                continue
+            frac = self._skin_fraction(core)
+            if frac >= self.SKIN_REJECT_AT:
+                blamed = f"{frac:.2f} skin"
+            else:
+                kept.append(d)
+        return kept, blamed
 
     def _drop_screen_artifacts(self, frame, detections):
         """Remove pill candidates that are really part of a screen.
@@ -144,6 +207,8 @@ class MedicationIntakePlugin(DetectorPlugin):
                     # tell them apart and the object around the candidate must.
                     if pih:
                         detections, screen = self._drop_screen_artifacts(raw, detections)
+                        detections, skinned = self._drop_skin_artifacts(raw, detections)
+                        screen = screen or (f"finger ({skinned})" if skinned else None)
                         if screen is not None:
                             best_pill = max((d["confidence"] for d in detections), default=0.0)
                             if detections:
