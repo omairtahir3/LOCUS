@@ -201,6 +201,18 @@ ENROLLED_CANDIDATE_CONF = float(os.environ.get("ENROLLED_CANDIDATE_CONF", 0.08))
 # 0.666. 0.75 sits in that gap with room either side.
 LOW_CONF_MATCH_THRESHOLD = float(os.environ.get("LOW_CONF_MATCH_THRESHOLD", 0.75))
 
+# How far ahead the best-matching belonging must be before it is believed.
+#
+# A box matched the wearer's Phone at 0.770 and their Rover Earbuds at 0.763 in
+# the same frame. Nothing in that pair of numbers identifies an object; it is
+# noise deciding which name gets attached. Galleries built from fifteen varied
+# photographs overlap far more than four-photograph ones did, so this will
+# happen whenever two belongings share a colour or a silhouette.
+#
+# 0.05 is wider than the 0.007 that was observed and narrower than the gap on a
+# clean match, where the right item typically leads by 0.1 or more.
+AMBIGUOUS_MARGIN = float(os.environ.get("AMBIGUOUS_MARGIN", 0.05))
+
 # How many candidates may be embedded per frame. Batched at a measured 61 ms
 # each, so this is the frame's embedding budget: 8 is about half a second in the
 # worst case, on a background worker with its own queue. Boxes above the normal
@@ -1440,6 +1452,10 @@ class DailyItemIndexer:
             best_sim = 0.0
             best_item_id = None
             best_thresh = self.EXEMPLAR_MATCH_THRESHOLD
+            # The runner-up, so a box that two belongings both claim can be
+            # recognised as telling us nothing. See AMBIGUOUS_MARGIN below.
+            second_sim = 0.0
+            second_name = None
 
             for item in user_items:
                 # YOLO named this box. Whether that name describes this item
@@ -1470,11 +1486,35 @@ class DailyItemIndexer:
                     thresh = max(thresh, LOW_CONF_MATCH_THRESHOLD)
                 sims = np.asarray(item["embeddings"]) @ crop_emb
                 sim = float(sims.max()) if sims.size else 0.0
-                if sim > best_sim and sim >= thresh:
-                    best_sim = sim
-                    best_match_name = item["name"]
-                    best_item_id = item["id"]
-                    best_thresh = thresh
+                if sim >= thresh:
+                    if sim > best_sim:
+                        second_sim, second_name = best_sim, best_match_name
+                        best_sim = sim
+                        best_match_name = item["name"]
+                        best_item_id = item["id"]
+                        best_thresh = thresh
+                    elif sim > second_sim:
+                        second_sim, second_name = sim, item["name"]
+
+            # Two belongings claiming the same pixels is not a match, it is a
+            # coin toss.
+            #
+            # One tile_scan box was matched as the wearer's Phone at 0.770 and
+            # their Rover Earbuds at 0.763, seven thousandths apart. Whichever
+            # won, the system would have asserted a specific object was in a
+            # specific place on the strength of nothing. Galleries of fifteen
+            # varied photographs overlap this much: measured on this account, the
+            # car keys reach 0.860 into the phone's gallery.
+            #
+            # Refusing is the honest outcome. A missed sighting is a gap in the
+            # record; a confident wrong one sends somebody looking for the wrong
+            # thing in the wrong room.
+            if best_match_name and second_name and (best_sim - second_sim) < AMBIGUOUS_MARGIN:
+                print(f"[DailyItemIndexer] Ambiguous: '{d.get('name','?')}' matched "
+                      f"'{best_match_name}' at {best_sim:.3f} and '{second_name}' at "
+                      f"{second_sim:.3f}; too close to call, so neither is claimed")
+                best_match_name = None
+                best_item_id = None
 
             if best_match_name:
                 generic_name = d["name"]
