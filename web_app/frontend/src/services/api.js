@@ -188,6 +188,21 @@ export const eventLogsAPI = {
   ask: (question, params) => api.post('/event-logs/ask', { question }, { params })
 };
 
+// ── Personal belongings ──────────────────────────────────────────────────────
+// The items the wearer has enrolled, which the detector matches against. The
+// web had no way to see or manage these at all; enrolment existed only on the
+// phone, where it capped at five photographs and produced galleries too thin to
+// recognise anything.
+export const userItemsAPI = {
+  getAll:  ()        => api.get('/user-items'),
+  get:     (id)      => api.get(`/user-items/${id}`),
+  lastSeen:(id)      => api.get(`/user-items/${id}/last-seen`),
+  remove:  (id)      => api.delete(`/user-items/${id}`),
+  // frames are data: URLs or raw base64, 10 to 15 of them. The server enforces
+  // that range as well, because a limit only the client knows is not a limit.
+  enroll:  (item_name, frames) => api.post('/user-items/enroll', { item_name, frames }),
+};
+
 // ── Relationships ────────────────────────────────────────────────────────────
 export const relationshipsAPI = {
   getAll: () => api.get('/relationships'),

@@ -7,6 +7,7 @@ import threading
 from database import get_db
 from bson import ObjectId
 from utils.auth import create_access_token
+import os
 
 router = APIRouter(prefix="/api/detection", tags=["AI Detection"])
 
@@ -336,6 +337,10 @@ class EmbeddingRequest(BaseModel):
     frames: list[str]  # List of base64-encoded JPEG images (3-5 from different angles)
 
 
+# Enrolment photographs per item. Mirrors MAX_ENROLL_FRAMES in the Node
+# gateway; a limit that disagrees across services is a 502 waiting to happen.
+MAX_ENROLL_FRAMES = int(os.environ.get("MAX_ENROLL_FRAMES", 15))
+
 @router.post("/extract-embedding")
 async def extract_embedding(req: EmbeddingRequest):
     """
@@ -352,8 +357,13 @@ async def extract_embedding(req: EmbeddingRequest):
 
     if not req.frames or len(req.frames) < 1:
         raise HTTPException(status_code=400, detail="At least 1 frame is required")
-    if len(req.frames) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 frames allowed")
+    # 15, matching the enrolment ceiling in web_app/backend/routes/userItems.js.
+    # This was 10 while the gateway allowed 15, so a 15-photo enrolment was
+    # refused here and surfaced to the user as a 502 from a service they have
+    # never heard of. Three places knew a different limit; they agree now.
+    if len(req.frames) > MAX_ENROLL_FRAMES:
+        raise HTTPException(status_code=400,
+                            detail=f"Maximum {MAX_ENROLL_FRAMES} frames allowed")
 
     try:
         from ai.embedding_backbone import ItemEmbeddingBackbone

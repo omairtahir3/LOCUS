@@ -22,6 +22,7 @@ import UserDashboard from './pages/UserDashboard';
 import UserMedications from './pages/UserMedications';
 import UserHistory from './pages/UserHistory';
 import MemorySearch from './pages/MemorySearch';
+import Belongings from './pages/Belongings';
 import RelationshipsManage from './pages/RelationshipsManage';
 
 function CaregiverOnlyRoute({ element }) {
@@ -65,6 +66,9 @@ function App() {
               <Route path="keyframes" element={<KeyframeAudit />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="memory-search" element={<MemorySearch />} />
+              {/* Enrolling an item is 10 to 15 photographs, which is work on a
+                  phone and easy at a desk where a folder can be dropped in. */}
+              <Route path="belongings" element={<Belongings />} />
               {/* Shared, not caregiver-only. Both of these were reached from
                   pages every role can see -- "Saw <name>" in Memory Search and
                   "Manage relationships" in Settings -- but were gated to

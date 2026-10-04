@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { User, Bell, Shield, Save, Link as LinkIcon, Users } from 'lucide-react';
+import { User, Bell, Shield, Save, Link as LinkIcon, Users, Package } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
@@ -86,6 +86,22 @@ export default function SettingsPage() {
       </div>
 
       {/* Link a User */}
+      {/* Personal belongings. The phone keeps this in Settings so the web does
+          too, and a desk is where adding ten to fifteen photographs is bearable. */}
+      <div className="card mb-4">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Package size={20} style={{ color: 'var(--primary)' }} />
+          <div style={{ flex: 1 }}>
+            <div className="card-title">Personal Belongings</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              The items the camera watches for, and their enrolment photographs
+            </div>
+          </div>
+          <Link to="/belongings" className="btn btn-primary">Manage</Link>
+        </div>
+      </div>
+
+
       <div className="card mb-4">
         <div className="card-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
