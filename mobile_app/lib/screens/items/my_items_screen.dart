@@ -91,6 +91,94 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
     }
   }
 
+  /// What the enrolment is actually worth, said where the enrolling happens.
+  ///
+  /// A low agreement is NOT a fault once there are enough photographs. Measured
+  /// on this account: four photos of a phone agreed at 0.699 and fifteen taken
+  /// properly agree at 0.647, and the fifteen are the better gallery. Agreement
+  /// falls because the pictures differ, and differing pictures are the point:
+  /// the matcher scores a sighting against its single best exemplar.
+  ///
+  /// What does signal trouble is ONE photograph sitting far from the rest, which
+  /// is a blurred shot, a mostly-background shot, or the wrong object in frame.
+  /// That is `min`, not `mean`.
+  List<Widget> _galleryHealth(Map<String, dynamic> item) {
+    final g = item['gallery'];
+    if (g is! Map) return const [];
+    final photos = (g['photos'] as num?)?.toInt();
+    final mean = (g['mean'] as num?)?.toDouble();
+    final min = (g['min'] as num?)?.toDouble();
+    if (photos == null || mean == null) return const [];
+
+    String text;
+    Color colour;
+    if (photos < 10) {
+      text = '$photos photo${photos == 1 ? '' : 's'}, below the 10 needed';
+      colour = AppColors.danger;
+    } else if (min != null && min < 0.2) {
+      text = '$photos photos, agreement ${mean.toStringAsFixed(2)}, '
+          'but one looks unlike the rest (${min.toStringAsFixed(2)})';
+      colour = AppColors.warning;
+    } else if (mean < 0.35) {
+      text = '$photos photos, agreement ${mean.toStringAsFixed(2)}, too scattered';
+      colour = AppColors.danger;
+    } else {
+      text = '$photos photos, agreement ${mean.toStringAsFixed(2)}, a good spread';
+      colour = AppColors.success;
+    }
+    return [
+      const SizedBox(height: 6),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(colour == AppColors.success ? Icons.check_circle_outline : Icons.info_outline,
+              size: 14, color: colour),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(fontSize: 11, color: colour, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  /// Replace an item's photographs: remove it, then enrol it again.
+  ///
+  /// There is no way to add photographs to an existing gallery, because an
+  /// enrolment is a set taken together in one sitting rather than a pile grown
+  /// over time. So improving one means replacing it, and this says so plainly
+  /// instead of leaving someone to work out that Remove-then-Add is the route.
+  Future<void> _reEnroll(Map<String, dynamic> item) async {
+    final name = item['item_name']?.toString() ?? 'this item';
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Re-enrol with new photos'),
+        content: Text(
+          'This removes the current photographs for "$name" and starts a fresh '
+          'enrolment of 10 to 15.\n\n'
+          'Its past sightings stay in your timeline, and the routine it has '
+          'learned follows the name, so nothing else is lost.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continue')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    final res = await ApiService.deleteUserItem(item['_id'].toString());
+    if (!mounted) return;
+    if (res['statusCode'] != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not remove it: ${res['data']?['error'] ?? 'server error'}')));
+      return;
+    }
+    await Navigator.pushNamed(context, '/item-enroll');
+    if (mounted) _loadItems();
+  }
+
   Future<void> _showDeleteDialog(Map<String, dynamic> item) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -417,6 +505,12 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                               ],
                                             ],
                                           ),
+                                          // How good the enrolment actually is.
+                                          // This existed only on the web, so the
+                                          // one place somebody enrols an item was
+                                          // the one place they could not see
+                                          // whether it had worked.
+                                          ..._galleryHealth(item),
                                         ],
                                       ),
                                     ),
@@ -428,6 +522,8 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                           _showRenameDialog(item);
                                         } else if (value == 'delete') {
                                           _showDeleteDialog(item);
+                                        } else if (value == 'reenroll') {
+                                          _reEnroll(item);
                                         }
                                       },
                                       itemBuilder: (ctx) => [
@@ -438,6 +534,16 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                               Icon(Icons.edit_outlined, size: 18, color: AppColors.primary),
                                               SizedBox(width: 10),
                                               Text('Rename'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'reenroll',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.photo_camera_outlined, size: 18, color: AppColors.primary),
+                                              SizedBox(width: 10),
+                                              Text('Re-enrol with new photos'),
                                             ],
                                           ),
                                         ),

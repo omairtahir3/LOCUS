@@ -112,6 +112,25 @@ async function buildProfile(user) {
   }
 
   // ── enrolled item sightings ─────────────────────────────────────────────
+  //
+  // Keyed on the belonging's CURRENT id, resolved through its name.
+  //
+  // A sighting stores the item id that was enrolled when it happened. Enrolling
+  // the same thing again gives it a new id, so keying on the stored one threw
+  // away every routine this person had: a month of knowing when they pick up
+  // their keys became two signals pointing at ids that no longer exist, and two
+  // new ids with no history. Re-enrolling an item to improve its photographs
+  // should not cost the system its memory of when that item is used.
+  //
+  // Matched by name within one person's own belongings, which they chose and
+  // typed. Signals for a name that is no longer enrolled are dropped rather
+  // than kept pointing at nothing.
+  const UserItem = require('../models/UserItem');
+  const currentItems = await UserItem.find({ user_id: { $in: idForms } })
+    .select('item_name').lean();
+  const idForName = new Map(
+    currentItems.map(i => [String(i.item_name || '').trim().toLowerCase(), String(i._id)]));
+
   const objects = await EventLog.find({
     user_id: { $in: idForms }, event_type: 'object', timestamp: { $gte: since },
   }).lean();
@@ -132,7 +151,12 @@ async function buildProfile(user) {
     noteDay(when);
     for (const it of (o.details?.items || [])) {
       if (!it.enrolled_item_id || !it.matched_item) continue;
-      const sig = get(`item:${it.enrolled_item_id}`, it.matched_item);
+      // The id this belonging has NOW, not the one it had when it was seen.
+      const currentId = idForName.get(String(it.matched_item).trim().toLowerCase());
+      // No current id means the belonging has been removed, not re-enrolled, so
+      // its history is not carried forward into a signal nothing can match.
+      if (!currentId) continue;
+      const sig = get(`item:${currentId}`, it.matched_item);
       bump(sig, when, { room: roomAt(+when) });
     }
   }
