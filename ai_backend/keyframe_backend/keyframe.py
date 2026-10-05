@@ -164,6 +164,19 @@ class KeyframeStorage:
                     <uuid>.json         — metadata (timestamp, motion_score, etc.)
     """
 
+    # Only the CAPTURE store feeds the item indexer.
+    #
+    # items_storage, activities_storage and social_storage hold frames the
+    # pipeline wrote ABOUT a frame it had already indexed, and they inherit this
+    # save(). So storing a put-down handed that very picture back to the indexer,
+    # which recognised the same phone in the same box and stored another copy,
+    # and again: 01:22:52 was written three times, 8s and 51s apart, with three
+    # keyframes of one identical image (md5 754351cb, all three naming source
+    # frame 285be1ce). The capture timestamp travels in the metadata, so every
+    # lap was filed at the original moment and the feed showed one put-down as
+    # three memories.
+    feeds_item_indexer = True
+
     def __init__(self, storage_dir=KEYFRAME_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         self.storage_dir = storage_dir
         self.ttl_hours = ttl_hours
@@ -231,11 +244,12 @@ class KeyframeStorage:
         # module objects — two singletons, two worker threads, two model loads,
         # and two independent dedup dicts, which silently bypassed the 120s
         # enrichment window (observed: duplicate "Eating" events in the same second).
-        try:
-            from ai.item_indexer import DailyItemIndexer
-            DailyItemIndexer.get_instance().enqueue_keyframe(keyframe_id, frame, metadata)
-        except Exception as e:
-            print(f"[KeyframeStorage] Item indexer enqueue failed: {e}")
+        if self.feeds_item_indexer:
+            try:
+                from ai.item_indexer import DailyItemIndexer
+                DailyItemIndexer.get_instance().enqueue_keyframe(keyframe_id, frame, metadata)
+            except Exception as e:
+                print(f"[KeyframeStorage] Item indexer enqueue failed: {e}")
 
 
 
@@ -499,6 +513,8 @@ class SocialInteractionStorage(KeyframeStorage):
                     <uuid>.jpg
                     <uuid>.json
     """
+    feeds_item_indexer = False
+
     def __init__(self, storage_dir=SOCIAL_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
 
@@ -518,6 +534,8 @@ class ActivityStorage(KeyframeStorage):
                     <uuid>.jpg
                     <uuid>.json
     """
+    feeds_item_indexer = False
+
     def __init__(self, storage_dir=ACTIVITY_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
 
@@ -537,6 +555,8 @@ class ItemStorage(KeyframeStorage):
                     <uuid>.jpg
                     <uuid>.json
     """
+    feeds_item_indexer = False
+
     def __init__(self, storage_dir=ITEMS_STORAGE_DIR, ttl_hours=KEYFRAME_TTL_HOURS):
         super().__init__(storage_dir=storage_dir, ttl_hours=ttl_hours)
 

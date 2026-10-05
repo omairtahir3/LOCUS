@@ -20,7 +20,7 @@ import time
 import queue
 import threading
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import cv2
@@ -274,6 +274,11 @@ ITEM_HELD_DEDUP_SECONDS = float(os.environ.get("ITEM_HELD_DEDUP_SECONDS", 60))
 SAME_SPOT_IOU = float(os.environ.get("SAME_SPOT_IOU", 0.50))
 SAME_SPOT_DRIFT_IOU = float(os.environ.get("SAME_SPOT_DRIFT_IOU", 0.25))
 SAME_SPOT_DRIFT_SECONDS = float(os.environ.get("SAME_SPOT_DRIFT_SECONDS", 30))
+# How many recent put-downs of one item to compare a new one against. Frames
+# are indexed out of the order they were captured, so the row that duplicates
+# this one is not reliably the newest; a dozen covers the whole dedup window at
+# any rate the queue achieves, and they all arrive from the one query.
+SAME_SPOT_LOOKBACK = int(os.environ.get("SAME_SPOT_LOOKBACK", 12))
 
 # ── Held, or put down? ──────────────────────────────────────────────────────
 #
@@ -1217,34 +1222,43 @@ class DailyItemIndexer:
                 uid = ObjectId(user_key)
             except Exception:
                 return False
-            prev = db.eventlogs.find_one(
+            # EVERY recent put-down of this item, not just the newest one.
+            #
+            # This asked for the single latest row by capture time, and frames
+            # are not processed in the order they were captured. At 01:23:07 a
+            # re-run of the 01:22:52 frame asked this question; the newest row
+            # was the 01:23:06 capture, by then at (697,539) because the phone
+            # had been moved, so the overlap was nil and the duplicate passed --
+            # while its own twin at (836,542) sat one row further back. Reading
+            # the window instead of its newest member is what makes the check
+            # independent of processing order.
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(seconds=ITEM_DEDUP_SECONDS)
+            prev = db.eventlogs.find(
                 {"user_id": uid, "event_type": "object", "keyframe_id": {"$ne": None},
+                 "timestamp": {"$gte": cutoff},
                  "details.items": {"$elemMatch": {
                      "enrolled_item_id": str(iid), "placement": "placed"}}},
-                {"details.items": 1, "timestamp": 1}, sort=[("timestamp", -1)])
-            if not prev:
-                return False
-            # Only compare against a RECENT one. Something put back on the same
-            # shelf tomorrow is a new memory of today, not a repeat.
-            age = (datetime.now(timezone.utc) - prev["timestamp"].replace(
-                tzinfo=prev["timestamp"].tzinfo or timezone.utc)).total_seconds()
-            if age > ITEM_DEDUP_SECONDS:
-                return False
-            for it in (prev.get("details", {}) or {}).get("items") or []:
-                if str(it.get("enrolled_item_id")) != str(iid):
-                    continue
-                if it.get("placement") != "placed" or not it.get("bbox"):
-                    continue
-                o = self._box_iou(box, it["bbox"])
-                same = o >= SAME_SPOT_IOU or (
-                    o >= SAME_SPOT_DRIFT_IOU and age <= SAME_SPOT_DRIFT_SECONDS)
-                if same:
-                    why = ("the same box" if o >= SAME_SPOT_IOU
-                           else f"the same box give or take drift, {age:.0f}s later")
-                    print(f"[Items] {det.get('matched_item', det.get('name'))} is in {why} "
-                          f"(overlap {o:.2f}); keeping the frame already stored rather than "
-                          f"another of the same place")
-                    return True
+                {"details.items": 1, "timestamp": 1}).sort("timestamp", -1).limit(
+                    SAME_SPOT_LOOKBACK)
+            for row in prev:
+                age = (now - row["timestamp"].replace(
+                    tzinfo=row["timestamp"].tzinfo or timezone.utc)).total_seconds()
+                for it in (row.get("details", {}) or {}).get("items") or []:
+                    if str(it.get("enrolled_item_id")) != str(iid):
+                        continue
+                    if it.get("placement") != "placed" or not it.get("bbox"):
+                        continue
+                    o = self._box_iou(box, it["bbox"])
+                    same = o >= SAME_SPOT_IOU or (
+                        o >= SAME_SPOT_DRIFT_IOU and age <= SAME_SPOT_DRIFT_SECONDS)
+                    if same:
+                        why = ("the same box" if o >= SAME_SPOT_IOU
+                               else f"the same box give or take drift, {age:.0f}s later")
+                        print(f"[Items] {det.get('matched_item', det.get('name'))} is in {why} "
+                              f"(overlap {o:.2f}); keeping the frame already stored rather than "
+                              f"another of the same place")
+                        return True
         except Exception as e:
             print(f"[Items] same-spot check skipped: {e}")
         return False
