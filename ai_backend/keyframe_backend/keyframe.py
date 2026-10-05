@@ -1115,6 +1115,27 @@ class KeyframeExtractor:
         if not (self.save_locally and self.storage):
             return None
 
+        # ── The privacy gate (Module A FE-4/FE-5) ───────────────────────────
+        # 'paused' and the automatic rules stop a frame existing at all.
+        # 'blur' lets it exist, unreadable, so the day still has a record.
+        _blur = False
+        _uid = getattr(self, "user_id", "")
+        if _uid:
+            try:
+                from ai.privacy import state as _privacy_state
+                st = _privacy_state(str(_uid))
+                if not st["capture"]:
+                    # Before the cooldown slot is claimed, so a refused frame
+                    # does not consume the allowance of the one after it: the
+                    # first frame once privacy ends would otherwise be skipped.
+                    print(f"[KeyframeExtractor] {kind} not captured: {st['reason']}")
+                    return None
+                _blur = st["blur"]
+            except Exception as e:
+                # Capture carries on. A privacy check that takes the camera
+                # down whenever Mongo hiccups is its own harm; see ai/privacy.py.
+                print(f"[KeyframeExtractor] privacy check skipped: {e}")
+
         now = time.time()
         cooldown = EVENT_COOLDOWN_SECONDS.get(kind, 10.0)
 
@@ -1217,9 +1238,29 @@ class KeyframeExtractor:
               f"{best['blur_score']:.1f}, best of {len(candidates)})"
               + (f": {label}" if label else ""))
 
+        # Blurred HERE, once, so every copy downstream is blurred: the file on
+        # disk, the frame handed to the item indexer, and therefore any item or
+        # session frame derived from it. Blurring only at the point of writing
+        # the image would have left the indexer storing sharp crops of the same
+        # moment in items_storage.
+        #
+        # A new array, never the one in the ring buffer: that frame is shared
+        # with the other events of this moment and with the detectors.
+        frame_out = best["frame"]
+        if _blur:
+            from ai.privacy import blur_frame
+            frame_out = blur_frame(frame_out)
+            if frame_out is None:
+                # blur_frame refuses rather than returning the original, so
+                # there is no path where a failure stores a readable frame.
+                print(f"[KeyframeExtractor] {kind} dropped: could not blur it")
+                _give_back()
+                return None
+            metadata["privacy_blurred"] = True
+
         threading.Thread(
             target=self._save_event_async,
-            args=(best["keyframe_id"], best["frame"], metadata, kind),
+            args=(best["keyframe_id"], frame_out, metadata, kind),
             daemon=True).start()
         return best["keyframe_id"]
 

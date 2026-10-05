@@ -809,6 +809,16 @@ class MedicationDetectionPipeline:
                 print("[Pipeline] Evidence for this dose is already stored — not saving a second set")
                 return
 
+            # Read once for the whole set, not per frame: three phases of one
+            # dose must not end up half blurred because the wearer pressed the
+            # button between two writes.
+            _priv_blur = False
+            try:
+                from .privacy import state as _privacy_state
+                _priv_blur = bool(_privacy_state(str(getattr(self, "user_id", "")))["blur"])
+            except Exception as e:
+                print(f"[Pipeline] evidence privacy check skipped: {e}")
+
             # --- Iterate over the evidence_frames list (already has unique IDs
             # and correct phase_role assigned by analyze_keyframes_batch) ---
             tagged = 0
@@ -854,6 +864,19 @@ class MedicationDetectionPipeline:
                         "user_id": getattr(self, "user_id", ""),
                         "detected_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    # Medication evidence writes its own frames, straight from
+                    # the analysis buffer, so it never passes the gate in
+                    # capture_event. Without this, privacy mode blurred every
+                    # frame on the memory page while medications_storage kept
+                    # sharp ones -- the single store that is kept longest and
+                    # shown to caregivers.
+                    if _priv_blur:
+                        from .privacy import blur_frame
+                        frame_data = blur_frame(frame_data)
+                        if frame_data is None:
+                            print(f"[Pipeline] evidence {ev_id[:8]} dropped: could not blur it")
+                            continue
+                        evidence_meta["privacy_blurred"] = True
                     evidence_store.save(ev_id, frame_data, evidence_meta)
                     tagged += 1
                     print(f"[Pipeline] Saved evidence {ev_id[:8]} as {phase_role} (order={phase_order}, conf={phase_score})")
@@ -2051,6 +2074,47 @@ class MedicationDetectionPipeline:
                     time.sleep(0.02)  # yield GIL
                     continue
                 self._last_process_time = _now
+
+                # ── Privacy: stop ANALYSIS too, not only storage ─────────────
+                #
+                # capture_event already refuses to write a frame while privacy
+                # mode is on, and that is not enough on its own. FE-4 says
+                # "pause all recording AND analysis", and it is right: a paused
+                # camera that still ran face recognition would go on writing
+                # "you saw Omair at 4pm" rows with no picture, which is the
+                # content the wearer asked not to be recorded, minus only the
+                # evidence of it.
+                #
+                # The liveness heartbeat deliberately keeps running below. It
+                # carries no image and no claim about what happened; and
+                # without it routineMonitor's camera-off trigger would fire
+                # after a long shower and tell a caregiver the camera had
+                # failed. Privacy mode must not look like a fault.
+                _priv = {"capture": True, "blur": False, "reason": None}
+                if self.user_id:
+                    try:
+                        from .privacy import state as _privacy_state
+                        _priv = _privacy_state(str(self.user_id))
+                    except Exception as e:
+                        print(f"[Pipeline] privacy check skipped: {e}")
+                if not _priv["capture"]:
+                    if not hasattr(self, '_privacy_logged_at'):
+                        self._privacy_logged_at = 0.0
+                    if (time.time() - self._privacy_logged_at) >= 30.0:
+                        self._privacy_logged_at = time.time()
+                        print(f"[Pipeline] analysis paused: {_priv['reason']}")
+                    # Heartbeat only, so the camera still reads as alive.
+                    if not hasattr(self, '_last_heartbeat'):
+                        self._last_heartbeat = time.time()
+                        self._heartbeat_frames = 0
+                    self._heartbeat_frames += 1
+                    if time.time() - self._last_heartbeat >= HEARTBEAT_SECONDS:
+                        threading.Thread(
+                            target=self._log_heartbeat_to_db,
+                            args=(0.0, self._heartbeat_frames), daemon=True).start()
+                        self._last_heartbeat = time.time()
+                        self._heartbeat_frames = 0
+                    continue
 
                 # Step 1: Always process frames — keyframe capture, face
                 # recognition, and scene saving run continuously whenever

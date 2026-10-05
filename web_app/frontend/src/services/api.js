@@ -175,6 +175,13 @@ export const userAPI = {
   login:    (data) => api.post('/auth/login', data),
 };
 
+// ── Privacy (Module A FE-4/FE-5, Module 10 FE-3) ─────────────────────────────
+export const privacyAPI = {
+  get: () => api.get('/users/me/privacy'),
+  // Every field is optional, so the one-tap toggle sends {mode} alone.
+  set: (data) => api.put('/users/me/privacy', data),
+};
+
 export default api;
 
 // ── Event Logs ───────────────────────────────────────────────────────────────

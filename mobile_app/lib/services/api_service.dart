@@ -127,6 +127,23 @@ class ApiService {
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
 
+  // ── Privacy (Module A FE-4/FE-5, Module 10 FE-3) ────────────────────────
+
+  /// What is switched on, plus whether the pipeline has gone dead by itself
+  /// (the washroom rule, or a place the wearer named).
+  static Future<Map<String, dynamic>> getPrivacy() async {
+    final res = await http.get(Uri.parse('$baseUrl/users/me/privacy'), headers: _headers);
+    if (res.statusCode != 200) return {};
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Every field is optional, so the one-tap toggle sends {'mode': ...} alone.
+  static Future<bool> setPrivacy(Map<String, dynamic> patch) async {
+    final res = await http.put(Uri.parse('$baseUrl/users/me/privacy'),
+        headers: _headers, body: jsonEncode(patch));
+    return res.statusCode == 200;
+  }
+
   // ── Auth ────────────────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> register(String name, String email, String password, String role) async {

@@ -223,6 +223,102 @@ router.put('/me/home_location', auth, async (req, res) => {
   }
 });
 
+// ── Privacy ──────────────────────────────────────────────────────────────────
+//
+// The rooms the scene classifier can actually name. Offering a room it cannot
+// recognise would be a switch that silently does nothing, which on a privacy
+// control is worse than not offering it: see ai/scene.py SCENE_WEIGHTS.
+const KNOWN_ROOMS = ['bathroom', 'bedroom', 'kitchen', 'living', 'dining', 'office'];
+const PRIVACY_MODES = ['off', 'blur', 'paused'];
+
+// GET /api/users/me/privacy
+// What is switched on, and whether the pipeline has gone dead by itself.
+router.get('/me/privacy', auth, async (req, res) => {
+  try {
+    const p = req.user.privacy || {};
+    const now = new Date();
+    res.json({
+      mode: p.mode || 'off',
+      mode_set_at: p.mode_set_at || null,
+      sensitive_rooms: p.sensitive_rooms || [],
+      sensitive_places: p.sensitive_places || [],
+      // Reported as live/not-live rather than as a raw timestamp, so a stale
+      // auto_dead_until cannot read as "still dead" on the page.
+      auto_dead: !!(p.auto_dead_until && new Date(p.auto_dead_until) > now),
+      auto_dead_until: p.auto_dead_until || null,
+      auto_dead_reason: p.auto_dead_reason || null,
+      known_rooms: KNOWN_ROOMS,
+    });
+  } catch (error) {
+    console.error('[Privacy] Error reading settings:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /api/users/me/privacy
+// Set the mode, the sensitive rooms, or the sensitive places. Each field is
+// optional, so the one-tap toggle can send {mode} alone.
+router.put('/me/privacy', auth, async (req, res) => {
+  try {
+    const { mode, sensitive_rooms, sensitive_places } = req.body;
+    if (!req.user.privacy) req.user.privacy = {};
+
+    if (mode !== undefined) {
+      if (!PRIVACY_MODES.includes(mode)) {
+        return res.status(400).json({ error: `mode must be one of ${PRIVACY_MODES.join(', ')}` });
+      }
+      req.user.privacy.mode = mode;
+      // The moment it was set, which is what makes "privacy mode has been on
+      // for three hours" sayable. A wearer who switches it on and forgets is
+      // the likeliest way this feature causes harm.
+      req.user.privacy.mode_set_at = mode === 'off' ? null : new Date();
+    }
+
+    if (sensitive_rooms !== undefined) {
+      if (!Array.isArray(sensitive_rooms)) {
+        return res.status(400).json({ error: 'sensitive_rooms must be an array' });
+      }
+      const unknown = sensitive_rooms.filter(r => !KNOWN_ROOMS.includes(r));
+      if (unknown.length) {
+        return res.status(400).json({
+          error: `not rooms the camera can recognise: ${unknown.join(', ')}`,
+          known_rooms: KNOWN_ROOMS,
+        });
+      }
+      req.user.privacy.sensitive_rooms = [...new Set(sensitive_rooms)];
+    }
+
+    if (sensitive_places !== undefined) {
+      if (!Array.isArray(sensitive_places)) {
+        return res.status(400).json({ error: 'sensitive_places must be an array' });
+      }
+      const clean = [];
+      for (const pl of sensitive_places) {
+        const lat = Number(pl?.lat), lng = Number(pl?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return res.status(400).json({ error: 'every place needs a numeric lat and lng' });
+        }
+        if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+          return res.status(400).json({ error: 'lat/lng out of range' });
+        }
+        // Floored at 20 m rather than accepted as given: GPS on a phone is not
+        // accurate enough for a 5 m circle, and a radius the fix can never fall
+        // inside is a switch that does nothing.
+        const radius = Math.min(2000, Math.max(20, Number(pl?.radius_m) || 50));
+        clean.push({ label: String(pl?.label || '').slice(0, 60), lat, lng, radius_m: radius });
+      }
+      req.user.privacy.sensitive_places = clean;
+    }
+
+    req.user.markModified('privacy');
+    await req.user.save();
+    res.json({ message: 'Privacy settings updated', privacy: req.user.privacy });
+  } catch (error) {
+    console.error('[Privacy] Error updating settings:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/users/chat/:userId
 // Get chat history with a specific user
 router.get('/chat/:userId', auth, async (req, res) => {
