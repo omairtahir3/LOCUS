@@ -262,6 +262,18 @@ async function execute(r, userId) {
           placement: { $nin: ['in_hand', 'unknown'] },
         },
       },
+      // A sighting with no picture at all is bookkeeping, not an answer.
+      //
+      // When the indexer sees a belonging in a spot it has already stored a
+      // frame of, it records the sighting without one. Those rows are real and
+      // stay in the event log, but "where did I put my phone" should point at
+      // the sighting that can SHOW the place. Asked at 04:09 on 5 October, the
+      // newest row was the frameless 04:05:58 one and the answer came back with
+      // nothing to look at, while the 04:05:36 frame of the same desk existed.
+      //
+      // Not the same as a frame that has since expired: that row keeps its id
+      // and is still the best answer, with the picture simply gone.
+      keyframe_id: { $nin: [null, ''] },
     };
     const rows = await EventLog.find(q).sort({ timestamp: -1 })
       .limit(r.intent === 'item_last_location' ? 1 : 10).lean();

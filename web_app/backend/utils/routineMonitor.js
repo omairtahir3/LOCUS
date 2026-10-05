@@ -376,6 +376,16 @@ async function checkLeftBehind(user, sinceRun, now = new Date()) {
       // backwards.
       if (s.at < new Date(+start - grace)) continue;
       if (s.at > new Date(+end + LEFT_BEHIND_EXIT_TOLERANCE_MS)) continue;
+      // Still visible counts, not only newly logged.
+      //
+      // This asked whether a NEW EVENT existed after the sighting, and the
+      // fifteen-minute dedup guarantees one does not. On 5 October the wearer's
+      // phone, keys and earbuds sat on the desk in plain view, the indexer kept
+      // refreshing last_visible_at to 04:08:30, and this still reported all
+      // three as left behind at 04:09:26 because no new row had been written.
+      // Trigger 2 below was written to avoid precisely this and reads
+      // last_visible_at; this one never learned.
+      if (s.lastVisible && s.lastVisible > minutesAgo(ITEM_GONE_MIN, now)) continue;
       const seenSince = await EventLog.exists({
         user_id: { $in: idForms(user._id) }, event_type: 'object',
         'details.items.enrolled_item_id': itemId, timestamp: { $gt: s.at },

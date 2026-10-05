@@ -238,6 +238,15 @@ OUTDOOR_STATUS_CACHE_S = 60.0     # one DB lookup per user per minute, not per k
 # which is the flooding this gate exists to prevent.
 ITEM_DEDUP_SECONDS = 900  # 15 minutes
 
+# When a put-down counts as a NEW place rather than a repeat, on position alone.
+#
+# Zero overlap, because the camera is worn: turning the wearer's head moves
+# every box in frame, so anything short of "no shared pixels at all" would call
+# a glance a move. And only against a recent sighting, since two boxes minutes
+# apart may be different views rather than different places.
+MOVED_SPOT_IOU = float(os.environ.get("MOVED_SPOT_IOU", 0.0))
+MOVED_SPOT_MAX_AGE = float(os.environ.get("MOVED_SPOT_MAX_AGE", 300))
+
 # The same gate for a HELD sighting, which is a different kind of record. A held
 # sighting writes no keyframe and never reaches the feed; it exists so the
 # monitor can tell "carried away" from "left behind", and so a put-down that
@@ -573,6 +582,9 @@ class DailyItemIndexer:
         # (user, item identity, room) -> monotonic ts. The room is part of the
         # key so the same belonging is recorded again when it moves.
         self._last_item_seen: dict[tuple[str, Any, Any], float] = {}
+        # Where each kind of sighting was last RECORDED, so a later one can be
+        # told apart from a repeat without having caught the item in a hand.
+        self._last_item_box: dict[tuple[str, Any, Any], dict] = {}
         self._last_enriched_activity: dict[tuple[str, str], float] = {}  # (user, activity) -> monotonic ts
         self._is_running = True
 
@@ -1034,12 +1046,43 @@ class DailyItemIndexer:
             # Picked up since we last recorded it down? Then this is a new place.
             moved = (placement == "placed" and last is not None
                      and last_held is not None and last_held > last)
+
+            # ...or it is simply somewhere else, whether or not a hand was seen.
+            #
+            # The rule above needs the pick-up to have been CAUGHT. A hand
+            # closing round a phone hides most of it, the frames that catch the
+            # carry are few, and if none of them produced an in_hand sighting
+            # then the put-down in the new place looks like a repeat of the old
+            # one and is suppressed for fifteen minutes. That is what happened on
+            # 5 October: the phone moved at 04:06, nothing was logged until
+            # 04:20, and the monitor called it left behind at 04:09.
+            #
+            # Position is weaker evidence than a hand, because this camera is on
+            # the wearer and turning their head moves everything in frame. So it
+            # only counts when the boxes do not overlap AT ALL and the previous
+            # sighting is recent enough that the two describe the same scene.
+            # A head turn that drops overlap to zero is usually also a change of
+            # view, and the next sighting re-anchors it either way: the cost of
+            # being wrong is one extra memory, against a false "you left it
+            # behind" for the cost of being right.
+            if not moved and placement == "placed" and last is not None:
+                prev_box = self._last_item_box.get(k)
+                if prev_box and (now_ts - last) <= MOVED_SPOT_MAX_AGE:
+                    if self._box_iou(d.get("bbox") or {}, prev_box) <= MOVED_SPOT_IOU:
+                        moved = True
+                        print(f"[Items] {d.get('matched_item', d['name'])} is in a "
+                              f"different place from where it was recorded; "
+                              f"treating it as moved")
             # Held sightings cost no keyframe and no disk, so they are rate
             # limited only enough to stop a row per frame. Keeping them frequent
             # is what lets the monitor tell "carried away" from "left behind".
             window = ITEM_HELD_DEDUP_SECONDS if placement == "in_hand" else ITEM_DEDUP_SECONDS
             if last is None or (now_ts - last) >= window or moved:
                 self._last_item_seen[k] = now_ts
+                # Remembered so the next sighting can tell "still there" from
+                # "somewhere else" without needing to have seen a hand.
+                if d.get("bbox"):
+                    self._last_item_box[k] = dict(d["bbox"])
                 if moved:
                     print(f"[Items] {d.get('matched_item', d['name'])} was carried "
                           f"and put down again; recording where it is now")
