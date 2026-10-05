@@ -38,11 +38,23 @@ const NotificationSchema = new mongoose.Schema({
   medication_id:     { type: mongoose.Schema.Types.ObjectId, ref: 'Medication', default: null },
   medication_log_id: { type: mongoose.Schema.Types.ObjectId, ref: 'MedicationLog', default: null },
 
-  // Delivery status per channel
+  // Delivery status per channel.
+  //
+  // attempts/next_attempt_at are what make a failure recoverable. A push that
+  // failed because the device was off, or an email that failed because SMTP
+  // hiccupped, was recorded {sent: false, failed: true} and left there
+  // forever: the record was honest and nothing ever acted on it. The retry
+  // sweep in utils/notifications.js reads these two fields.
+  //
+  // A channel that has exhausted its attempts keeps failed: true with attempts
+  // at the ceiling, which is the permanent-failure record the UI can show.
   delivery: {
-    push:  { sent: Boolean, sent_at: Date, failed: Boolean },
-    email: { sent: Boolean, sent_at: Date, failed: Boolean },
-    sms:   { sent: Boolean, sent_at: Date, failed: Boolean },
+    push:  { sent: Boolean, sent_at: Date, failed: Boolean,
+             attempts: { type: Number, default: 0 }, next_attempt_at: Date },
+    email: { sent: Boolean, sent_at: Date, failed: Boolean,
+             attempts: { type: Number, default: 0 }, next_attempt_at: Date },
+    sms:   { sent: Boolean, sent_at: Date, failed: Boolean,
+             attempts: { type: Number, default: 0 }, next_attempt_at: Date },
   },
 
   // Last line of defence against the same alert being written twice. Callers
@@ -70,6 +82,12 @@ const NotificationSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 NotificationSchema.index({ recipient_id: 1, createdAt: -1 });
+// The retry sweep scans by due time across every recipient, so it needs its own
+// index rather than riding on a recipient-first one.
+NotificationSchema.index({ 'delivery.push.next_attempt_at': 1 },
+  { partialFilterExpression: { 'delivery.push.failed': true } });
+NotificationSchema.index({ 'delivery.email.next_attempt_at': 1 },
+  { partialFilterExpression: { 'delivery.email.failed': true } });
 NotificationSchema.index({ recipient_id: 1, is_read: 1 });
 NotificationSchema.index({ recipient_id: 1, is_dismissed: 1 });
 NotificationSchema.index({ dedup_key: 1 }, {

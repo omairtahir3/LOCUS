@@ -243,6 +243,21 @@ const checkEscalations = async () => {
   }
 };
 
+/** Re-send deliveries that failed (FE 9-5 auto-retry). Contained: a bad row
+ *  must not stop the reminder checks that share this tick. */
+const retrySweep = async () => {
+  try {
+    const { retryFailedDeliveries } = require('./notifications');
+    const r = await retryFailedDeliveries();
+    if (r.checked) {
+      console.log(`[Scheduler] delivery retries: ${r.checked} due, ` +
+        `${r.recovered} recovered, ${r.exhausted} given up on`);
+    }
+  } catch (err) {
+    console.error('[Scheduler] Error retrying deliveries:', err.message);
+  }
+};
+
 const init = () => {
   console.log('[NotificationScheduler] Starting cron tasks (every 60s)...');
 
@@ -252,6 +267,9 @@ const init = () => {
     await checkRemindersAndSnooze();
     await checkReminderExhaustion();
     await checkEscalations();
+    // Last, so a delivery that failed during THIS tick is picked up on the
+    // next one rather than retried a second after it failed.
+    await retrySweep();
   });
   cron.schedule('* * * * *', tick);
 
@@ -263,5 +281,6 @@ const init = () => {
 
 module.exports = {
   init, checkRemindersAndSnooze, checkReminderExhaustion, checkEscalations, runNightlyBatchSync,
+  retrySweep,
   _withLeaseForTests: withLease,
 };

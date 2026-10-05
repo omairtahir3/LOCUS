@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
-import { MapPin, Navigation, AlertTriangle, Shield } from 'lucide-react';
+import { MapPin, Navigation, AlertTriangle, Shield, Package } from 'lucide-react';
 import LocationMapComponent from '../components/LocationMap';
-import api from '../services/api';
+import api, { userItemsAPI } from '../services/api';
 import UserSelector from '../components/Layout/UserSelector';
 
 import { useSelectedUser } from '../context/SelectedUserContext';
@@ -10,6 +10,9 @@ import { useAuth } from '../context/AuthContext';
 
 export default function LocationMap() {
   const [locationData, setLocationData] = useState(null);
+  // Where each belonging was last seen (FE 10-4). Its own request, so a
+  // belongings failure never blanks the person's position.
+  const [itemPins, setItemPins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const location = useLocation();
@@ -61,10 +64,22 @@ export default function LocationMap() {
       }
     };
     
+    const fetchItemPins = async () => {
+      try {
+        const res = await userItemsAPI.lastSeenAll(selectedUser?._id);
+        setItemPins(res.data?.items || []);
+      } catch {
+        // A belonging with no sighting is the normal case indoors, and this
+        // must never be the reason the map does not draw.
+        setItemPins([]);
+      }
+    };
+
     fetchLocation();
-    
+    fetchItemPins();
+
     // Auto refresh every 30 seconds
-    const interval = setInterval(fetchLocation, 30000);
+    const interval = setInterval(() => { fetchLocation(); fetchItemPins(); }, 30000);
     return () => clearInterval(interval);
   }, [sosData, selectedUser, user]);
 
@@ -142,33 +157,60 @@ export default function LocationMap() {
             lat={locationData.lat} 
             lng={locationData.lng} 
             timestamp={locationData.timestamp} 
+            items={itemPins}
           />
         ) : null}
       </div>
 
-      {/* Feature preview cards */}
-      <div className="stat-grid mt-4">
-        <div className="stat-card">
-          <div className="stat-icon primary"><MapPin size={20} /></div>
-          <div>
-            <div className="stat-label" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Live Tracking</div>
-            <div className="text-xs text-muted">Real-time GPS location on interactive map</div>
-          </div>
+      {/* Where each belonging was last seen, matching the amber dots on the map.
+          This replaced three cards advertising "Geofence Alerts" and "guided
+          navigation", neither of which exists: a label is not a feature, and on
+          a page a caregiver opens in an emergency it is worse than empty. */}
+      <div className="card mt-4" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Package size={16} style={{ color: '#F59E0B' }} />
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Belongings last seen</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon warning"><AlertTriangle size={20} /></div>
-          <div>
-            <div className="stat-label" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Geofence Alerts</div>
-            <div className="text-xs text-muted">Get notified when family member leaves safe zones</div>
+        {itemPins.length === 0 ? (
+          <p className="text-xs text-muted" style={{ margin: 0 }}>
+            No belongings have been sighted with a GPS fix in the last three days.
+            Indoors there is often no fix to record, which is normal.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {itemPins.map(it => (
+              <div key={it.item_id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                paddingBottom: 8, borderBottom: '1px solid var(--border)',
+              }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%', background: '#F59E0B',
+                  border: '2px solid #fff', boxShadow: '0 0 0 1px var(--border)', flexShrink: 0,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {it.name}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {new Date(it.at).toLocaleString('en-US', {
+                      day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
+                    })}
+                    {it.placement === 'in_hand' ? ' · was being carried' : ''}
+                  </div>
+                </div>
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${it.location.lat},${it.location.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs"
+                  style={{ color: 'var(--primary)', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                >
+                  Open in Maps
+                </a>
+              </div>
+            ))}
           </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon danger"><Navigation size={20} /></div>
-          <div>
-            <div className="stat-label" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Emergency Mode</div>
-            <div className="text-xs text-muted">"I'm Lost" panic button with guided navigation</div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

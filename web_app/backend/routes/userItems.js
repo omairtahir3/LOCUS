@@ -214,6 +214,85 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// GET /api/user-items/last-seen?user_id=&hours=
+//
+// Where each belonging was last seen, with its GPS fix, in ONE call.
+//
+// FE 10-4 asks for location history "with item last-seen markers". The data was
+// already being written -- every object event carries the GPS fix that was
+// current when the item was sighted (FE-13) -- and /:id/last-seen could read it
+// for one item at a time, which no client ever did because a map needs them all
+// at once.
+//
+// Registered BEFORE /:id deliberately: Express matches in order, so with this
+// below it "last-seen" is read as an item id and answers 404.
+router.get('/last-seen', auth, async (req, res) => {
+  try {
+    // Same convention as /api/location/latest: an explicit user_id must be one
+    // this caregiver monitors, and a caregiver with none named falls back to
+    // their first.
+    let userId = req.query.user_id || req.user.id;
+    if (String(userId) !== String(req.user.id)) {
+      const caregiver = await User.findById(req.user.id);
+      const monitored = (caregiver?.monitoring_users || []).map(String);
+      if (!monitored.includes(String(userId))) {
+        return res.status(403).json({ error: "Not authorized to view these items" });
+      }
+    } else {
+      userId = await resolveUserId(req);
+    }
+
+    const EventLog = require('../models/EventLog');
+    // A marker older than this is a memory, not a place to go and look. Three
+    // days by default, which outlives the 36 h keyframe window so the pin
+    // survives the photograph.
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 72));
+    const since = new Date(Date.now() - hours * 3600000);
+
+    const items = await UserItem.find({ user_id: userId, is_active: true })
+      .select('item_name').lean();
+    if (!items.length) return res.json({ items: [] });
+    const nameOf = new Map(items.map(i => [String(i._id), i.item_name]));
+
+    // Only sightings that carry a fix: without one there is nothing to pin.
+    const events = await EventLog.find({
+      user_id: { $in: [userId, String(userId)] },
+      event_type: 'object',
+      timestamp: { $gte: since },
+      'location.lat': { $exists: true },
+    }).sort({ timestamp: -1 }).select('timestamp keyframe_id location details.items').lean();
+
+    // Newest wins. Keyed by STRING: an ObjectId key compares by reference, so
+    // a Map keyed on the raw value silently keeps every sighting separate.
+    const latest = new Map();
+    for (const ev of events) {
+      for (const it of (ev.details?.items || [])) {
+        const id = it.enrolled_item_id && String(it.enrolled_item_id);
+        if (!id || !nameOf.has(id) || latest.has(id)) continue;
+        latest.set(id, {
+          item_id: id,
+          name: nameOf.get(id),
+          at: ev.timestamp,
+          location: ev.location,
+          placement: it.placement || null,
+          keyframe_id: ev.keyframe_id || null,
+          // The route is authorised, so a browser <img> needs ?t= from
+          // /api/detection/image-token and Flutter needs the header.
+          image_url: ev.keyframe_id
+            ? `/api/detection/keyframes/${ev.keyframe_id}/image` : null,
+        });
+      }
+    }
+
+    // Newest first, so the list beside the map reads in the same order.
+    const out = [...latest.values()].sort((a, b) => new Date(b.at) - new Date(a.at));
+    res.json({ items: out, window_hours: hours });
+  } catch (err) {
+    console.error('Error fetching item last-seen:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/user-items/:id
 // Get a single item by ID
 router.get('/:id', auth, async (req, res) => {
