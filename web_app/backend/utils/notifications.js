@@ -470,6 +470,9 @@ const createNotification = async ({
       updates['delivery.email.sent'] = sent;
       updates['delivery.email.sent_at'] = sent ? new Date() : null;
       updates['delivery.email.failed'] = !sent;
+      // A failure is scheduled for another go rather than simply recorded.
+      // attempts counts RETRIES, so the original send leaves it at zero.
+      if (!sent) updates['delivery.email.next_attempt_at'] = nextAttemptAt(0);
     }
   }
 
@@ -484,6 +487,7 @@ const createNotification = async ({
     updates['delivery.push.sent'] = sentPush;
     updates['delivery.push.sent_at'] = sentPush ? new Date() : null;
     updates['delivery.push.failed'] = !sentPush;
+    if (!sentPush) updates['delivery.push.next_attempt_at'] = nextAttemptAt(0);
   }
 
   if (Object.keys(updates).length > 0) {
@@ -702,9 +706,132 @@ const escalateAlert = async (notification) => {
   set['delivery.push.sent'] = pushSent;
   set['delivery.push.failed'] = !pushSent;
   if (pushSent) set['delivery.push.sent_at'] = new Date();
+  else set['delivery.push.next_attempt_at'] = nextAttemptAt(0);
+  if (!emailSent && recipient.notification_prefs?.email) {
+    set['delivery.email.next_attempt_at'] = nextAttemptAt(0);
+  }
   await Notification.findByIdAndUpdate(notification._id, { $set: set });
 
   return true;
+};
+
+
+// ── Retrying a delivery that failed ─────────────────────────────────────────
+//
+// FE 9-5 asks for "delivery tracking and auto-retry". The tracking was there:
+// every send wrote {sent, sent_at, failed} per channel and they were accurate.
+// Nothing ever read them. A push that failed because the phone was off, or an
+// email that failed because SMTP refused the connection, stayed failed for
+// good, and the one notification that most needs to arrive -- an escalation
+// nobody has acknowledged -- was exactly the one with no second chance.
+//
+// Three retries on a widening gap. Past that the channel is left failed with
+// attempts at the ceiling, which is a permanent-failure record rather than an
+// endless queue.
+const RETRY_BACKOFF_MIN = [1, 5, 15];
+const MAX_DELIVERY_ATTEMPTS = RETRY_BACKOFF_MIN.length;
+
+// An alert is not worth retrying indefinitely: "take your 2pm tablets"
+// delivered at 8pm is not a late reminder, it is a wrong one. Two hours is the
+// same window the medication logic already treats as the point of no return,
+// so a dose alert stops being retried at the moment the dose is marked missed
+// -- and the missed-dose alert that replaces it gets its own three attempts.
+const RETRY_MAX_AGE_MIN = Number(process.env.RETRY_MAX_AGE_MIN || 120);
+
+/** When the next attempt is due, or null once they are exhausted. */
+function nextAttemptAt(attempts, from = new Date()) {
+  const mins = RETRY_BACKOFF_MIN[attempts];
+  return mins === undefined ? null : new Date(+from + mins * 60000);
+}
+
+/**
+ * Re-send the channels that failed, for notifications still worth delivering.
+ *
+ * Returns {checked, recovered, exhausted}. Never throws: this runs on the
+ * minute cron and a bad row must not take the tick down with it.
+ */
+const retryFailedDeliveries = async (limit = 25) => {
+  const now = new Date();
+  const freshEnough = new Date(+now - RETRY_MAX_AGE_MIN * 60000);
+  const due = (ch) => ({
+    [`delivery.${ch}.failed`]: true,
+    [`delivery.${ch}.sent`]: { $ne: true },
+    [`delivery.${ch}.attempts`]: { $lt: MAX_DELIVERY_ATTEMPTS },
+    $or: [
+      { [`delivery.${ch}.next_attempt_at`]: { $lte: now } },
+      { [`delivery.${ch}.next_attempt_at`]: null },
+      { [`delivery.${ch}.next_attempt_at`]: { $exists: false } },
+    ],
+  });
+
+  const rows = await Notification.find({
+    createdAt: { $gte: freshEnough },
+    $or: [due('push'), due('email')],
+  }).sort({ createdAt: 1 }).limit(limit);
+
+  let recovered = 0, exhausted = 0;
+  for (const n of rows) {
+    // A dismissed alert is one the recipient has already dealt with by other
+    // means, so chasing the delivery is noise.
+    if (n.is_dismissed || n.acknowledged_at) continue;
+
+    const User = require('../models/User');
+    const recipient = await User.findById(n.recipient_id);
+    if (!recipient) continue;
+
+    const set = {};
+    for (const ch of ['push', 'email']) {
+      const d = n.delivery?.[ch] || {};
+      if (!d.failed || d.sent === true) continue;
+      const attempts = Number(d.attempts || 0);
+      if (attempts >= MAX_DELIVERY_ATTEMPTS) continue;
+      if (d.next_attempt_at && new Date(d.next_attempt_at) > now) continue;
+
+      // Honour the preference on every attempt, not just the first: somebody
+      // who turned email off between the failure and the retry has said no.
+      let ok = false;
+      if (ch === 'push') {
+        if (recipient.notification_prefs?.push === false) continue;
+        ok = await sendPushNotification({
+          userId: n.recipient_id, title: n.title, body: n.message,
+          payload: { type: n.type, logId: n.medication_log_id?.toString() },
+        });
+      } else {
+        if (!recipient.notification_prefs?.email || !recipient.email) continue;
+        // Sent directly rather than queued. The digest exists to coalesce a
+        // burst of NEW alerts; a retry is one message that already missed its
+        // moment, and holding it again is the opposite of what is wanted.
+        ok = await sendEmail({
+          to: recipient.email,
+          subject: n.title,
+          html: getLocusEmailHtml({ title: n.title, message: n.message, type: n.type }),
+          text: getLocusEmailText({ title: n.title, message: n.message }),
+        });
+      }
+
+      const tries = attempts + 1;
+      set[`delivery.${ch}.attempts`] = tries;
+      if (ok) {
+        set[`delivery.${ch}.sent`] = true;
+        set[`delivery.${ch}.failed`] = false;
+        set[`delivery.${ch}.sent_at`] = new Date();
+        set[`delivery.${ch}.next_attempt_at`] = null;
+        recovered++;
+        console.log(`[Notifications] ${ch} recovered on attempt ${tries}: ${n.type} -> ${recipient.email || recipient._id}`);
+      } else {
+        const next = nextAttemptAt(tries, now);
+        set[`delivery.${ch}.next_attempt_at`] = next;
+        if (!next) {
+          exhausted++;
+          console.warn(`[Notifications] ${ch} gave up after ${tries} attempts: ${n.type} for ${recipient._id}`);
+        }
+      }
+    }
+    if (Object.keys(set).length) {
+      await Notification.findByIdAndUpdate(n._id, { $set: set });
+    }
+  }
+  return { checked: rows.length, recovered, exhausted };
 };
 
 module.exports = {
@@ -723,6 +850,11 @@ module.exports = {
   flushEmails: flushAll,
   ensureDedupIndex,
   keyframeAttachment,
+  retryFailedDeliveries,
+  nextAttemptAt,
+  MAX_DELIVERY_ATTEMPTS,
+  RETRY_BACKOFF_MIN,
+  RETRY_MAX_AGE_MIN,
 };
 
 // emailDigest needs to send and to record delivery, but notifications.js is

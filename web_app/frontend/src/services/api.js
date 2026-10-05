@@ -197,6 +197,10 @@ export const userItemsAPI = {
   getAll:  ()        => api.get('/user-items'),
   get:     (id)      => api.get(`/user-items/${id}`),
   lastSeen:(id)      => api.get(`/user-items/${id}/last-seen`),
+  // Every belonging's last sighting with its GPS fix, in one call, for the map
+  // pins. userId is set when a caregiver is viewing somebody else.
+  lastSeenAll: (userId) => api.get('/user-items/last-seen'
+    + (userId ? `?user_id=${userId}` : '')),
   remove:  (id)      => api.delete(`/user-items/${id}`),
   // frames are data: URLs or raw base64, 10 to 15 of them. The server enforces
   // that range as well, because a limit only the client knows is not a limit.

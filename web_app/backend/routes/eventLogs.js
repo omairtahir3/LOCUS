@@ -60,7 +60,7 @@ router.get('/memory-search', auth, async (req, res) => {
       }
     }
 
-    const { type, limit, date } = req.query;
+    const { type, limit, date, person, item } = req.query;
 
     // Same id-form problem as the timeline: some writers store user_id as a
     // string and others as an ObjectId, and matching only one form returns an
@@ -134,6 +134,35 @@ router.get('/memory-search', auth, async (req, res) => {
       query.event_type = type; // override with specific filter
     }
 
+    // ── Filtered by person, or by object (FE 6-3) ────────────────────────────
+    //
+    // The spec asks for search "filtered by date, person, or object". Date was
+    // here; the other two were only reachable as a category -- "Social" gave
+    // every person at once and "Belongings" every item -- so "when did I last
+    // see Omair" could not be narrowed at all without asking the agent.
+    //
+    // Narrowing by one entity necessarily restricts the event type: only a face
+    // event has a person and only an object event has a belonging. Set here
+    // rather than left to the caller, so a request cannot ask for a person
+    // among medication rows and quietly get nothing.
+    if (person) {
+      if (!mongoose.Types.ObjectId.isValid(String(person))) {
+        return res.status(400).json({ error: 'person must be a relationship id' });
+      }
+      query.person_id = new mongoose.Types.ObjectId(String(person));
+      query.event_type = 'social_interaction';
+    }
+    if (item) {
+      if (!mongoose.Types.ObjectId.isValid(String(item))) {
+        return res.status(400).json({ error: 'item must be a belonging id' });
+      }
+      // Stored as a string on the event, so matched as one. The $nor above
+      // still applies, so a sighting with no picture or one in the wearer's
+      // hand stays excluded for this item exactly as for any other.
+      query['details.items.enrolled_item_id'] = String(item);
+      query.event_type = 'object';
+    }
+
     // A day at a time, bounded by the LOCAL day so "the 24th" means the same
     // thing to the person reading it as to their clock. Without a date this
     // still returns the most recent events, as it always did.
@@ -154,7 +183,12 @@ router.get('/memory-search', auth, async (req, res) => {
     const cap = limit ? Math.min(Number(limit) || HARD_CAP, HARD_CAP) : (date ? HARD_CAP : 200);
 
     const events = await EventLog.find(query)
-      .populate('person_id', 'person_name relationship_type face_embedding')
+      // Name and relationship only. This also asked for face_embedding, which
+      // is a 512-float biometric template: no client reads it, the timeline
+      // route next door never sent it, and a page of memories was shipping one
+      // per recognised face to the browser. A day with 264 events would send
+      // one for every row of them.
+      .populate('person_id', 'person_name relationship_type')
       .sort({ timestamp: -1 })
       .limit(cap);
 
