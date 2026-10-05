@@ -95,6 +95,20 @@ router.get('/memory-search', auth, async (req, res) => {
       // person is expected to confirm before it counts.
       $nor: [
         { event_type: 'medication_intake', verification_status: { $ne: 'confirmed' } },
+        // A belonging memory that never had a picture.
+        //
+        // These are not memories, they are bookkeeping: the indexer had already
+        // stored a frame of that belonging in that spot, so the second sighting
+        // was recorded without one. On the page it drew an entry saying the
+        // phone was spotted with nothing to show, which reads as a photograph
+        // that failed to load.
+        //
+        // Written as "has no keyframe_id", which is different from "its picture
+        // has since been deleted". A memory whose frame has passed its retention
+        // window KEEPS its id and stays on the page; the page simply has nothing
+        // to render for it. Only the ones that never had a frame are dropped.
+        { event_type: 'object', keyframe_id: { $in: [null, ''] } },
+        { event_type: 'object', keyframe_id: { $exists: false } },
         // An item in the wearer's own hand is not a memory of where they left
         // something, and `unknown` is the indexer saying it could not tell.
         // Neither has a picture any more either, so without this they appeared
