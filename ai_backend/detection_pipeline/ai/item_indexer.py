@@ -882,8 +882,11 @@ class DailyItemIndexer:
                     print(f"[DailyItemIndexer] {backlog} frames queued, skipping the "
                           f"tile scan to catch up")
                 else:
-                    detections.extend(self._scan_tiles_for_enrolled_items(
-                        image, user_id_str, exclude_item_ids=already_matched))
+                    tiles = self._scan_tiles_for_enrolled_items(
+                        image, user_id_str, exclude_item_ids=already_matched)
+                    if tiles:
+                        tiles = self._corroborated_tiles(tiles, detections, image)
+                    detections.extend(tiles)
 
         if not detections:
             return
@@ -2252,6 +2255,45 @@ class DailyItemIndexer:
             print(f"[DailyItemIndexer] Error persisting scene session: {e}")
 
     # ── Tiled exemplar scan ──────────────────────────────────────────────────
+    def _corroborated_tiles(self, tiles, boxed, image):
+        """A tile match needs a reason to be believed beyond its own score.
+
+        The tile scanner slices the frame into fixed squares and asks whether
+        each one resembles an enrolled belonging. It has no object boundary, so
+        a square holding a television, a computer mouse or a stretch of desk is
+        compared whole against galleries of whole photographs, and it scores the
+        way a real sighting scores. Every number available says the same thing:
+
+            4 Oct 04:05:36  Car Keys   0.747  hands, 2 detector boxes  CORRECT
+            5 Oct 01:25:18  Phone      0.745  nothing else in frame    a TV
+
+        Two thousandths apart, so no threshold can separate them. What separates
+        them is the rest of the frame. A belonging is put down where the wearer
+        IS: their hands are in shot, or the detector has boxed something else
+        nearby. A television across the room has neither.
+
+        This refuses rather than lowers confidence, because a stored frame of
+        somebody's living room labelled "your phone is here" is worse than no
+        sighting at all: it sends them to the wrong room.
+        """
+        if not tiles:
+            return tiles
+        # Anything the real detector boxed and matched in this same frame.
+        corroborating = [d for d in boxed if d.get("generic_name") != "tile_scan"]
+        if corroborating:
+            return tiles
+        try:
+            hands = self._hand_boxes(image)
+        except Exception:
+            hands = None
+        if hands:
+            return tiles
+        for t in tiles:
+            print(f"[DailyItemIndexer] Tile match '{t.get('matched_item')}' "
+                  f"({t.get('exemplar_similarity')}) has nothing else in frame to "
+                  f"support it, no hands and no detected object; not recording it")
+        return []
+
     def _tile_regions(self, img_w: int, img_h: int) -> list[tuple[int, int, int, int]]:
         """Multi-scale sliding windows over the searchable region of the frame."""
         x0 = int(TILE_REGION_X[0] * img_w)
