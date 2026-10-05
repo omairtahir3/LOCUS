@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { eventLogsAPI, detectionAPI, relationshipsAPI, userItemsAPI } from '../services/api';
+import { eventLogsAPI, detectionAPI } from '../services/api';
 import { formatClockTime } from '../utils/dateUtils';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
@@ -98,13 +98,6 @@ export default function MemorySearch() {
   // behaviour of showing the most recent memories regardless of date.
   const [date, setDate] = useState(todayStr);
 
-  // Narrowing by WHO or by WHAT (FE 6-3). Empty string means "everyone" /
-  // "everything", which is the state the page has always been in.
-  const [personId, setPersonId] = useState('');
-  const [itemId, setItemId] = useState('');
-  const [people, setPeople] = useState([]);
-  const [things, setThings] = useState([]);
-
   // `quiet` refreshes in place, without the spinner: a background poll that
   // blanks the list every few seconds is worse than not polling at all.
   const fetchEvents = async ({ quiet = false } = {}) => {
@@ -112,11 +105,7 @@ export default function MemorySearch() {
     try {
       // No limit when a day is chosen: every memory from that day is the
       // point of asking for the day.
-      const res = await eventLogsAPI.getMemorySearch({
-        ...(date ? { date } : {}),
-        ...(personId ? { person: personId } : {}),
-        ...(itemId ? { item: itemId } : {}),
-      });
+      const res = await eventLogsAPI.getMemorySearch(date ? { date } : {});
       setEvents(res.data || []);
     } catch (e) {
       console.error('Failed to load events:', e);
@@ -127,26 +116,7 @@ export default function MemorySearch() {
 
   useEffect(() => {
     fetchEvents();
-  }, [date, personId, itemId]);
-
-  // The option lists, once. Loaded from what the person has actually enrolled
-  // rather than from the names appearing in the events: a belonging with no
-  // sightings today should still be offerable, so that choosing it and seeing
-  // nothing is an answer ("not seen today") rather than a missing control.
-  useEffect(() => {
-    (async () => {
-      try {
-        const [r, i] = await Promise.all([
-          relationshipsAPI.getAll().catch(() => ({ data: [] })),
-          userItemsAPI.getAll().catch(() => ({ data: [] })),
-        ]);
-        setPeople((r.data || []).filter(x => x?.person_name));
-        setThings((i.data || []).filter(x => x?.item_name));
-      } catch {
-        // Filters are an addition to the page, never a condition of it.
-      }
-    })();
-  }, []);
+  }, [date]);
 
   // This page used to fetch on mount and when the date changed, and never
   // again. While a camera is running that makes it a snapshot of the moment it
@@ -465,45 +435,6 @@ export default function MemorySearch() {
             </button>
           </div>
         )}
-
-        {/* Narrowing by who or by what (FE 6-3). Choosing one clears the other:
-            a face event has no belonging and an object event has no person, so
-            both at once can only ever return nothing. */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          <select
-            value={personId}
-            onChange={(e) => { setPersonId(e.target.value); if (e.target.value) setItemId(''); }}
-            className="form-input"
-            style={{ padding: '6px 10px', fontSize: '0.85rem', height: 32, borderRadius: 8, maxWidth: 200 }}
-            title="Show only interactions with one person"
-          >
-            <option value="">Anyone</option>
-            {people.map(pp => (
-              <option key={pp._id} value={pp._id}>{pp.person_name}</option>
-            ))}
-          </select>
-          <select
-            value={itemId}
-            onChange={(e) => { setItemId(e.target.value); if (e.target.value) setPersonId(''); }}
-            className="form-input"
-            style={{ padding: '6px 10px', fontSize: '0.85rem', height: 32, borderRadius: 8, maxWidth: 200 }}
-            title="Show only sightings of one belonging"
-          >
-            <option value="">Any belonging</option>
-            {things.map(t => (
-              <option key={t._id} value={t._id}>{t.item_name}</option>
-            ))}
-          </select>
-          {(personId || itemId) && (
-            <button
-              onClick={() => { setPersonId(''); setItemId(''); }}
-              className="btn"
-              style={{ height: 32, padding: '0 12px', fontSize: '0.8rem', fontWeight: 600 }}
-            >
-              Clear
-            </button>
-          )}
-        </div>
 
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
           {FILTERS.map(f => (
