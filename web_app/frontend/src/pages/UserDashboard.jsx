@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { userAPI, authAPI, detectionAPI } from '../services/api';
 import { formatTime12Hour } from '../utils/dateUtils';
+import PrivacyPanel from '../components/Privacy/PrivacyPanel';
 import { useAuth } from '../context/AuthContext';
 import {
   Pill, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp,
@@ -338,6 +339,19 @@ export default function UserDashboard() {
         <h1>Hello, {user?.name?.split(' ')[0]}!</h1>
         <p>You're doing great. Stay on track today.</p>
       </header>
+
+      {/* One tap, above the live monitor (Module 10 FE-3). Somebody who wants
+          the camera off wants it off NOW, not after finding Settings: this is
+          the first control on the page they land on. */}
+      <div className="card" style={{ marginBottom: 24, borderRadius: 24 }}>
+        <div style={{ padding: '20px 24px' }}>
+          <h3 className="card-title" style={{ marginTop: 0, marginBottom: 4 }}>Privacy</h3>
+          <p className="card-subtitle" style={{ marginBottom: 14 }}>
+            Turn the camera off, or keep it on without recognisable pictures
+          </p>
+          <PrivacyPanel compact />
+        </div>
+      </div>
 
       <div className="card" style={{ marginBottom: 32, borderRadius: 32 }}>
         <div className="card-header" style={{ padding: '24px 32px' }}>

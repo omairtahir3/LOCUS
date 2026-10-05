@@ -856,7 +856,12 @@ class DailyItemIndexer:
         # Runs on every keyframe, before any item-related early return: the room
         # the wearer is in does not depend on whether they own anything in view.
         user_id_str = str((metadata or {}).get("user_id", ""))
-        self._observe_scene(scene_detections, user_id_str, keyframe_id, metadata)
+        # Returns True when the room itself is private. Everything below this
+        # line stores something derived from this frame -- an item crop, a
+        # sighting row, a session cover photograph -- so a washroom frame has to
+        # stop here rather than merely be left out of the room history.
+        if self._observe_scene(scene_detections, user_id_str, keyframe_id, metadata):
+            return
 
         # ── Exemplar Embedding Gallery: match detections against enrolled items ──
         if detections and user_id_str:
@@ -2129,14 +2134,18 @@ class DailyItemIndexer:
 
         Emits an event only when a session CLOSES, so the feed carries
         "Kitchen activity for 25 minutes" rather than a label per frame.
+
+        Returns True when this room is one the wearer asked never to be
+        recorded in, which means the caller must stop: nothing further about
+        this frame may be stored.
         """
         if not user_id_str:
-            return
+            return False
         try:
             from ai.scene import classify_scene, SceneSessionTracker
         except Exception as e:
             print(f"[DailyItemIndexer] scene module unavailable: {e}")
-            return
+            return False
 
         tracker = self._scene_trackers.get(user_id_str)
         if tracker is None:
@@ -2144,6 +2153,28 @@ class DailyItemIndexer:
             self._scene_trackers[user_id_str] = tracker
 
         room, score, scores = classify_scene(all_detections)
+
+        # ── The washroom rule (Module A FE-5) ────────────────────────────────
+        #
+        # This is the earliest moment anything in the system knows which room
+        # the wearer is in, and it is already too late: the frame being
+        # classified was written to disk seconds ago by the capture loop, a
+        # thumbnail may have been rendered from it, and an event row points at
+        # it. So recognising a sensitive room does two things, and the second
+        # matters more than the first -- it closes the gate on what comes next,
+        # and destroys what has already been kept.
+        #
+        # Checked before the session tracker sees it, so no bathroom session is
+        # ever opened, named, or given a cover photograph.
+        try:
+            from ai.privacy import is_sensitive_room, enter_sensitive_room
+            if is_sensitive_room(user_id_str, room):
+                print(f"[Privacy] {room} recognised ({score:.2f}); going dark "
+                      f"and destroying what was already stored")
+                enter_sensitive_room(user_id_str, room)
+                return True
+        except Exception as e:
+            print(f"[Privacy] sensitive-room check skipped: {e}")
 
         # One line per indexed frame saying what was seen and what was decided.
         # "Nothing was recognised" had been indistinguishable from "Tier-2 never

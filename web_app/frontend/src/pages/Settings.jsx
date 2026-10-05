@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { User, Bell, Shield, Save, Link as LinkIcon, Users, Package } from 'lucide-react';
+import PrivacyPanel from '../components/Privacy/PrivacyPanel';
 import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
@@ -86,6 +87,26 @@ export default function SettingsPage() {
       </div>
 
       {/* Link a User */}
+      {/* Privacy Mode, and the rooms and places that switch recording off by
+          themselves. Above Personal Belongings deliberately: what the camera
+          must NOT see belongs before what it is told to look for. */}
+      <div className="card mb-4">
+        <div className="card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Shield size={18} style={{ color: 'var(--primary)' }} />
+            <div style={{ flex: 1 }}>
+              <div className="card-title">Privacy</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                What the camera records, and where it stops by itself
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '0 4px' }}>
+          <PrivacyPanel />
+        </div>
+      </div>
+
       {/* Personal belongings. The phone keeps this in Settings so the web does
           too, and a desk is where adding ten to fifteen photographs is bearable. */}
       <div className="card mb-4">

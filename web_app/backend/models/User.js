@@ -24,6 +24,39 @@ const UserSchema = new mongoose.Schema({
     emergency:       { type: Boolean, default: true },
   },
 
+  // ── Privacy (Module A FE-4 and FE-5, Module 10 FE-3) ──────────────────────
+  //
+  // Three states, not a boolean, because "stop recording" and "stop showing me
+  // recognisable pictures" are different needs and the wearer should be able to
+  // pick. 'blur' keeps the day's record while making every stored frame
+  // unreadable; 'paused' keeps nothing at all.
+  //
+  // sensitive_rooms is the washroom rule. The scene classifier already knows a
+  // bathroom (Toilet, Bathtub, Toothbrush, Toilet Paper), and the moment it
+  // says so the capture goes dead and the frames already written from that room
+  // are destroyed -- classification happens after a frame reaches disk, so
+  // without the retroactive half the first washroom frames would survive the
+  // very feature meant to prevent them.
+  //
+  // It defaults to ['bathroom'] rather than empty. A privacy feature that
+  // protects nobody until they configure it protects nobody.
+  privacy: {
+    mode:            { type: String, enum: ['off', 'blur', 'paused'], default: 'off' },
+    mode_set_at:     { type: Date, default: null },
+    sensitive_rooms: { type: [String], default: () => ['bathroom'] },
+    // Places, for the same purpose: a clinic, a neighbour's house.
+    sensitive_places: [{
+      label:    { type: String, default: '' },
+      lat:      { type: Number, required: true },
+      lng:      { type: Number, required: true },
+      radius_m: { type: Number, default: 50 },
+    }],
+    // What the pipeline decided, written back so the UI can say WHY capture is
+    // dead right now rather than looking broken. Set by the AI backend.
+    auto_dead_until:  { type: Date, default: null },
+    auto_dead_reason: { type: String, default: null },
+  },
+
   phone:        { type: String, default: null },
   camera_stream_url: { type: String, default: null },  // RTSP/RTMP camera URL for this elderly user's AI pipeline
   // Where the outdoor item checks measure "away from home" from (Core FE-12).

@@ -11,6 +11,7 @@ import '../../services/step_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/voice_call_service.dart';
 import '../caregiver/location_map_screen.dart';
+import '../../widgets/privacy_control.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -146,6 +147,36 @@ class HomeScreenState extends State<HomeScreen> {
             
             if (_isElderly)
               _buildSOSSection(),
+            if (_isElderly)
+              const SizedBox(height: 20),
+
+            // One tap, on the screen the wearer actually lands on (Module 10
+            // FE-3). Somebody who wants the camera off wants it off NOW, not
+            // after finding their way into Settings. Directly under the SOS
+            // button, which is the other control that must never be hunted for.
+            if (_isElderly)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Row(children: [
+                      Icon(Icons.shield_outlined, size: 18, color: AppColors.primary),
+                      SizedBox(width: 10),
+                      Text('Privacy',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                    ]),
+                    SizedBox(height: 14),
+                    PrivacyControl(compact: true),
+                  ],
+                ),
+              ),
             if (_isElderly)
               const SizedBox(height: 20),
 

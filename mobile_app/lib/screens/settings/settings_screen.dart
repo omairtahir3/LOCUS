@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/privacy_control.dart';
 import '../../services/api_service.dart';
 import '../../services/location_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -175,6 +176,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
 
           // Notification preferences
+          // Privacy, above Notifications: what the camera must NOT see comes
+          // before how loudly it tells anybody what it saw.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Row(children: [
+                  Icon(Icons.shield_outlined, size: 18, color: AppColors.primary),
+                  SizedBox(width: 10),
+                  Text('Privacy', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                ]),
+                SizedBox(height: 16),
+                PrivacyControl(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
