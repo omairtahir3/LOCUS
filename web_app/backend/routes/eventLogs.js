@@ -412,17 +412,63 @@ router.get('/timeline', auth, async (req, res) => {
         // demanding 'placed' would have erased every memory older than the
         // field itself.
         const notPutDown = (i) => ['in_hand', 'unknown'].includes(i.placement || d.placement);
-        const named = (d.items || []).filter(i => i.matched_item && !notPutDown(i)).map(i => i.matched_item);
-        if (!named.length) continue;   // unenrolled clutter is not timeline-worthy
+        const recognised = (d.items || []).filter(i => i.matched_item);
+        // The GATE is still "something was actually put down". A frame of the
+        // wearer holding their own phone is not a memory of where anything was
+        // left, and one per glance would bury the sightings that matter.
+        if (!recognised.some(i => !notPutDown(i))) continue;
+
+        // ── Every belonging in the frame gets named ──────────────────────────
+        //
+        // This listed only what was put DOWN, so a frame holding a phone on the
+        // desk and earbuds in the wearer's hand was titled "Spotted Phone" and
+        // the earbuds vanished -- the event row said two things, the timeline
+        // said one, and the memory pages next door said two. Worse, the detail
+        // line read off the frame-level placement, which is the string "mixed"
+        // for exactly those frames, so the two entries that DID contain a
+        // second belonging were the two labelled "Seen at home".
+        //
+        // Generic by construction: it reads each item's own placement, so it
+        // behaves the same for any number of belongings and any mixture of
+        // states, now and for anything enrolled later.
+        const uniq = [...new Set(recognised.map(i => i.matched_item))];
+        const where = e.location ? 'while out' : 'at home';
+
+        // Grouped by what each one was doing, in the frame's own order.
+        const stateOf = (i) => {
+          const pl = i.placement || d.placement;
+          if (pl === 'in_hand') return 'in your hand';
+          if (pl === 'unknown') return 'also in view';
+          // No placement at all: 317 of 321 historical sightings predate the
+          // field, and calling those "unknown" would relabel the entire past.
+          return `put down ${where}`;
+        };
+        const groups = new Map();
+        for (const i of recognised) {
+          const st = stateOf(i);
+          if (!groups.has(st)) groups.set(st, new Set());
+          groups.get(st).add(i.matched_item);
+        }
+        // One state, one phrase: "Put down at home", as before. Several, and
+        // each is named, because that is the case the old line got wrong.
+        let detail;
+        if (groups.size === 1) {
+          const st = [...groups.keys()][0];
+          detail = st.startsWith('put down') ? `Put down ${where}`
+            : st === 'in your hand' ? `In your hand` : `Seen ${where}`;
+        } else {
+          detail = [...groups.entries()]
+            .map(([st, names]) => `${[...names].join(', ')} ${st}`)
+            .join(' · ');
+        }
+
         // A sighting, not a departure. "Left" belongs to the routine monitor's
         // left_behind finding, which knows the wearer moved away and the item
         // was not seen again; a single frame cannot know either.
-        const placed = d.placement === 'placed';
         items.push({ at: e.timestamp, kind: 'items',
-          title: `Spotted ${[...new Set(named)].slice(0, 3).join(', ')}`,
-          detail: placed
-            ? (e.location ? 'Put down while out' : 'Put down at home')
-            : (e.location ? 'Seen while out' : 'Seen at home'),
+          title: `Spotted ${uniq.slice(0, 4).join(', ')}`
+            + (uniq.length > 4 ? ` +${uniq.length - 4} more` : ''),
+          detail,
           keyframe_id: e.keyframe_id || null });
       }
     }
