@@ -5,9 +5,10 @@ import { privacyAPI } from '../../services/api';
 /**
  * Privacy Mode (Module A FE-4 and FE-5, Module 10 FE-3).
  *
- * One component, two depths. `compact` is the one-tap control FE 10-3 asks for
- * and shows only the three states; the full form adds the rooms and the places
- * that switch capture off by themselves.
+ * It lives in Settings and nowhere else, by the wearer's choice. It briefly had
+ * a cut-down copy on the dashboard for FE 10-3's "one-tap access"; that reading
+ * of one-tap is now Settings being one tap from anywhere, rather than a second
+ * copy of the same switch on the page people look at every day.
  *
  * The three states are deliberately not a checkbox. "Stop recording me" and
  * "stop keeping pictures I am recognisable in" are different things to want,
@@ -38,7 +39,7 @@ const since = (iso) => {
   return `${h} hour${h === 1 ? '' : 's'} ago`;
 };
 
-export default function PrivacyPanel({ compact = false }) {
+export default function PrivacyPanel() {
   const [p, setP] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -109,7 +110,7 @@ export default function PrivacyPanel({ compact = false }) {
         })}
       </div>
 
-      <div className="text-xs text-muted" style={{ marginBottom: compact ? 0 : 20 }}>
+      <div className="text-xs text-muted" style={{ marginBottom: 20 }}>
         {current.hint}
         {p.mode !== 'off' && p.mode_set_at && (
           // A wearer who switches this on and forgets is the likeliest way the
@@ -132,8 +133,6 @@ export default function PrivacyPanel({ compact = false }) {
 
       {err && <div className="text-xs" style={{ color: 'var(--danger)', marginTop: 8 }}>{err}</div>}
 
-      {!compact && (
-        <>
           <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 6 }}>
             Rooms to never record in
           </div>
@@ -247,8 +246,6 @@ export default function PrivacyPanel({ compact = false }) {
               <Plus size={14} /> Add
             </button>
           </div>
-        </>
-      )}
     </div>
   );
 }

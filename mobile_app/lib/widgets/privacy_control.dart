@@ -7,18 +7,17 @@ import '../theme/app_theme.dart';
 
 /// Privacy Mode (Module A FE-4 and FE-5, Module 10 FE-3).
 ///
-/// One widget, two depths. `compact` is the one-tap control FE 10-3 asks for and
-/// shows only the three states; the full form adds the rooms that switch
-/// recording off by themselves.
+/// It lives in Settings and nowhere else, by the wearer's choice. It briefly had
+/// a cut-down copy on the home screen for FE 10-3's "one-tap access"; that
+/// reading of one-tap is now Settings being one tap away, rather than a second
+/// copy of the same switch on the screen they see every day.
 ///
 /// Three states rather than a switch, because "stop recording me" and "stop
 /// keeping pictures I am recognisable in" are different things to want, and
 /// collapsing them would force the stricter one on anybody who only wanted the
 /// softer one.
 class PrivacyControl extends StatefulWidget {
-  const PrivacyControl({super.key, this.compact = false});
-
-  final bool compact;
+  const PrivacyControl({super.key});
 
   @override
   State<PrivacyControl> createState() => _PrivacyControlState();
@@ -176,7 +175,6 @@ class _PrivacyControlState extends State<PrivacyControl> {
             ]),
           ),
         ],
-        if (!widget.compact) ...[
           const SizedBox(height: 20),
           const Text('Rooms to never record in',
               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
@@ -237,7 +235,6 @@ class _PrivacyControlState extends State<PrivacyControl> {
             const Text('Places are added from the web app.',
                 style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
           ],
-        ],
       ],
     );
   }
