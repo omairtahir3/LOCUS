@@ -39,8 +39,32 @@ class FaceRecognitionPlugin(DetectorPlugin):
         self._social_storage = None   # see _storages(): one instance, one cleanup thread
         self._keyframe_storage = None
         
-        # Load InsightFace Model (CPU for free-tier compatibility)
-        self.app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+        # Load InsightFace Model (CPU for free-tier compatibility).
+        #
+        # allowed_modules is the whole point of this call. buffalo_l is a bundle
+        # of five ONNX graphs and FaceAnalysis loads and RUNS all of them per
+        # face unless told otherwise. This plugin reads exactly four attributes
+        # -- bbox, det_score, kps, normed_embedding -- and all four come from
+        # two of the five:
+        #
+        #   det_10g.onnx      16.1 MB  detection    -> bbox, det_score, kps
+        #   w600k_r50.onnx   166.3 MB  recognition  -> normed_embedding
+        #   1k3d68.onnx      137.0 MB  3D landmarks     never read
+        #   2d106det.onnx      4.8 MB  2D landmarks     never read
+        #   genderage.onnx     1.3 MB  gender/age       never read
+        #
+        # So 143 MB of graphs were resident and three extra inference passes ran
+        # on every detected face to produce nothing anybody looked at. The
+        # gender/age estimator is worth naming separately: inferring either from
+        # a dementia camera is not something this system has any reason to do,
+        # and not loading it is better than loading it and ignoring it.
+        #
+        # kps is the 5-point set that comes WITH detection, which is what
+        # _calculate_frontality uses -- it does not need the 106- or 68-point
+        # models.
+        self.app = FaceAnalysis(name='buffalo_l',
+                                allowed_modules=['detection', 'recognition'],
+                                providers=['CPUExecutionProvider'])
         self.app.prepare(ctx_id=0, det_size=(640, 640))
         
         # Initialize sync MongoDB client for use in the background threads
