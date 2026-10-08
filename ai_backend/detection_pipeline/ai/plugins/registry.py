@@ -61,9 +61,28 @@ _SPECS: tuple[PluginSpec, ...] = (
                note="pill detector + hand pose, three-phase temporal scoring"),
     PluginSpec(ActionType.SOCIAL_INTERACTION, _face,
                note="insightface embedding match; also raises unknown_face"),
-    PluginSpec(ActionType.ACTIVITY, _activity,
-               note="egocentric object context; per-frame events are retired, "
-                    "its output feeds Tier-2 environment sessions"),
+    # OFF. It loaded yolov8s -- 11.17 M parameters, 21.5 MB, four times
+    # YOLO11n -- and ran a second full detector pass per activity batch into
+    # two output paths that are BOTH already gated off in pipeline.py:
+    # EMIT_PER_FRAME_ACTIVITY_EVENTS is False because per-frame activity claims
+    # hallucinated, and EMIT_ACTIVITY_SESSIONS defaults to "0" because "At a
+    # keyboard for 454 seconds" is a description of furniture, not a memory.
+    #
+    # Measured over this account's whole history: 1 activity_session event,
+    # dated 25 September, against 17 scene_session events still arriving. The
+    # feed's room entries ("Bedroom activity, 1 minute") come from
+    # _observe_scene in item_indexer.py, which uses YOLO11n.
+    #
+    # The one claim that kept it alive -- "its output feeds Tier-2's metadata"
+    # -- does not hold: TIER2_GAP_FILL_ACTIVITY_MAP is keyed on Objects365
+    # class ids and reads YOLO11n's own detections. It exists precisely BECAUSE
+    # COCO was blind to those classes.
+    #
+    # Registration is lazy, so disabled here means the weights never load.
+    PluginSpec(ActionType.ACTIVITY, _activity, enabled=False,
+               note="egocentric object context; OFF -- both its output flags "
+                    "are already false, and room sessions come from YOLO11n "
+                    "via item_indexer._observe_scene instead"),
 )
 
 

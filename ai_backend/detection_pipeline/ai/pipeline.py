@@ -53,7 +53,8 @@ BATCH_ANALYSIS_FRAMES = int(BUFFER_SECONDS * CAPTURE_FPS)
 HEARTBEAT_SECONDS = float(os.environ.get("HEARTBEAT_SECONDS", 60.0))
 
 # Per-frame activity events are retired in favour of Tier-2 environment
-# sessions. Flip to True to restore the old behaviour for comparison.
+# sessions. Flipping this to True also needs the ACTIVITY PluginSpec re-enabled
+# in plugins/registry.py, which is what actually produces the result this gates.
 EMIT_PER_FRAME_ACTIVITY_EVENTS = False
 
 # Sessions like "At a keyboard for 454 seconds" are off.
@@ -65,8 +66,12 @@ EMIT_PER_FRAME_ACTIVITY_EVENTS = False
 # day, and they were rewritten on every observation as their duration grew.
 #
 # The environment sessions in ai/scene.py are what the feed carries instead.
-# The tracker itself still runs, so turning this back on needs one flag and no
-# other change.
+#
+# Turning this back on now needs TWO changes, not one: the detector that feeds
+# the tracker is disabled in plugins/registry.py, because with both this flag
+# and EMIT_PER_FRAME_ACTIVITY_EVENTS false it was loading yolov8s and running a
+# detector pass per batch into nothing at all. Re-enable the PluginSpec there as
+# well, or this flag on its own will silently do nothing.
 EMIT_ACTIVITY_SESSIONS = os.environ.get(
     "EMIT_ACTIVITY_SESSIONS", "0").lower() in ("1", "true", "yes")
 THRESHOLD_AUTO_VERIFY = EVENT_CONFIDENCE_POLICY.auto_verify_threshold
