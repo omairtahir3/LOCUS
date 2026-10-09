@@ -863,6 +863,14 @@ class DailyItemIndexer:
         if self._observe_scene(scene_detections, user_id_str, keyframe_id, metadata):
             return
 
+        # A PROBE exists only to answer "is the wearer still in the private
+        # room?". _observe_scene has now answered it, either closing the gate
+        # again or lifting it, and everything below this line stores or records
+        # something. The frame itself was never written to disk, so there is
+        # nothing to clean up either.
+        if (metadata or {}).get("privacy_probe"):
+            return
+
         # ── Exemplar Embedding Gallery: match detections against enrolled items ──
         if detections and user_id_str:
             self._enrich_with_exemplar_matches(detections, image, user_id_str)
@@ -2127,6 +2135,26 @@ class DailyItemIndexer:
                 return True
         return False
 
+    @staticmethod
+    def _captured_epoch(metadata: dict) -> float:
+        """When the frame in this metadata was CAPTURED, as a unix timestamp.
+
+        Falls back to now, which makes a purge reach no further back than this
+        instant -- the conservative direction: it may leave a frame of the
+        private room on disk, where guessing earlier would delete frames of the
+        room before it.
+        """
+        raw = (metadata or {}).get("timestamp")
+        if isinstance(raw, str) and raw:
+            try:
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.timestamp()
+            except ValueError:
+                pass
+        return time.time()
+
     # ── Environment sessions ─────────────────────────────────────────────────
     def _observe_scene(self, all_detections: dict[str, float], user_id_str: str,
                        keyframe_id: str, metadata: dict):
@@ -2167,14 +2195,37 @@ class DailyItemIndexer:
         # Checked before the session tracker sees it, so no bathroom session is
         # ever opened, named, or given a cover photograph.
         try:
-            from ai.privacy import is_sensitive_room, enter_sensitive_room
+            from ai.privacy import (is_sensitive_room, enter_sensitive_room,
+                                    left_sensitive_room)
             if is_sensitive_room(user_id_str, room):
+                # The CAPTURE time, not now. Classification runs behind the
+                # capture loop, so "now" would place the boundary seconds late
+                # and leave the first frames of the visit on disk; and a purge
+                # measured backwards from now took the previous room's frames,
+                # which is how a wearer lost their bedroom by walking into the
+                # washroom.
                 print(f"[Privacy] {room} recognised ({score:.2f}); going dark "
-                      f"and destroying what was already stored")
-                enter_sensitive_room(user_id_str, room)
+                      f"and destroying what this visit already stored")
+                enter_sensitive_room(user_id_str, room,
+                                     self._captured_epoch(metadata))
                 return True
+            if room:
+                # A room was named and it is not a private one, so the wearer
+                # has left. Only ever called with a RECOGNISED room: lifting on
+                # "no room recognised" would let any unclassifiable frame from
+                # inside the washroom reopen the gate.
+                left_sensitive_room(user_id_str, room)
         except Exception as e:
             print(f"[Privacy] sensitive-room check skipped: {e}")
+
+        # A probe's whole job was the question above. It must not reach the
+        # session tracker: its frame was never written to disk, so it would
+        # contribute to a room session and could be chosen as that session's
+        # cover photograph, leaving an event pointing at an image that does not
+        # exist. Returning False, because a probe never means "stop" -- by here
+        # the room is either still private (handled above) or no longer is.
+        if (metadata or {}).get("privacy_probe"):
+            return False
 
         # One line per indexed frame saying what was seen and what was decided.
         # "Nothing was recognised" had been indistinguishable from "Tier-2 never

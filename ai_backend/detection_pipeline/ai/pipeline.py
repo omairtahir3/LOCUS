@@ -2108,6 +2108,39 @@ class MedicationDetectionPipeline:
                     if (time.time() - self._privacy_logged_at) >= 30.0:
                         self._privacy_logged_at = time.time()
                         print(f"[Pipeline] analysis paused: {_priv['reason']}")
+
+                    # ── Probing our way back out of a private ROOM ──────────
+                    #
+                    # While the gate is shut nothing is captured, so nothing is
+                    # classified, so nothing could notice the wearer had left:
+                    # walking out of the washroom left them standing in the
+                    # bedroom, unrecorded, until AUTO_DEAD_SECONDS expired.
+                    #
+                    # So every PROBE_SECONDS one frame goes to the indexer
+                    # marked as a probe. It is classified in memory to answer
+                    # one question -- which room is this? -- and discarded.
+                    # Nothing is written to disk and no event is recorded; the
+                    # probe flag makes _process_keyframe_task return straight
+                    # after the room check.
+                    #
+                    # ONLY for a room. A manual pause is the wearer saying stop
+                    # analysing, and a sensitive place is re-read from GPS on
+                    # every call, so neither is probed.
+                    if _priv.get("kind") == "room":
+                        if not hasattr(self, '_privacy_probed_at'):
+                            self._privacy_probed_at = 0.0
+                        try:
+                            from .privacy import PROBE_SECONDS
+                            if (time.time() - self._privacy_probed_at) >= PROBE_SECONDS:
+                                self._privacy_probed_at = time.time()
+                                from .item_indexer import DailyItemIndexer
+                                DailyItemIndexer.get_instance().enqueue_keyframe(
+                                    f"probe-{int(time.time())}", frame,
+                                    {"user_id": str(self.user_id),
+                                     "timestamp": datetime.utcnow().isoformat(),
+                                     "privacy_probe": True})
+                        except Exception as e:
+                            print(f"[Pipeline] privacy probe failed: {e}")
                     # Heartbeat only, so the camera still reads as alive.
                     if not hasattr(self, '_last_heartbeat'):
                         self._last_heartbeat = time.time()
