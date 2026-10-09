@@ -35,6 +35,15 @@ const userItemSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: null,
   },
+  // What the object detector actually calls this item, measured on its own
+  // enrolment photos. Objects365 has no earbuds class and boxes their case as
+  // "Mouse"; comparing that label to the NAME found no overlap and raised the
+  // match bar to 0.85, which those earbuds could never clear. The label is not
+  // an opinion about identity, only what this detector calls this shape.
+  detector_class: {
+    type: String,
+    default: null,
+  },
   representative_image: {
     type: String,
     default: null

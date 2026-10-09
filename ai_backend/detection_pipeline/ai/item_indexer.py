@@ -1424,7 +1424,8 @@ class DailyItemIndexer:
             except Exception:
                 query = {"user_id": user_id_str, "is_active": True}
 
-            cursor = db.useritems.find(query, {"item_name": 1, "item_embeddings": 1})
+            cursor = db.useritems.find(
+                query, {"item_name": 1, "item_embeddings": 1, "detector_class": 1})
             for doc in cursor:
                 embs = doc.get("item_embeddings", [])
                 if embs:
@@ -1458,6 +1459,9 @@ class DailyItemIndexer:
                     items.append({
                         "id": str(doc["_id"]),
                         "name": doc.get("item_name", "Unknown Item"),
+                        # What this detector calls this item, measured on its
+                        # own enrolment photos rather than guessed from its name.
+                        "detector_class": doc.get("detector_class"),
                         "embeddings": embs_arr,
                         "threshold_floor": item_floor,
                     })
@@ -1541,8 +1545,19 @@ class DailyItemIndexer:
                 # positive came from. This is the BASE bar and it always applies;
                 # it was previously skipped whenever the item carried a stored
                 # threshold, which was always, so it never applied at all.
-                thresh = (self.CLASS_AGREE_MATCH_THRESHOLD
-                          if self._names_agree(d.get("name", ""), item["name"])
+                # Agreement is a fact about the DETECTOR, not about English.
+                # Objects365 boxes a pair of earbuds as "Mouse", which overlaps
+                # no word in "Rover Earbuds", so the name test called it a
+                # disagreement and raised the bar to 0.85 -- a bar those
+                # earbuds could never clear however well they were embedded.
+                # The class measured on their own enrolment photos is what
+                # settles it; the name test stays as a fallback for items
+                # enrolled before that was recorded.
+                _cls = d.get("name", "")
+                _agrees = (self._names_agree(_cls, item["name"])
+                           or (item.get("detector_class")
+                               and _cls == item["detector_class"]))
+                thresh = (self.CLASS_AGREE_MATCH_THRESHOLD if _agrees
                           else self.CLASS_DISAGREE_MATCH_THRESHOLD)
                 # An item with almost no surface texture matches ambient clutter
                 # too easily, so it carries a floor of its own. A floor can only
