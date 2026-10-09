@@ -231,7 +231,25 @@ def state(user_id: str) -> dict:
 
     with _lock:
         dead = _dead_until.get(key)
-    if dead and dead[0] > time.monotonic():
+        if dead and dead[0] <= time.monotonic():
+            # ── The visit is over, so FORGET WHERE IT STARTED ───────────────
+            #
+            # This was cleared only when a probe recognised another room, and
+            # not when the gate simply timed out. A stale boundary then made
+            # the NEXT detection purge from the PREVIOUS visit's start: a
+            # bathroom frame at 17:14 set the boundary, the gate timed out at
+            # 17:16, twenty-four minutes of ordinary recording followed, and a
+            # second bathroom frame at 17:40 purged from 17:14 -- clamped only
+            # by PURGE_MAX_LOOKBACK_SECONDS, which still destroyed five minutes
+            # of the wearer's desk, including the one frame showing their
+            # earbuds and phone put down together.
+            #
+            # With this, a purge can only ever reach back to the visit that
+            # triggered it, which is seconds.
+            _dead_until.pop(key, None)
+            _sensitive_since.pop(key, None)
+            dead = None
+    if dead:
         # kind "room" is the one the caller may probe its way out of.
         return {"capture": False, "blur": False, "reason": dead[1],
                 "kind": dead[2] if len(dead) > 2 else "room"}
