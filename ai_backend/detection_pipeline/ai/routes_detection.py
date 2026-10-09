@@ -435,9 +435,54 @@ async def extract_embedding(req: EmbeddingRequest):
     # be judged between different photos: variants of one photo are near
     # identical by construction, so averaging over all of them would report a
     # healthy gallery no matter how poor the originals were.
+    # ── What the detector actually CALLS this thing ─────────────────────────
+    #
+    # Objects365 has no class for a pair of earbuds, so it boxes their case as
+    # "Mouse". The matcher compared that label against the item's NAME and,
+    # finding no overlap, treated it as disagreement and raised the bar from
+    # 0.65 to 0.85 -- a bar those earbuds could never clear, so an item that
+    # was correctly boxed and correctly embedded was rejected on the strength
+    # of its own name.
+    #
+    # The label is not an opinion about identity, it is just what this detector
+    # happens to call this shape. So it is measured here, on the enrolment
+    # photos, and stored. At match time a box agrees when it carries the label
+    # this item is KNOWN to get, which is a fact about the detector rather than
+    # a guess from English.
+    detector_class = None
+    try:
+        from collections import Counter
+        from ultralytics import YOLO
+        from ai.item_indexer import DEFAULT_MODEL_PATH
+        _det = YOLO(DEFAULT_MODEL_PATH)
+        votes = Counter()
+        for img in valid_images:
+            r = _det.predict(img, conf=0.20, verbose=False)[0]
+            best, best_area = None, 0.0
+            for b in r.boxes:
+                x1, y1, x2, y2 = (float(v) for v in b.xyxy[0])
+                area = (x2 - x1) * (y2 - y1)
+                # The photo was cropped to the item, so the LARGEST box in it is
+                # the item; anything smaller is a part of it or background.
+                if area > best_area:
+                    best, best_area = _det.names.get(int(b.cls[0]), ""), area
+            if best:
+                votes[best] += 1
+        if votes:
+            top, n = votes.most_common(1)[0]
+            # A label seen in only one photo of fifteen is a fluke, not what
+            # this item reliably looks like to the detector.
+            if n >= max(2, len(valid_images) // 4):
+                detector_class = top
+            print(f"[extract-embedding] detector calls this a {top} in {n}/{len(valid_images)} "
+                  f"photo(s){'' if detector_class else ' — too few to rely on'}")
+    except Exception as e:
+        print(f"[extract-embedding] could not learn the detector class: {e}")
+
     return {
         "embeddings": embeddings,
         "count": len(embeddings),
         "source_indices": source_indices,
         "source_count": len(valid_images),
+        "detector_class": detector_class,
     }
