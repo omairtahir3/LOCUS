@@ -64,6 +64,25 @@ AUTO_DEAD_SECONDS = float(os.environ.get("PRIVACY_AUTO_DEAD_SECONDS", 90))
 # to cover is the indexing lag -- a few seconds.
 PURGE_MAX_LOOKBACK_SECONDS = float(os.environ.get("PRIVACY_PURGE_MAX_LOOKBACK_SECONDS", 300))
 
+# How many frames must agree before anything is DESTROYED.
+#
+# The gate still closes on the first one -- privacy is immediate, and no new
+# frame is stored from the moment a private room is suspected. Deletion is the
+# part that waits, because it cannot be undone and a single frame has twice now
+# been wrong enough to cost real memories: one glimpse through a doorway while
+# the wearer carried a table past it destroyed five minutes of their desk,
+# including the only frame of their earbuds and phone put down together.
+#
+# The second opinion arrives from the probe below, so confirmation costs about
+# four seconds. The trade is explicit: if the confirming frame never comes, the
+# first frame of a genuine visit stays on disk. One frame surviving is a smaller
+# harm than minutes of unrelated frames being destroyed, and nothing new is
+# stored either way.
+CONFIRM_FRAMES = int(os.environ.get("PRIVACY_CONFIRM_FRAMES", 2))
+
+# How long a first sighting waits for its confirmation before being forgotten.
+CONFIRM_WINDOW_SECONDS = float(os.environ.get("PRIVACY_CONFIRM_WINDOW_SECONDS", 30))
+
 # While dead for a ROOM, a frame is taken every so often, classified in memory
 # and thrown away, purely to notice that the wearer has left. Without it the
 # only way back is the AUTO_DEAD_SECONDS timer, so walking out of the washroom
@@ -86,6 +105,8 @@ _dead_until: dict[str, tuple[float, str, str]] = {}   # (until, reason, kind)
 # The capture time of the earliest frame of the current sensitive visit, which
 # is how far back a purge may reach. Cleared when the gate lifts.
 _sensitive_since: dict[str, float] = {}
+# A sensitive room seen once and not yet corroborated: {room, first, seen, at}.
+_pending_sensitive: dict[str, dict] = {}
 
 
 def _db():
@@ -248,6 +269,7 @@ def state(user_id: str) -> dict:
             # triggered it, which is seconds.
             _dead_until.pop(key, None)
             _sensitive_since.pop(key, None)
+            _pending_sensitive.pop(key, None)
             dead = None
     if dead:
         # kind "room" is the one the caller may probe its way out of.
@@ -414,13 +436,40 @@ def enter_sensitive_room(user_id: str, room: str,
     key = str(user_id)
     reason = f"the {room} is private"
     ts = float(frame_epoch) if frame_epoch else time.time()
+    now = time.monotonic()
+
+    # The gate closes on the FIRST sighting, always. Nothing new is stored from
+    # here, whether or not the sighting is ever corroborated.
+    mark_dead(key, reason, kind="room")
+
     with _lock:
         prev = _sensitive_since.get(key)
         if prev is None or ts < prev:
             _sensitive_since[key] = ts
         since = _sensitive_since[key]
-    mark_dead(key, reason, kind="room")
-    return purge_since(key, reason, since)
+
+        pend = _pending_sensitive.get(key)
+        stale = (pend is None or pend["room"] != room
+                 or (now - pend["at"]) > CONFIRM_WINDOW_SECONDS)
+        if stale:
+            pend = {"room": room, "first": ts, "seen": 1, "at": now}
+        else:
+            pend = {"room": room, "first": min(pend["first"], ts),
+                    "seen": pend["seen"] + 1, "at": now}
+        _pending_sensitive[key] = pend
+        seen, first = pend["seen"], pend["first"]
+
+    if seen < CONFIRM_FRAMES:
+        # Not destroying anything yet. The probe will offer a second opinion
+        # within PROBE_SECONDS, and if it names another room the gate lifts and
+        # nothing was lost.
+        print(f"[Privacy] {room} seen once; recording stopped, nothing deleted "
+              f"until a second frame agrees")
+        return {"files": 0, "events": 0, "since": since, "confirmed": False}
+
+    out = purge_since(key, reason, min(first, since))
+    out["confirmed"] = True
+    return out
 
 
 def left_sensitive_room(user_id: str, room: str | None) -> bool:
@@ -457,6 +506,9 @@ def left_sensitive_room(user_id: str, room: str | None) -> bool:
             return False
         _dead_until.pop(key, None)
         _sensitive_since.pop(key, None)
+        # An uncorroborated sighting is dropped with it: another room was
+        # recognised, so the first frame was a glimpse, not a visit.
+        _pending_sensitive.pop(key, None)
     print(f"[Privacy] no longer in a private room"
           + (f" (now: {room})" if room else "") + "; recording again")
     try:
