@@ -124,7 +124,7 @@ async function keyframeAttachment(keyframeId, cid = 'keyframe') {
   if (!keyframeId) return null;
   try {
     const axios = require('axios');
-    const base = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+    const base = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
     const res = await axios.get(`${base}/api/keyframes/${keyframeId}/image`, {
       responseType: 'arraybuffer', timeout: 10000,
     });

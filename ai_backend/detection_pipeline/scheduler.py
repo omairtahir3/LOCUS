@@ -88,7 +88,7 @@ def _spawn_pipeline_for_user(user_id, camera_url):
 
     try:
         pipeline = MedicationDetectionPipeline(
-            api_base_url="http://localhost:8000",
+            api_base_url="http://127.0.0.1:8000",
             expected_medicine_count=0,
             user_id=user_id,
         )

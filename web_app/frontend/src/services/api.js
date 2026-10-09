@@ -1,7 +1,21 @@
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:5000/api';
-const PYTHON_API_BASE = 'http://localhost:8000/api';
+// 127.0.0.1, never the name "localhost".
+//
+// On Windows localhost resolves to ::1 before 127.0.0.1, and every server in
+// this project binds IPv4 only. A browser asked for localhost therefore opens
+// each connection to ::1 first, waits for the refusal and retries: measured at
+// 2,015 ms of dead time per connection against 1 ms direct. A memory page
+// opening six parallel connections for thumbnails pays it six times, which is
+// what made frames crawl in while the server itself answered in 20 ms.
+//
+// Taken from the address bar rather than hardcoded, so opening the app from a
+// phone on the LAN still reaches the right machine instead of that phone's own
+// loopback.
+const HOST = ['localhost', '::1', ''].includes(window.location.hostname)
+  ? '127.0.0.1' : window.location.hostname;
+const API_BASE = `http://${HOST}:5000/api`;
+const PYTHON_API_BASE = `http://${HOST}:8000/api`;
 
 const api = axios.create({
   baseURL: API_BASE,

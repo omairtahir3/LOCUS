@@ -28,7 +28,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const User = require('../models/User');
 
-const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
 
 const FRAME_SCOPE = 'frame';
 const FRAME_TOKEN_MINUTES = 60;

@@ -148,7 +148,7 @@ async def start_detection(req: DetectionStartRequest, db=Depends(get_db)):
         token = create_access_token({"sub": user_id, "role": "system"})
 
     _pipeline = MedicationDetectionPipeline(
-        api_base_url="http://localhost:8000",
+        api_base_url="http://127.0.0.1:8000",
         expected_medicine_count=expected_count,
         medication_ids=medication_ids,
         scheduled_time=scheduled_time_used,

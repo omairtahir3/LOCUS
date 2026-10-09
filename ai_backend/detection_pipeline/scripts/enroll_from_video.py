@@ -25,7 +25,7 @@ import numpy as np
 from pymongo import MongoClient
 from db_config import get_client, get_db_name
 
-AI_BACKEND = "http://localhost:8000/api/detection/extract-embedding"
+AI_BACKEND = "http://127.0.0.1:8000/api/detection/extract-embedding"
 
 
 def sharpest_frames(video_path: str, want: int) -> list:

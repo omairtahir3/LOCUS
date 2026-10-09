@@ -415,7 +415,7 @@ router.patch('/logs/:logId', async (req, res) => {
         const origTime = new Date(log.scheduled_time);
         const schedTime = String(origTime.getHours()).padStart(2, '0') + ':' + String(origTime.getMinutes()).padStart(2, '0');
         if (log.medication_id) {
-          await axios.post('http://localhost:8000/api/detection/rewatch', {
+          await axios.post('http://127.0.0.1:8000/api/detection/rewatch', {
             medication_id: log.medication_id._id.toString(),
             user_id: log.user_id.toString(),  // always the elderly user, even if caregiver triggered
             scheduled_time: schedTime,
