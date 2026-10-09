@@ -13,6 +13,7 @@ the synchronous Tier-1 live camera ingest loop.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import statistics
@@ -2136,6 +2137,31 @@ class DailyItemIndexer:
         return False
 
     @staticmethod
+    def _surviving_frame(session: dict) -> str | None:
+        """The session's best frame that is STILL ON DISK, or None.
+
+        A session closes a couple of minutes after its last frame, and a frame
+        caught on the way into a private room is destroyed in between. One
+        bedroom session was written at 17:17:32 carrying a frame deleted at
+        17:15:5x, so the feed showed "Time in the bedroom for 1 min" with a
+        picture that did not exist -- and the purge could not have redacted the
+        row, because the row was not written yet.
+        """
+        roots = [os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "..", "keyframe_backend", d)
+                 for d in ("keyframe_storage", "activities_storage")]
+        best = session.get("keyframe_id")
+        # Best first, then the runners-up the tracker kept for exactly this.
+        for kid in [best] + [k for k in (session.get("keyframe_candidates") or [])
+                             if k != best]:
+            if not kid:
+                continue
+            for root in roots:
+                if glob.glob(os.path.join(root, "*", "*", f"{kid}.jpg")):
+                    return kid
+        return None
+
+    @staticmethod
     def _captured_epoch(metadata: dict) -> float:
         """When the frame in this metadata was CAPTURED, as a unix timestamp.
 
@@ -2250,10 +2276,12 @@ class DailyItemIndexer:
         session = tracker.observe(room, all_detections, ts,
                                   keyframe_id=keyframe_id, score=score)
         if session:
-            # The session's OWN best frame. Passing the frame in hand here
-            # attached the next room's photo to every session that closed.
+            # The session's OWN best frame, and one that still EXISTS. Passing
+            # the frame in hand here attached the next room's photo to every
+            # session that closed; passing the best one blindly attached a
+            # photo that privacy had already destroyed.
             self._persist_scene_session(
-                session, user_id_str, session.get("keyframe_id"))
+                session, user_id_str, self._surviving_frame(session))
 
         # A room is reported when the wearer LEAVES it, with the time spent
         # there, and not before. Writing the session while it was still open
@@ -2275,7 +2303,8 @@ class DailyItemIndexer:
                 continue
             session = tracker.flush()
             if session:
-                self._persist_scene_session(session, uid, session.get("keyframe_id"))
+                self._persist_scene_session(session, uid,
+                                            self._surviving_frame(session))
 
     def _persist_scene_session(self, session: dict, user_id_str: str, keyframe_id: str | None):
         """Write an environment session to EventLog, open or closed.

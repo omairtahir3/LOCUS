@@ -317,6 +317,14 @@ class SceneSessionTracker:
         # carried a photo of the bedroom the wearer walked into next.
         self._best_kf: Optional[str] = None
         self._best_score = -1.0
+        # More than one frame to illustrate the session with, because the best
+        # one can be GONE by the time the session is written. A session closes
+        # a couple of minutes after its last frame, and a frame caught on the
+        # way into a private room is destroyed in between: one wearer's bedroom
+        # session was written at 17:17:32 pointing at a frame deleted at
+        # 17:15:5x, so the feed showed "Time in the bedroom for 1 min" with a
+        # picture that no longer existed. Best first.
+        self._kfs: list[tuple[float, str]] = []
         # Stable identity for the OPEN session, so it can be written to the
         # database while it is still running and updated in place as it grows.
         self._session_id: Optional[str] = None
@@ -342,7 +350,7 @@ class SceneSessionTracker:
             return None
         return self._describe(self._current, self._started_at, end, duration,
                               dict(self._evidence), self._frames, self._best_kf,
-                              in_progress=True)
+                              in_progress=True, candidates=list(self._kfs))
 
     def observe(self, room: Optional[str], detections: dict[str, float],
                 timestamp: Optional[float] = None,
@@ -368,9 +376,9 @@ class SceneSessionTracker:
             for cls, conf in detections.items():
                 self._evidence[cls] = max(self._evidence[cls], conf)
             # Illustrate the session with the frame that recognised the room
-            # most clearly, not the first or the last one.
-            if keyframe_id and score > self._best_score:
-                self._best_kf, self._best_score = keyframe_id, score
+            # most clearly, not the first or the last one -- and keep the
+            # runners-up, because the best one may not survive to be written.
+            self._note_frame(keyframe_id, score)
             # A long stay is reported in chunks rather than withheld until the
             # wearer finally leaves (see MAX_SESSION_SECONDS).
             if self._started_at is not None and (ts - self._started_at) >= MAX_SESSION_SECONDS:
@@ -384,7 +392,7 @@ class SceneSessionTracker:
                 self._evidence = defaultdict(float)
                 for cls, conf in detections.items():
                     self._evidence[cls] = max(self._evidence[cls], conf)
-                self._best_kf, self._best_score = keyframe_id, score
+                self._start_frames(keyframe_id, score)
                 return completed
             return None
 
@@ -422,7 +430,7 @@ class SceneSessionTracker:
         for cls, conf in detections.items():
             self._evidence[cls] = max(self._evidence[cls], conf)
         # This frame belongs to the NEW session, never to the one just closed.
-        self._best_kf, self._best_score = keyframe_id, score
+        self._start_frames(keyframe_id, score)
         self._pending = None
         self._pending_count = 0
         self._pending_since = None
@@ -442,6 +450,7 @@ class SceneSessionTracker:
         duration = max(0.0, end - start)
         room, evidence, frames = self._current, dict(self._evidence), self._frames
         best_kf, session_id = self._best_kf, self._session_id
+        candidates = list(self._kfs)
         self._current = None
         self._started_at = None
         self._last_seen = None
@@ -449,14 +458,36 @@ class SceneSessionTracker:
         self._evidence = defaultdict(float)
         self._frames = 0
         self._best_kf, self._best_score = None, -1.0
+        self._kfs = []
         self._session_id = None
         if duration < MIN_SESSION_SECONDS or frames < MIN_SESSION_FRAMES:
             return None
         return self._describe(room, start, end, duration, evidence, frames,
-                              best_kf, in_progress=False, session_id=session_id)
+                              best_kf, in_progress=False, session_id=session_id,
+                              candidates=candidates)
+
+    # How many illustrative frames a session remembers. Three covers the case
+    # this exists for -- the best frame destroyed for privacy -- without
+    # keeping a list as long as the session.
+    _MAX_KF_CANDIDATES = 3
+
+    def _note_frame(self, keyframe_id, score) -> None:
+        """Remember a frame that recognised this room, best first."""
+        if not keyframe_id:
+            return
+        if score > self._best_score:
+            self._best_kf, self._best_score = keyframe_id, score
+        self._kfs = sorted(
+            [(sc, k) for sc, k in self._kfs if k != keyframe_id] + [(score, keyframe_id)],
+            key=lambda sk: -sk[0])[:self._MAX_KF_CANDIDATES]
+
+    def _start_frames(self, keyframe_id, score) -> None:
+        """This frame opens a new session, so it is the only candidate so far."""
+        self._best_kf, self._best_score = keyframe_id, score
+        self._kfs = [(score, keyframe_id)] if keyframe_id else []
 
     def _describe(self, room, start, end, duration, evidence, frames, best_kf,
-                  in_progress, session_id=None) -> dict[str, Any]:
+                  in_progress, session_id=None, candidates=None) -> dict[str, Any]:
         """One shape for a session, open or closed, so an in-progress record
         and the final one cannot drift apart."""
         return {
@@ -464,6 +495,9 @@ class SceneSessionTracker:
             "session_id": session_id or self._session_id,
             "in_progress": in_progress,
             "keyframe_id": best_kf,
+            # Fallbacks, for when the one above has been deleted by the time
+            # this session is persisted. See _note_frame.
+            "keyframe_candidates": [k for _, k in (candidates or [])],
             "started_at": self._fmt(start),
             "start_ts": start,
             "end_ts": end,
