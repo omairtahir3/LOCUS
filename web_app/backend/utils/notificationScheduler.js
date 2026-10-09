@@ -7,7 +7,7 @@ const { notifyUserDoseReminder, notifyCaregiversMissedDose, notifyUserMissedDose
 const { runNightlyBatchSync } = require('./nightlySync');
 const axios = require('axios');
 
-const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
 
 // Every notification makes an LLM call, so a pass over a dozen due doses takes
 // minutes, not seconds. node-cron does not wait for the previous run, so the

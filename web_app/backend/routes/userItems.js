@@ -10,7 +10,7 @@ const { protect: auth } = require('../middleware/auth');
 const axios = require('axios');
 
 // AI Backend URL for embedding extraction
-const AI_BACKEND_URL = process.env.AI_BACKEND_URL || 'http://localhost:8000';
+const AI_BACKEND_URL = process.env.AI_BACKEND_URL || 'http://127.0.0.1:8000';
 
 /**
  * Resolve the target user ID for item operations.
@@ -169,6 +169,8 @@ router.post('/enroll', auth, async (req, res) => {
     });
 
     const coherence = galleryCoherence(embeddings, embeddingSources);
+    // Stored, so the list endpoint never has to work it out again.
+    await UserItem.updateOne({ _id: item._id }, { $set: { gallery: coherence } });
     console.log(`[UserItems] Enrolled "${item_name}" for user ${userId} with ${embeddings.length} embeddings (${embeddings[0]?.length || 0}-D)`);
     if (coherence && !coherence.matchable) {
       console.warn(`[UserItems] "${item_name}" may never be recognised: its own photos `
@@ -199,15 +201,32 @@ router.post('/enroll', auth, async (req, res) => {
 router.get('/', auth, async (req, res) => {
   try {
     const userId = await resolveUserId(req);
-    // Embeddings are read but never sent: they are needed to judge whether each
-    // gallery can actually be matched, and an item that cannot is worth saying
-    // so on the list, not only at the moment it was enrolled.
+    // The embeddings are NOT read here. They were, so that each gallery's
+    // coherence could be judged and an unmatchable item flagged on the list --
+    // but that meant pulling roughly 2 MB of vectors per item out of Mongo and
+    // running an O(n^2) cosine over them on every single request. Measured at
+    // 530 ms to answer a call whose query takes 21 ms.
+    //
+    // A gallery only changes when it is enrolled, so its coherence is computed
+    // there and stored. Items enrolled before that are filled in lazily below,
+    // once each, rather than in a migration nobody would remember to run.
     const items = await UserItem.find({ user_id: userId, is_active: true })
+      .select('-item_embeddings -embedding_sources')
       .sort({ createdAt: -1 }).lean();
-    res.json(items.map(({ item_embeddings, embedding_sources, ...rest }) => ({
-      ...rest,
-      gallery: galleryCoherence(item_embeddings, embedding_sources),
-    })));
+
+    const missing = items.filter(i => i.gallery === undefined || i.gallery === null);
+    if (missing.length) {
+      const full = await UserItem.find({ _id: { $in: missing.map(i => i._id) } })
+        .select('item_embeddings embedding_sources').lean();
+      for (const f of full) {
+        const g = galleryCoherence(f.item_embeddings, f.embedding_sources);
+        await UserItem.updateOne({ _id: f._id }, { $set: { gallery: g } });
+        const row = items.find(i => String(i._id) === String(f._id));
+        if (row) row.gallery = g;
+      }
+      console.log(`[UserItems] backfilled gallery coherence for ${full.length} item(s)`);
+    }
+    res.json(items);
   } catch (error) {
     console.error('Error fetching items:', error);
     res.status(500).json({ error: 'Server error' });

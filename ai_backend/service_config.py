@@ -20,8 +20,15 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_LOCUS_API = "http://localhost:5000"
-DEFAULT_AI_SERVICE = "http://localhost:8000"
+# 127.0.0.1, never the name "localhost".
+#
+# On this machine localhost resolves to ::1 first and every server here binds
+# IPv4 only, so a client that uses the NAME connects to ::1, waits for the
+# refusal, and retries on IPv4. Measured: 2,015 ms of dead time per connection,
+# against 1 ms direct. It made every proxied frame and every fresh database
+# connection two seconds slower for no reason visible in any profiler.
+DEFAULT_LOCUS_API = "http://127.0.0.1:5000"
+DEFAULT_AI_SERVICE = "http://127.0.0.1:8000"
 
 
 def _clean(url: str) -> str:

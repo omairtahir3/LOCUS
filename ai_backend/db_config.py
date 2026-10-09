@@ -2,7 +2,7 @@
 
 Core FE-9 asks for the event record to go "to the cloud". The record itself
 was already complete -- timestamp, action type, confidence, GPS, keyframe ids
--- but the destination was the string "mongodb://localhost:27017" repeated in
+-- but the destination was the string "mongodb://127.0.0.1:27017" repeated in
 twenty places across five files, so pointing the system at a hosted cluster
 meant editing every one of them and hoping none was missed.
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_URI = "mongodb://localhost:27017"
+DEFAULT_URI = "mongodb://127.0.0.1:27017"
 
 
 def get_mongo_uri() -> str:

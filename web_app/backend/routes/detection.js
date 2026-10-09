@@ -5,7 +5,7 @@ const { frameAccess, issueFrameToken, FRAME_TOKEN_MINUTES } = require('../middle
 
 const router = express.Router();
 
-const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+const AI_BACKEND = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
 
 /**
  * Pipe a frame from the AI backend, preserving the headers that let a browser

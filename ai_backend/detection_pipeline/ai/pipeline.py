@@ -99,7 +99,7 @@ class MedicationDetectionPipeline:
     early and disappearing late is a positive indicator.
     """
 
-    def __init__(self, api_base_url="http://localhost:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id="", confidence_thresholds=None):
+    def __init__(self, api_base_url="http://127.0.0.1:8000", expected_medicine_count=0, medication_ids=None, scheduled_time="", token="", user_id="", confidence_thresholds=None):
         import time
         t0 = time.time()
         print(f"[Profiling] Pipeline init start at {t0}")
