@@ -191,7 +191,17 @@ class KeyframeStorage:
 
         
 
-    def save(self, keyframe_id, frame, metadata):
+    def save(self, keyframe_id, frame, metadata, index_frame=None):
+        """Write `frame` to disk and hand `index_frame` to the item indexer.
+
+        They differ only under Privacy Mode's blur, where the frame that is
+        KEPT must be unreadable but the frame that is ANALYSED must not be.
+        Blurring both meant blur silently switched off every detector: a
+        pixelated frame yields no objects, so for the ten minutes one wearer
+        had it on, nothing was recognised, no belonging was tracked and no room
+        was named. Privacy was supposed to cost recognisable pictures, not the
+        whole system.
+        """
 
         uid = str(metadata.get("user_id", "unknown"))
 
@@ -206,6 +216,29 @@ class KeyframeStorage:
         meta_path = os.path.join(user_dir, f"{keyframe_id}.json")
 
 
+
+        # ── Privacy blur, applied where the file is actually written ────────
+        #
+        # Here rather than at each caller, because there are five stores and
+        # four separate face-crop writes, and one of them WILL be forgotten.
+        # The frame handed to the item indexer stays sharp (index_frame), so
+        # blur costs recognisable pictures and not the detectors: blurring both
+        # had quietly switched off every detector for as long as it was on.
+        uid_for_privacy = str(metadata.get("user_id") or "")
+        if uid_for_privacy and not metadata.get("privacy_blurred"):
+            try:
+                from ai.privacy import state as _pstate, blur_frame
+                if _pstate(uid_for_privacy).get("blur"):
+                    blurred = blur_frame(frame)
+                    if blurred is None:
+                        print(f"[KeyframeStorage.save] refusing to write {keyframe_id}: "
+                              f"privacy blur failed and a readable frame must not be kept")
+                        return
+                    frame = blurred
+                    metadata = {**metadata, "privacy_blurred": True}
+            except Exception as e:
+                print(f"[KeyframeStorage.save] privacy check failed, not writing: {e}")
+                return
 
         success = cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
@@ -247,7 +280,10 @@ class KeyframeStorage:
         if self.feeds_item_indexer:
             try:
                 from ai.item_indexer import DailyItemIndexer
-                DailyItemIndexer.get_instance().enqueue_keyframe(keyframe_id, frame, metadata)
+                DailyItemIndexer.get_instance().enqueue_keyframe(
+                    keyframe_id,
+                    frame if index_frame is None else index_frame,
+                    metadata)
             except Exception as e:
                 print(f"[KeyframeStorage] Item indexer enqueue failed: {e}")
 
@@ -1246,21 +1282,14 @@ class KeyframeExtractor:
         #
         # A new array, never the one in the ring buffer: that frame is shared
         # with the other events of this moment and with the detectors.
-        frame_out = best["frame"]
-        if _blur:
-            from ai.privacy import blur_frame
-            frame_out = blur_frame(frame_out)
-            if frame_out is None:
-                # blur_frame refuses rather than returning the original, so
-                # there is no path where a failure stores a readable frame.
-                print(f"[KeyframeExtractor] {kind} dropped: could not blur it")
-                _give_back()
-                return None
-            metadata["privacy_blurred"] = True
+        # Blurring happens in KeyframeStorage.save, which is the one place a
+        # frame becomes a file. The sharp frame goes to the indexer either way.
+        frame_sharp = best["frame"]
+        frame_out = frame_sharp
 
         threading.Thread(
             target=self._save_event_async,
-            args=(best["keyframe_id"], frame_out, metadata, kind),
+            args=(best["keyframe_id"], frame_out, metadata, kind, frame_sharp),
             daemon=True).start()
         return best["keyframe_id"]
 
@@ -1276,9 +1305,11 @@ class KeyframeExtractor:
         return self.capture_event(
             "coverage", label="Routine check", extra={"reason": "coverage_floor"})
 
-    def _save_event_async(self, keyframe_id, frame, metadata, kind):
+    def _save_event_async(self, keyframe_id, frame, metadata, kind, index_frame=None):
         try:
-            self.storage.save(keyframe_id, frame, metadata)
+            # `frame` is what is kept, `index_frame` is what is analysed. Under
+            # blur they differ; otherwise they are the same array.
+            self.storage.save(keyframe_id, frame, metadata, index_frame=index_frame)
             if self.on_event_saved:
                 self.on_event_saved(keyframe_id, kind, metadata)
             # Event frames are still frames: hand them to the same Tier-2 path

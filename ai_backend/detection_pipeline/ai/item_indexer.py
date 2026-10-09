@@ -1195,6 +1195,8 @@ class DailyItemIndexer:
         try:
             storage = self._get_item_storage()
             if storage is not None and item_keyframe_id is not None:
+                # The image here is the SHARP one, so the detectors work under
+                # Privacy Mode's blur. ItemStorage.save blurs what it writes.
                 storage.save(item_keyframe_id, image, {
                     **(metadata or {}),
                     "user_id": user_key,
