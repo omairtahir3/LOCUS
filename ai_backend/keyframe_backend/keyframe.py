@@ -356,10 +356,21 @@ class KeyframeStorage:
             try:
                 with open(meta_path, "r") as f:
                     meta = json.load(f)
-                    meta["keyframe_id"] = os.path.basename(meta_path).replace(".json", "")
+                    stem = os.path.basename(meta_path).replace(".json", "")
+                    meta["keyframe_id"] = stem
+                    # Every row needs an `id` and a `timestamp`: that is what
+                    # the clients ask for the image by, and what they sort on.
+                    # A face crop's sidecar carries neither -- it is written
+                    # with user_id, source_frame, type, file and saved_at -- so
+                    # those rows reached the audit page with id undefined, the
+                    # page requested /keyframes/undefined/image, and they drew
+                    # as blanks beside perfectly good images.
+                    meta.setdefault("id", stem)
                     meta["date"] = date_str
                     if "timestamp" in meta and "saved_at" not in meta:
                         meta["saved_at"] = meta["timestamp"]
+                    if "timestamp" not in meta and "saved_at" in meta:
+                        meta["timestamp"] = meta["saved_at"]
 
                     if medication_only and not meta.get("medication_detected"):
                         continue
