@@ -96,20 +96,42 @@ const OWNER_CACHE_MAX = 500;
  * refused as unowned, so the audit page showed one picture and five blanks.
  */
 async function ownerFromAiBackend(keyframeId) {
-  if (ownerCache.has(keyframeId)) return ownerCache.get(keyframeId);
+  const cached = ownerCache.get(keyframeId);
+  if (cached) return cached;
   let owner = null;
   try {
-    const res = await axios.get(
-      `${AI_BACKEND}/api/keyframes/medication_frames/${encodeURIComponent(keyframeId)}/owner`,
-      { timeout: 2000, validateStatus: null });
-    if (res.status === 200 && res.data?.user_id) owner = String(res.data.user_id);
+    // Both stores, because the same gap exists in each. A capture taken for a
+    // medication or social moment is written to keyframe_storage whether or
+    // not that moment produced an event row, so its owner lives only in the
+    // sidecar; 10 of one account's 90 audit frames were refused as unowned
+    // while their images sat on disk, and drew as blanks.
+    const paths = [
+      `/api/keyframes/medication_frames/${encodeURIComponent(keyframeId)}/owner`,
+      `/api/keyframes/${encodeURIComponent(keyframeId)}/owner`,
+    ];
+    for (const path of paths) {
+      const res = await axios.get(`${AI_BACKEND}${path}`,
+        { timeout: 2000, validateStatus: null });
+      if (res.status === 200 && res.data?.user_id) {
+        owner = String(res.data.user_id);
+        break;
+      }
+    }
   } catch {
     // Unreachable or no such frame. Returning null denies, which is the right
     // way for this to fail: an owner we cannot establish is not one we can
     // check against.
   }
-  if (ownerCache.size >= OWNER_CACHE_MAX) ownerCache.clear();
-  ownerCache.set(keyframeId, owner);
+  // Only a SUCCESSFUL lookup is remembered. A failure here means the AI
+  // backend was unreachable or mid-reload, and caching that taught the gateway
+  // to refuse a frame for the rest of the process's life: one reload during a
+  // page load left frames blank until the server was restarted, with their
+  // images sitting on disk the whole time. An owner does not change, so a hit
+  // is safe to keep; a miss is usually about the moment, not the frame.
+  if (owner) {
+    if (ownerCache.size >= OWNER_CACHE_MAX) ownerCache.clear();
+    ownerCache.set(keyframeId, owner);
+  }
   return owner;
 }
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 import glob
+import json
 import os
 import threading
 
@@ -239,6 +240,42 @@ async def list_keyframes(limit: int = 50, user_id: str = ""):
                 if "is_flagged" not in k: k["is_flagged"] = False
                 
     return keyframes
+
+
+@router.get("/{keyframe_id}/owner")
+async def get_keyframe_owner(keyframe_id: str):
+    """Who an ordinary keyframe belongs to.
+
+    The same gap the medication route above was built for, one store over. The
+    Node gateway authorises an image by resolving its owner and can only look
+    in MongoDB, but not every saved frame has an event row pointing at it: a
+    capture taken for a medication or social moment is written to
+    keyframe_storage whether or not that moment ever produced a row, and its
+    owner then exists only in the json sidecar.
+
+    Measured on one account: 10 of the 90 frames the audit page lists came back
+    404 and drew as blanks, every one of them a medication or social capture
+    with an image on disk that the gateway could not establish an owner for.
+
+    Returns the owner only. Nothing about what the frame shows, because
+    authorising an image needs none of it.
+    """
+    img_path = _resolve_frame(keyframe_id, [
+        KEYFRAME_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR,
+    ])
+    if not img_path:
+        raise HTTPException(status_code=404, detail="Keyframe not found")
+    meta_path = os.path.splitext(img_path)[0] + ".json"
+    user_id = None
+    try:
+        with open(meta_path, "r") as f:
+            user_id = (json.load(f) or {}).get("user_id")
+    except Exception:
+        user_id = None
+    if not user_id:
+        # No owner on record is not the same as "anyone may see it".
+        raise HTTPException(status_code=404, detail="Keyframe owner not recorded")
+    return {"user_id": str(user_id)}
 
 
 @router.get("/{keyframe_id}/image")
