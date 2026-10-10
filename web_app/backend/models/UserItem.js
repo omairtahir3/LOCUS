@@ -49,8 +49,12 @@ const userItemSchema = new mongoose.Schema({
   // wearer's phone sat 0.017 from their earbuds -- but their outlines do not:
   // phone 0.50-1.20, earbuds case 0.82-2.46. Used only to break a tie the
   // appearance could not, never to claim a match on its own.
+  // {median, lo, hi, n} -- the RANGE, not a single number. A phone in portrait
+  // and the same phone in landscape differ fourfold in aspect ratio, so a
+  // median alone would let a tight-shaped item steal its sightings. Shape is
+  // only ever consulted when two items' ranges do not overlap.
   box_aspect: {
-    type: Number,
+    type: mongoose.Schema.Types.Mixed,
     default: null,
   },
   representative_image: {

@@ -487,8 +487,18 @@ async def extract_embedding(req: EmbeddingRequest):
         # this costs nothing, and it is independent of lighting and texture --
         # which is exactly where the embedding is weakest.
         if aspects:
-            box_aspect = round(float(sorted(aspects)[len(aspects) // 2]), 3)
-            print(f"[extract-embedding] its box is typically {box_aspect:.2f} wide per unit tall")
+            a = sorted(aspects)
+            pick = lambda q: a[min(len(a) - 1, int(q * len(a)))]
+            # The RANGE, not just the middle. A phone photographed in portrait
+            # and in landscape is one object at four times the aspect ratio, so
+            # a median on its own invites the matcher to treat a landscape
+            # phone as some other belonging entirely.
+            box_aspect = {"median": round(float(pick(0.5)), 3),
+                          "lo": round(float(pick(0.1)), 3),
+                          "hi": round(float(pick(0.9)), 3),
+                          "n": len(a)}
+            print(f"[extract-embedding] its box runs {box_aspect['lo']:.2f}-"
+                  f"{box_aspect['hi']:.2f} wide per unit tall over {len(a)} photo(s)")
         if votes:
             top, n = votes.most_common(1)[0]
             # A label seen in only one photo of fifteen is a fluke, not what
