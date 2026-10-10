@@ -9,6 +9,7 @@ Benchmarked at ~22ms/crop on Intel i5-1035G1 CPU (224×224 input).
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Optional
@@ -26,16 +27,50 @@ class ItemEmbeddingBackbone:
     Strips the classifier head to produce raw 576-D pooled features.
     """
 
+    # Which backbone embeds the crops. Switchable because the default one is
+    # not discriminative enough for small dark objects, and measuring is the
+    # only way to know. Benchmarked on real crops from one wearer's own frames,
+    # separation = (same object across frames) minus (earbuds vs phone):
+    #
+    #     MobileNetV3-Small   2.5M    78 ms/crop   +0.192   <- the old default
+    #     MobileNetV3-Large   5.5M   132 ms/crop   +0.292
+    #     EfficientNet-B0     5.3M   362 ms/crop   +0.289
+    #     ResNet50           25.6M   588 ms/crop   +0.288
+    #     ConvNeXt-Tiny      28.6M   624 ms/crop   +0.229
+    #     CLIP ViT-B/32              (slowest)     +0.100
+    #
+    # Large wins outright: the best separation of the five, at a fifth of
+    # ResNet50's cost. CLIP is the surprise -- it embeds what a thing IS, and
+    # a phone, a pair of earbuds and a laptop screen are all "small dark
+    # gadget" to it, so it pushes them together rather than apart.
+    #
+    # CHANGING THIS INVALIDATES EVERY STORED GALLERY. The vectors are in a
+    # different space and a different number of dimensions, so items must be
+    # re-enrolled; the indexer ignores any gallery whose width does not match.
+    BACKBONES = {
+        "small": ("mobilenet_v3_small", "MobileNet_V3_Small_Weights", 576),
+        "large": ("mobilenet_v3_large", "MobileNet_V3_Large_Weights", 960),
+    }
+
     def __init__(self):
         import torch
         import torchvision.models as models
-        from torchvision.models import MobileNet_V3_Small_Weights
+
+        choice = os.environ.get("ITEM_BACKBONE", "small").strip().lower()
+        if choice not in self.BACKBONES:
+            print(f"[ItemEmbeddingBackbone] unknown ITEM_BACKBONE={choice!r}, using small")
+            choice = "small"
+        ctor_name, weights_name, dim = self.BACKBONES[choice]
+        self.name = ctor_name
+        self.dim = dim
 
         t0 = time.perf_counter()
-        print("[ItemEmbeddingBackbone] Loading MobileNetV3-Small...")
+        print(f"[ItemEmbeddingBackbone] Loading {ctor_name}...")
 
-        self._model = models.mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.DEFAULT)
-        self._model.classifier = torch.nn.Identity()  # 576-D output
+        weights = getattr(__import__("torchvision.models", fromlist=[weights_name]),
+                          weights_name).DEFAULT
+        self._model = getattr(models, ctor_name)(weights=weights)
+        self._model.classifier = torch.nn.Identity()
         self._model.eval()
 
         # Store torch reference for later use
@@ -46,7 +81,8 @@ class ItemEmbeddingBackbone:
         self._std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
         elapsed = (time.perf_counter() - t0) * 1000
-        print(f"[ItemEmbeddingBackbone] MobileNetV3-Small loaded in {elapsed:.1f}ms (576-D output)")
+        print(f"[ItemEmbeddingBackbone] {self.name} loaded in {elapsed:.1f}ms "
+              f"({self.dim}-D output)")
 
     @classmethod
     def get_instance(cls) -> ItemEmbeddingBackbone:
