@@ -1429,7 +1429,14 @@ class DailyItemIndexer:
             for doc in cursor:
                 embs = doc.get("item_embeddings", [])
                 if embs:
-                    embs_arr = [np.array(e, dtype=np.float32) for e in embs if len(e) == 576]
+                    # Width must match the ACTIVE backbone. Switching backbones
+                    # puts vectors in a different space and a different number
+                    # of dimensions, so a gallery built by the old one is not
+                    # merely stale, it is meaningless -- silently ignored here
+                    # so the item simply stops matching until it is re-enrolled,
+                    # rather than matching nonsense.
+                    _dim = self._get_embedding_backbone().dim
+                    embs_arr = [np.array(e, dtype=np.float32) for e in embs if len(e) == _dim]
                     # Adaptive threshold: if multi-angle internal similarity is very high (>= 0.96),
                     # the item lacks high-frequency surface texture (e.g. plain solid surface).
                     # For such items, apply a cautious 0.72 threshold to prevent ambient clutter false matches.

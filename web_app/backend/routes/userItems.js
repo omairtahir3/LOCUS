@@ -42,6 +42,44 @@ const MATCH_THRESHOLD = 0.74;
 // answer a different one, and would drift as it learned.
 const LEARNED_SOURCE_BASE = 1000;
 
+/**
+ * Is this new gallery closer to a belonging the wearer ALREADY has than it is
+ * to itself?
+ *
+ * This is the failure that went unnoticed for weeks. One account's galleries
+ * agreed with EACH OTHER at 0.808 (Phone vs Earbuds) and 0.797 (Earbuds vs
+ * Keys), while each agreed with ITSELF across its own photos at a mean of
+ * 0.647. Three small dark low-texture objects, photographed the same way, are
+ * nearer to one another in this embedding space than any of them is to another
+ * view of itself -- and once that is true no threshold can separate them, so
+ * the matcher either refuses everything or confuses everything.
+ *
+ * Nothing downstream can fix it, which is why it is said HERE, at the only
+ * moment the wearer is holding the item and could take different photographs.
+ *
+ * Returns {name, cross, self} for the nearest existing item, or null when
+ * there is nothing to be confused with.
+ */
+function nearestOtherItem(embeddings, selfMean, others) {
+  let worst = null;
+  for (const other of others) {
+    const vecs = other.item_embeddings || [];
+    if (!vecs.length) continue;
+    let top = 0;
+    for (const a of embeddings) {
+      for (const b of vecs) {
+        let d = 0;
+        for (let i = 0; i < a.length; i++) d += a[i] * b[i];
+        if (d > top) top = d;
+      }
+    }
+    if (!worst || top > worst.cross) {
+      worst = { name: other.item_name, cross: Number(top.toFixed(3)), self: selfMean };
+    }
+  }
+  return worst;
+}
+
 function galleryCoherence(embeddings, sources = []) {
   const vecs = [];
   const src = [];
@@ -174,9 +212,34 @@ router.post('/enroll', auth, async (req, res) => {
     });
 
     const coherence = galleryCoherence(embeddings, embeddingSources);
+
+    // Can this be told apart from what the wearer already owns? Read AFTER the
+    // insert and filtered by id, so the new item is not compared against
+    // itself.
+    let confusable = null;
+    try {
+      const others = await UserItem.find({
+        user_id: userId, is_active: true, _id: { $ne: item._id },
+      }).select('item_name item_embeddings').lean();
+      const near = nearestOtherItem(embeddings, coherence ? coherence.mean : null, others);
+      // Nearer to something else than to its own other photos. Below that it
+      // is ordinary overlap and not worth a warning.
+      if (near && coherence && near.cross >= coherence.mean) confusable = near;
+    } catch (e) {
+      console.warn('[UserItems] could not compare against existing items:', e.message);
+    }
+
     // Stored, so the list endpoint never has to work it out again.
-    await UserItem.updateOne({ _id: item._id }, { $set: { gallery: coherence } });
+    await UserItem.updateOne({ _id: item._id },
+      { $set: { gallery: { ...(coherence || {}), confusable } } });
     console.log(`[UserItems] Enrolled "${item_name}" for user ${userId} with ${embeddings.length} embeddings (${embeddings[0]?.length || 0}-D)`);
+    if (confusable) {
+      console.warn(`[UserItems] "${item_name}" looks more like "${confusable.name}" `
+        + `(${confusable.cross}) than like its own other photos (${confusable.self}). `
+        + `No threshold can separate them, so one will be reported as the other. `
+        + `Photograph them apart: different distances, different backgrounds, and `
+        + `each filling its own frame.`);
+    }
     if (coherence && !coherence.matchable) {
       console.warn(`[UserItems] "${item_name}" may never be recognised: its own photos `
         + `agree at only ${coherence.mean} (lowest pair ${coherence.min}), below the `
@@ -188,12 +251,17 @@ router.post('/enroll', auth, async (req, res) => {
     res.status(201).json({
       ...item.toObject(),
       item_embeddings: undefined,
-      gallery: coherence,
-      warning: coherence && !coherence.matchable
-        ? `These photos are too different from each other for "${item_name}" to be `
-          + `recognised reliably. Retake them with the item filling the frame, in the `
-          + `same lighting, from a few angles.`
-        : undefined,
+      gallery: { ...(coherence || {}), confusable },
+      warning: confusable
+        ? `"${item_name}" looks more like your "${confusable.name}" than it looks like `
+          + `its own other photos, so the camera will mix them up. Photograph them at `
+          + `different distances and against different backgrounds, each one filling `
+          + `its own frame.`
+        : (coherence && !coherence.matchable
+          ? `These photos are too different from each other for "${item_name}" to be `
+            + `recognised reliably. Retake them with the item filling the frame, in the `
+            + `same lighting, from a few angles.`
+          : undefined),
     });
   } catch (error) {
     console.error('Error enrolling item:', error);
