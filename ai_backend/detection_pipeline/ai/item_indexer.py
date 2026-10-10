@@ -1012,12 +1012,32 @@ class DailyItemIndexer:
                 # chest. If it is far smaller than this item has ever been while
                 # held, it is not in a hand, whatever the boxes overlap.
                 size_says_placed = thr is not None and d["area_frac"] < thr
+                # ── Seeing the hands beats guessing from size ───────────
+                #
+                # size_held used to outrank this, and it claimed a phone lying
+                # flat on the wearer's lap was in their hand. It filled 3.34%
+                # of the frame against a learned bar of 1.55%, so size said
+                # "held" -- while a hand WAS detected, on the laptop trackpad,
+                # in a box that did not touch the phone's. The record even says
+                # hands_seen: false, because size had decided.
+                #
+                # A lap is about as close to a chest camera as a hand is, so
+                # size cannot tell those two apart and must not pretend to. It
+                # is still the right call when no hand is visible at all --
+                # which is what it was added for, a hand off the frame edge
+                # holding something up close -- so it keeps that job and loses
+                # the power to overrule hands it can see.
                 if size_says_placed:
                     d["placement"] = "placed"
-                elif overlap_held or size_held:
+                elif overlap_held:
                     d["placement"] = "in_hand"
                 elif hand_boxes:
+                    # Hands are in view and none of them is on this. That is
+                    # evidence, not an absence of it.
                     d["placement"] = "placed"
+                elif size_held:
+                    # No hands to be seen; size is the only thing left.
+                    d["placement"] = "in_hand"
                 else:
                     # No hands seen and no size opinion yet: nothing is known.
                     d["placement"] = "unknown"
@@ -1025,7 +1045,11 @@ class DailyItemIndexer:
                 # Anything size decided, in either direction, would otherwise
                 # feed its own output back and harden one mistake into the number
                 # that produced it.
-                size_decided = size_says_placed or (size_held and not overlap_held)
+                # Only a decision size actually MADE may train the threshold.
+                # With hands now outranking it, size_held only decides when no
+                # hand was visible.
+                size_decided = size_says_placed or (size_held and not overlap_held
+                                                    and not hand_boxes)
                 d["hands_seen"] = bool(hand_boxes) and not size_decided
                 if size_says_placed and overlap_held:
                     print(f"[Items] a hand box overlapped {d.get('matched_item', d['name'])}, but at "
