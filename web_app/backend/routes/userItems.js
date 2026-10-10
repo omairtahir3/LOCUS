@@ -179,6 +179,7 @@ router.post('/enroll', auth, async (req, res) => {
     // What the detector calls this item, measured on its own photos. See
     // UserItem.detector_class.
     let detectorClass = null;
+    let boxAspect = null;
     try {
       const aiRes = await axios.post(
         `${AI_BACKEND_URL}/api/detection/extract-embedding`,
@@ -188,6 +189,7 @@ router.post('/enroll', auth, async (req, res) => {
       embeddings = aiRes.data.embeddings;
       embeddingSources = aiRes.data.source_indices || [];
       detectorClass = aiRes.data.detector_class || null;
+      boxAspect = aiRes.data.box_aspect || null;
     } catch (aiErr) {
       console.error('[UserItems] AI embedding extraction failed:', aiErr.message);
       return res.status(502).json({ error: 'Failed to extract item embeddings from AI backend' });
@@ -206,6 +208,7 @@ router.post('/enroll', auth, async (req, res) => {
       item_embeddings: embeddings,
       embedding_sources: embeddingSources,
       detector_class: detectorClass,
+      box_aspect: boxAspect,
       representative_image: representativeImage,
       enrolled_by: req.user.role === 'caregiver' ? 'caregiver' : (req.user.role || 'user'),
       is_active: true

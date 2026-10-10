@@ -214,6 +214,11 @@ LOW_CONF_MATCH_THRESHOLD = float(os.environ.get("LOW_CONF_MATCH_THRESHOLD", 0.75
 # clean match, where the right item typically leads by 0.1 or more.
 AMBIGUOUS_MARGIN = float(os.environ.get("AMBIGUOUS_MARGIN", 0.05))
 
+# How much closer one item's recorded shape must be before it settles a tie the
+# embedding could not. Below this the two shapes are as good as each other and
+# saying nothing remains the honest answer.
+ASPECT_TIEBREAK_MARGIN = float(os.environ.get("ASPECT_TIEBREAK_MARGIN", 0.25))
+
 # How many candidates may be embedded per frame. Batched at a measured 61 ms
 # each, so this is the frame's embedding budget: 8 is about half a second in the
 # worst case, on a background worker with its own queue. Boxes above the normal
@@ -1425,7 +1430,8 @@ class DailyItemIndexer:
                 query = {"user_id": user_id_str, "is_active": True}
 
             cursor = db.useritems.find(
-                query, {"item_name": 1, "item_embeddings": 1, "detector_class": 1})
+                query, {"item_name": 1, "item_embeddings": 1,
+                        "detector_class": 1, "box_aspect": 1})
             for doc in cursor:
                 embs = doc.get("item_embeddings", [])
                 if embs:
@@ -1469,6 +1475,9 @@ class DailyItemIndexer:
                         # What this detector calls this item, measured on its
                         # own enrolment photos rather than guessed from its name.
                         "detector_class": doc.get("detector_class"),
+                        # The shape of its box, which separates items the
+                        # embedding cannot. See the ambiguity tie-break.
+                        "box_aspect": doc.get("box_aspect"),
                         "embeddings": embs_arr,
                         "threshold_floor": item_floor,
                     })
@@ -1543,6 +1552,7 @@ class DailyItemIndexer:
             # recognised as telling us nothing. See AMBIGUOUS_MARGIN below.
             second_sim = 0.0
             second_name = None
+            second_id = None
 
             for item in user_items:
                 # YOLO named this box. Whether that name describes this item
@@ -1586,13 +1596,14 @@ class DailyItemIndexer:
                 sim = float(sims.max()) if sims.size else 0.0
                 if sim >= thresh:
                     if sim > best_sim:
-                        second_sim, second_name = best_sim, best_match_name
+                        second_sim, second_name, second_id = (
+                            best_sim, best_match_name, best_item_id)
                         best_sim = sim
                         best_match_name = item["name"]
                         best_item_id = item["id"]
                         best_thresh = thresh
                     elif sim > second_sim:
-                        second_sim, second_name = sim, item["name"]
+                        second_sim, second_name, second_id = sim, item["name"], item["id"]
 
             # Two belongings claiming the same pixels is not a match, it is a
             # coin toss.
@@ -1608,11 +1619,47 @@ class DailyItemIndexer:
             # record; a confident wrong one sends somebody looking for the wrong
             # thing in the wrong room.
             if best_match_name and second_name and (best_sim - second_sim) < AMBIGUOUS_MARGIN:
-                print(f"[DailyItemIndexer] Ambiguous: '{d.get('name','?')}' matched "
-                      f"'{best_match_name}' at {best_sim:.3f} and '{second_name}' at "
-                      f"{second_sim:.3f}; too close to call, so neither is claimed")
-                best_match_name = None
-                best_item_id = None
+                # ── Before refusing, ask the SHAPE ──────────────────────────
+                #
+                # Two small dark textureless belongings embed almost
+                # identically, and refusing both is the honest answer only when
+                # there is nothing else to go on. There usually is: their
+                # outlines differ even when their appearance does not. On one
+                # account the phone's box ran 0.50-1.20 wide per unit tall and
+                # the earbuds case 0.82-2.46, which one cut separates 25 times
+                # out of 26, while their embeddings sat 0.017 apart.
+                #
+                # Only ever used to break a tie the embedding could not, never
+                # to claim a match on its own, and only when exactly one of the
+                # two candidates has a shape on record that fits.
+                bb = d.get("bbox") or {}
+                live_ar = ((bb.get("x2", 0) - bb.get("x1", 0))
+                           / max(1.0, bb.get("y2", 0) - bb.get("y1", 0))) if bb else None
+                winner = None
+                if live_ar:
+                    byname = {it["name"]: it for it in user_items}
+                    a1 = (byname.get(best_match_name) or {}).get("box_aspect")
+                    a2 = (byname.get(second_name) or {}).get("box_aspect")
+                    if a1 and a2:
+                        d1, d2 = abs(live_ar - a1), abs(live_ar - a2)
+                        # A clear preference only. Shapes this close say nothing.
+                        if abs(d1 - d2) >= ASPECT_TIEBREAK_MARGIN:
+                            winner = best_match_name if d1 < d2 else second_name
+                if winner:
+                    print(f"[DailyItemIndexer] '{best_match_name}' {best_sim:.3f} and "
+                          f"'{second_name}' {second_sim:.3f} are too close to call on "
+                          f"appearance; the box is {live_ar:.2f} wide per unit tall, so "
+                          f"it is the {winner}")
+                    if winner != best_match_name:
+                        best_match_name = second_name
+                        best_item_id = second_id
+                        best_sim = second_sim
+                else:
+                    print(f"[DailyItemIndexer] Ambiguous: '{d.get('name','?')}' matched "
+                          f"'{best_match_name}' at {best_sim:.3f} and '{second_name}' at "
+                          f"{second_sim:.3f}; too close to call, so neither is claimed")
+                    best_match_name = None
+                    best_item_id = None
 
             if best_match_name:
                 generic_name = d["name"]
