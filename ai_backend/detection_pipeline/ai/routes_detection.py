@@ -450,15 +450,17 @@ async def extract_embedding(req: EmbeddingRequest):
     # this item is KNOWN to get, which is a fact about the detector rather than
     # a guess from English.
     detector_class = None
+    box_aspect = None
     try:
         from collections import Counter
         from ultralytics import YOLO
         from ai.item_indexer import DEFAULT_MODEL_PATH
         _det = YOLO(DEFAULT_MODEL_PATH)
         votes = Counter()
+        aspects = []
         for img in valid_images:
             r = _det.predict(img, conf=0.20, verbose=False)[0]
-            best, best_area = None, 0.0
+            best, best_area, best_ar = None, 0.0, None
             for b in r.boxes:
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0])
                 area = (x2 - x1) * (y2 - y1)
@@ -466,8 +468,27 @@ async def extract_embedding(req: EmbeddingRequest):
                 # the item; anything smaller is a part of it or background.
                 if area > best_area:
                     best, best_area = _det.names.get(int(b.cls[0]), ""), area
+                    best_ar = (x2 - x1) / max(1.0, (y2 - y1))
             if best:
                 votes[best] += 1
+            if best_ar:
+                aspects.append(best_ar)
+        # ── The SHAPE of the box, which appearance cannot give us ───────────
+        #
+        # Two small dark textureless objects embed almost identically: on one
+        # account the phone sat 0.017-0.048 from the earbuds, inside the
+        # ambiguity margin, so both were refused. Their outlines are not alike
+        # at all. Measured over 26 real crops from that wearer's frames:
+        #
+        #     phone    w/h  0.50 .. 1.20
+        #     earbuds  w/h  0.82 .. 2.46
+        #
+        # One cut at 1.21 separates 25 of the 26. The box is already drawn, so
+        # this costs nothing, and it is independent of lighting and texture --
+        # which is exactly where the embedding is weakest.
+        if aspects:
+            box_aspect = round(float(sorted(aspects)[len(aspects) // 2]), 3)
+            print(f"[extract-embedding] its box is typically {box_aspect:.2f} wide per unit tall")
         if votes:
             top, n = votes.most_common(1)[0]
             # A label seen in only one photo of fifteen is a fluke, not what
@@ -485,4 +506,5 @@ async def extract_embedding(req: EmbeddingRequest):
         "source_indices": source_indices,
         "source_count": len(valid_images),
         "detector_class": detector_class,
+        "box_aspect": box_aspect,
     }

@@ -44,6 +44,15 @@ const userItemSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // The typical shape of this item's detection box, width per unit height.
+  // Two small dark textureless belongings embed almost identically -- one
+  // wearer's phone sat 0.017 from their earbuds -- but their outlines do not:
+  // phone 0.50-1.20, earbuds case 0.82-2.46. Used only to break a tie the
+  // appearance could not, never to claim a match on its own.
+  box_aspect: {
+    type: Number,
+    default: null,
+  },
   representative_image: {
     type: String,
     default: null
