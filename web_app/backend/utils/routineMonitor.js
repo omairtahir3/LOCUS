@@ -7,6 +7,7 @@
  *
  *   elderly  -> medication_gap, inactivity, camera_off, deviation   (to caregivers)
  *   user     -> left_behind, habitual_item                          (to the user)
+ *   both     -> idle_checkin                                        (to the user)
  *
  * Every check is deterministic and every threshold below was set from the real
  * data in this database, not from taste. Findings are recorded in
@@ -256,6 +257,62 @@ async function checkInactivityAndCamera(user, now = new Date()) {
     `${who}'s camera has been on since ${timeWords(windowStart)}, but there's been almost no movement in that time. ` +
     `It's probably worth checking in on ${who} now.`,
     { peak_motion: peak, frames: window.length, window_start: windowStart });
+}
+
+// ── A gentle check-in, for the person themselves ───────────────────────────
+//
+// Separate from the inactivity alert above in every way that matters. That one
+// is an ANOMALY: three hours of near-stillness, raised to a CAREGIVER, marked
+// urgent, meaning "go and look at them". This is not that. It is a short,
+// cheerful note to the person sitting there, and it goes to nobody else.
+//
+// Both roles get it. An elderly user who has been in the chair since lunch and
+// a working-age user who has not looked up from a desk are the same situation,
+// and neither is an emergency. The elderly path still escalates to a caregiver
+// at three hours if the stillness continues, so this sits in front of that as
+// a nudge rather than replacing it.
+//
+// Ninety minutes, because it has to be long enough that nobody is pestered for
+// reading a chapter and short enough to arrive while it is still worth saying.
+const IDLE_CHECKIN_MINUTES = 90;
+// Once per waking day. A cheerful message that arrives repeatedly stops being
+// cheerful, and the caregiver alert is what exists for a genuinely worrying
+// stretch.
+async function checkIdleCheckIn(user, now = new Date()) {
+  if (!isWakingHours(now)) return null;
+  const since = new Date(now.getTime() - IDLE_CHECKIN_MINUTES * 60000);
+  const frames = await EventLog.find({
+    user_id: { $in: idForms(user._id) },
+    event_type: 'activity',
+    'details.action': { $in: ['scene_change', 'coverage'] },
+    timestamp: { $gte: since },
+  }).sort({ timestamp: 1 }).lean();
+
+  // The camera has to have been WATCHING for stillness to mean anything. No
+  // frames is "not wearing it", which is a different thing entirely and
+  // already has its own alert.
+  if (frames.length < 3) return null;
+  const first = new Date(frames[0].timestamp);
+  if (now - first < IDLE_CHECKIN_MINUTES * 60000 * 0.8) return null;
+  const peak = Math.max(...frames.map(e => e.details?.motion_score ?? 0));
+  if (peak >= MOTION_FLOOR) return null;
+
+  // Genuinely doing nothing: no belonging picked up or put down, nobody
+  // spoken to. Someone reading, or on a call, is still and busy, and a note
+  // telling them to stretch would be the system talking over them.
+  const busy = await EventLog.exists({
+    user_id: { $in: idForms(user._id) },
+    event_type: { $in: ['object', 'social_interaction', 'unknown_face', 'medication'] },
+    timestamp: { $gte: since },
+  });
+  if (busy) return null;
+
+  const who = firstName(user.name);
+  return record(user, 'idle_checkin', `${user._id}:idle:${dayKey(now)}`, 'info',
+    `Everything alright, ${who}?`,
+    `It's been quiet for about ${IDLE_CHECKIN_MINUTES} minutes. No need to do anything — ` +
+    `just saying hello, and a stretch or a glass of water might be nice.`,
+    { peak_motion: peak, frames: frames.length, quiet_since: first });
 }
 
 async function checkDeviation(user, profile, now = new Date()) {
@@ -524,7 +581,54 @@ async function checkHabitualItems(user, profile, now = new Date()) {
  * from expires on the keyframe clock, so what lasts is the memory of the
  * conversation and not a recording of the words.
  */
+// How long a conversation may go unheard before it counts as finished. Matches
+// CONVERSATION_GAP_SECONDS on the Python side; a little slack is added below so
+// the pipeline, which owns the transcript, always gets first refusal.
+const CONVERSATION_GAP_MS = 180 * 1000;
+
+/**
+ * Close conversations the pipeline never got to finish.
+ *
+ * A conversation is written as one row and filled in as it is heard, held at
+ * summary_status 'collecting' so this pass leaves it alone until it is whole.
+ * The pipeline closes it when the person has been out of view long enough --
+ * but only while the pipeline is still running. If the camera stops mid
+ * conversation, or the process is restarted, the row would sit at 'collecting'
+ * for ever and no summary would ever be written. This is the backstop, and it
+ * is why the authority for closing lives here rather than only in the capture
+ * loop.
+ */
+async function closeStaleConversations(user, now = new Date()) {
+  const cutoff = new Date(now.getTime() - CONVERSATION_GAP_MS * 2);
+  const res = await EventLog.updateMany({
+    user_id: user._id,
+    event_type: { $in: ['social_interaction', 'unknown_face'] },
+    'details.conversation.summary_status': 'collecting',
+    $or: [
+      { 'details.conversation.last_heard_at': { $lte: cutoff } },
+      { 'details.conversation.last_heard_at': { $exists: false }, timestamp: { $lte: cutoff } },
+    ],
+  }, [{
+    $set: {
+      // A conversation with nothing audible in it is finished, not pending:
+      // sending an empty transcript to the summariser only burns a call to
+      // be told it is too thin.
+      'details.conversation.summary_status': {
+        $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$details.conversation.transcript', ''] } }, 0] },
+          'pending', 'skipped_silent'],
+      },
+      'details.conversation.closed_by': 'monitor',
+      updatedAt: now,
+    },
+  }]);
+  if (res.modifiedCount) {
+    console.log(`[RoutineMonitor] closed ${res.modifiedCount} conversation(s) the pipeline left open`);
+  }
+  return res.modifiedCount || 0;
+}
+
 async function summarisePendingConversations(user, limit = 5) {
+  await closeStaleConversations(user);
   const events = await EventLog.find({
     user_id: user._id,
     event_type: { $in: ['social_interaction', 'unknown_face'] },
@@ -678,6 +782,9 @@ async function runOnce(now = new Date()) {
         out.push(...await checkLeftBehind(user, sinceRun, now));
         if (profile) out.push(...await checkHabitualItems(user, profile, now));
       }
+      // Both roles, and addressed to the person themselves rather than to
+      // anybody watching over them. See checkIdleCheckIn.
+      const idle = await checkIdleCheckIn(user, now);           if (idle) out.push(idle);
       // Outdoor item tracking applies to both roles: a lost wallet is a lost
       // wallet. Escalation only has somewhere to go when caregivers exist.
       out.push(...await checkOutdoorItemLost(user, now));
@@ -725,8 +832,9 @@ function init() {
 
 module.exports = {
   summarisePendingConversations,
+  closeStaleConversations,
   init, runOnce,
-  checkMedicationGap, checkInactivityAndCamera, checkDeviation, checkLeftBehind, checkHabitualItems,
+  checkMedicationGap, checkInactivityAndCamera, checkIdleCheckIn, checkDeviation, checkLeftBehind, checkHabitualItems,
   checkOutdoorItemLost, escalateUnacknowledgedItemLoss,
   MED_GAP_DAYS, INACTIVITY_HOURS, MOTION_FLOOR, STREAM_ALIVE_MIN, CAMERA_OFF_HOURS, LEFT_BEHIND_WINDOW_MIN,
   ITEM_LOST_MOVE_RADIUS_M, ITEM_LOST_ESCALATE_MIN, LEFT_BEHIND_AFTER_MIN, ITEM_GONE_MIN,

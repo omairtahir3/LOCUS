@@ -261,6 +261,7 @@ const EMAIL_TYPES = {
   routine_inactivity:          { kicker: 'Needs you now',       cta: 'Open LOCUS',             path: '/dashboard' },
   routine_camera_off:          { kicker: 'Camera',              cta: 'Check the camera',       path: '/dashboard' },
   routine_deviation:           { kicker: 'A change in routine', cta: 'Open LOCUS',             path: '/dashboard' },
+  routine_idle_checkin:        { kicker: 'Just checking in',   cta: 'Open LOCUS',             path: '/dashboard' },
   routine_left_behind:         { kicker: 'Your things',         cta: 'See where it was',       path: '/items' },
   routine_habitual_item:       { kicker: 'Your things',         cta: 'See where it usually is', path: '/items' },
   routine_item_lost:           { kicker: 'Your things',         cta: 'See where it was',       path: '/items' },

@@ -39,7 +39,12 @@ const KIND_TO_TYPE = {
 // in the kitchen helps nobody who is standing next to the kitchen. Caregivers
 // come in via deliverEscalation if the user does not acknowledge within
 // ITEM_LOST_ESCALATE_MIN.
-const USER_FIRST_KINDS = new Set(['item_lost', 'left_behind']);
+// idle_checkin is the user's ONLY recipient, not merely the first. It is a
+// hello, not an alert: nothing escalates from it (escalation is scoped to
+// item_lost), and sending "they have been sitting still" to a caregiver is
+// precisely the surveillance this is not. The elderly inactivity alert at
+// three hours is the thing that reaches a caregiver, and it is separate.
+const USER_FIRST_KINDS = new Set(['item_lost', 'left_behind', 'idle_checkin']);
 
 async function recipientsFor(subject, kind) {
   const User = require('../models/User');
