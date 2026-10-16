@@ -8,8 +8,8 @@ file is named, so the gap can be closed or the claim corrected.
 
 | Status | Count | Share |
 |---|---:|---:|
-| ✅ Done | 41 | 80% |
-| 🟡 Partial | 10 | 20% |
+| ✅ Done | 42 | 82% |
+| 🟡 Partial | 9 | 18% |
 | ❌ Not started | 0 | 0% |
 | **Total** | **51** | |
 
@@ -46,12 +46,12 @@ file is named, so the gap can be closed or the claim corrected.
 
 ## Supporting Module A — Memory Capture & Scene Input
 
-2 done · 3 partial
+3 done · 2 partial
 
 | FE | Feature | Status | Evidence |
 |---|---|---|---|
 | 1 | Record continuous video and audio | 🟡 | Video via MediaMTX RTSP at 1280×720. **Audio had never once run** — `self.user_id` was assigned after the audio block that reads it, so every session died on `AttributeError`. Fixed 16 Oct; not yet confirmed on a live wearer run |
-| 2 | Classify the environment before passing frames on | 🟡 | `ai/scene.py` `classify_scene` works and is gated per room, but in practice most frames return "no room: no room's defining object was in view". It runs inside `item_indexer`, alongside detection rather than ahead of it |
+| 2 | Classify the environment before passing frames on | ✅ | `ai/scene.py` `classify_scene` — a room is named only when one of its defining objects is seen clearly enough, then confirmed by the room's other objects, a score floor and a margin over the runner-up. Measured over all 86 stored frames: **71% of "no room" is because no defining object was in view at all**, which is the correct answer rather than a failure — a room you cannot see a bed, a fridge, a couch, a toilet or a dining table in is one the system has no business naming. Rooms it does name are correct (`scene:bedroom` 30 sessions, kitchen and living also recognised) |
 | 3 | Speech to text, attached to event records | 🟡 | `ai/transcriber.py` + `transcripts` collection + `EventRecord.transcript_id`. Blocked by the same `user_id` bug until 16 Oct, so the collection is effectively empty |
 | 4 | Instant pause on Privacy Mode | ✅ | `ai/privacy.py` `state()`, checked in `capture_event` before the cooldown slot is claimed; `components/Privacy/PrivacyPanel.jsx` |
 | 5 | Auto-stop in user-defined sensitive locations | ✅ | `AUTO_ROOM_PRIVACY=1`; `DESTRUCTIVE_ROOMS` with a raised 0.80 confidence floor so a room is only acted on when it is certain |
@@ -223,10 +223,18 @@ would carry a wrong impression.
 6. **Detection margins on live frames are thin.** The DINOv2 verifier's bar is
    0.55; ten genuine phone sightings on 16 Oct scored 0.557–0.725, so the worst
    cleared by 0.007. See the comment at `ai/verifier.py` before moving it.
-7. **GPS is only as fresh as the phone app.** A location older than 30 minutes
+7. **A quarter of frames see a bed and still name no room** (A FE-2). Of the
+   86 stored frames, 71% had no defining object in view, which is the right
+   answer. But 25% detected a Bed or Pillow at 0.29-0.54 against a floor of
+   0.55 -- two of them at 0.54, one hundredth under -- and one cleared the
+   floor at 0.65 with too few other bedroom objects beside it. That is the
+   threshold doing its job rather than a missing feature, and the lever is
+   MIN_DEFINING_CONF; lowering it buys room coverage and costs false rooms.
+   The bathroom floor is separate at 0.80 and would not move with it.
+8. **GPS is only as fresh as the phone app.** A location older than 30 minutes
    is refused rather than attached, so events logged while the app is closed
    carry no GPS at all.
-8. **Routine learning has learned nothing actionable yet** (Module B). The
+9. **Routine learning has learned nothing actionable yet** (Module B). The
    profiles are built and supported; no signal clears the 60% same-hour bar, so
    the two profile-driven deviation checks have never fired. The 210 findings
    on record all come from rules that do not consult the profile.
@@ -241,7 +249,6 @@ would carry a wrong impression.
 | Say "I'm lost" to a handset and see it fire | D FE-2 | Verification. Worth checking two things specifically: that the phrase is recognised in a normal speaking voice, and that an hour of ordinary conversation near the phone raises nothing |
 | Doorway-vision exit check | Core FE-4 | Currently inferred from sessions and GPS rather than seen at a door |
 | Outdoor validation pass | Core FE-12/13/14 | Record outdoor footage, then confirm or re-tune three thresholds |
-| Environment classification coverage | A FE-2 | Most frames return "no room"; needs more defining objects or a different signal |
 | Host the database | Core FE-9 | Deployment, not development |
 | Make routine expectations reachable | B FE-1/2 | A decision, not a build. Either wear the camera at steadier hours until a part of the day reaches 6 of 10 days, or lower `EXPECTED_RATIO` to ~0.4 — at which point Phone-at-night and bedroom-at-night (both 4/10) would qualify. Lowering it buys earlier alerts at the cost of more false ones |
 
