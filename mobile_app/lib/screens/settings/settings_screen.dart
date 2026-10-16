@@ -60,7 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextField(
                 controller: ctrl,
                 autocorrect: false,
-                decoration: const InputDecoration(hintText: '192.168.1.14', border: OutlineInputBorder()),
+                decoration: const InputDecoration(hintText: '192.168.1.10', border: OutlineInputBorder()),
               ),
               if (status != null)
                 Padding(

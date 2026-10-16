@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show NetworkInterface, InternetAddressType;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,9 +15,16 @@ class ApiService {
   /// the first time the router hands out a different lease. It said
   /// 192.168.1.5 while the machine was on 192.168.1.14, so the phone was
   /// talking to nothing and EVERY screen looked broken rather than one.
+  /// It has since moved again, to .16, which is the whole point.
   ///
   /// The stored value wins, so correcting it is a few seconds in Settings
   /// instead of a rebuild. Nothing else in the app needs to know.
+  ///
+  /// Worth knowing when this looks like something else: Google sign-in fails
+  /// this way too. The Google half happens on the device through Play
+  /// Services and succeeds regardless, then the app posts the idToken HERE --
+  /// so a stale address reads as "the Google account won't log in" rather
+  /// than as a network problem.
   static String? _serverOverride;
 
   static String get baseUrl {
@@ -36,7 +44,7 @@ class ApiService {
     const customUrl = String.fromEnvironment('API_URL');
     if (customUrl.isNotEmpty) return customUrl;
     
-    return 'http://192.168.1.14:5000/api';
+    return 'http://192.168.1.10:5000/api';
   }
 
   /// The address the user has set, or null when the built-in one is in use.
@@ -44,7 +52,7 @@ class ApiService {
 
   /// Point the app at a different machine. Pass null or '' to go back to the
   /// built-in address. Accepts a bare host or IP and fills in the rest, because
-  /// "192.168.1.14" is what somebody reads off ipconfig, not a full URL.
+  /// "192.168.1.16" is what somebody reads off ipconfig, not a full URL.
   static Future<void> setServerOverride(String? value) async {
     var v = (value ?? '').trim();
     if (v.isNotEmpty) {
@@ -77,6 +85,80 @@ class ApiService {
     }
   }
 
+  /// Find the machine running LOCUS on this wifi, without being told.
+  ///
+  /// A compiled-in LAN address has now been wrong three times in two days --
+  /// .14, then .16, then .10 -- because the router hands out whatever lease it
+  /// likes and nothing tells the phone. Every time, every screen in the app
+  /// goes blank at once and it reads as "the app is broken" rather than "the
+  /// address moved". Google sign-in fails this way too, which is what it looked
+  /// like the first time.
+  ///
+  /// So the phone looks. It already knows its own address, and the server is on
+  /// the same /24, so it probes every host on that subnet at once and keeps
+  /// whichever answers. The probe is /auth/my-caregivers: a 401 is the ideal
+  /// reply -- something is listening AND it is us, not a printer.
+  ///
+  /// Batched rather than 254 at once: a phone will happily try to open every
+  /// socket you ask for and then fail most of them on a resource limit, which
+  /// looks exactly like "nothing is there".
+  static Future<String?> discoverServer({Duration perHost = const Duration(milliseconds: 900)}) async {
+    if (kIsWeb) return null;
+    final prefixes = <String>{};
+    try {
+      for (final iface in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+        for (final addr in iface.addresses) {
+          if (addr.isLoopback) continue;
+          final parts = addr.address.split('.');
+          if (parts.length == 4) prefixes.add('${parts[0]}.${parts[1]}.${parts[2]}');
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+    for (final prefix in prefixes) {
+      for (var start = 1; start <= 254; start += 32) {
+        final batch = <Future<String?>>[];
+        for (var h = start; h < start + 32 && h <= 254; h++) {
+          final url = 'http://$prefix.$h:5000/api';
+          batch.add(() async {
+            try {
+              final res = await http
+                  .get(Uri.parse('$url/auth/my-caregivers'))
+                  .timeout(perHost);
+              // 401 means our gateway answered and wanted a token.
+              return (res.statusCode == 200 || res.statusCode == 401) ? url : null;
+            } catch (_) {
+              return null;
+            }
+          }());
+        }
+        for (final found in await Future.wait(batch)) {
+          if (found != null) {
+            debugPrint('[ApiService] found LOCUS at $found');
+            return found;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Make sure baseUrl points at something that answers, searching if not.
+  ///
+  /// Called once at startup. Anything already configured is tried first, so the
+  /// common case costs one request and the scan only runs when the address has
+  /// actually moved.
+  static Future<bool> ensureServerReachable() async {
+    if (kIsWeb || kReleaseMode) return true;
+    if (await pingServer()) return true;
+    debugPrint('[ApiService] $baseUrl did not answer; looking for the server');
+    final found = await discoverServer();
+    if (found == null) return false;
+    await setServerOverride(found);
+    return true;
+  }
+
   static late SharedPreferences _prefs;
   static String? _token;
   static Map<String, dynamic>? _user;
@@ -86,6 +168,9 @@ class ApiService {
     // Loaded before anything can call baseUrl, or the first requests go to
     // the built-in address and fail while the stored one sits unused.
     _serverOverride = _prefs.getString('locus_server_url');
+    // Not awaited: the first screen should not wait on a subnet scan. It
+    // corrects the address in the background and later requests pick it up.
+    unawaited(ensureServerReachable());
     _token = _prefs.getString('locus_token');
     final userJson = _prefs.getString('locus_user');
     if (userJson != null) {

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/selected_user_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 class MemoryScreen extends StatefulWidget {
@@ -54,6 +55,31 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
   final _speech = SpeechToText();
   bool _speechReady = false;
   bool _listening = false;
+  /// Why the microphone is not available, in words meant for the wearer.
+  ///
+  /// This used to be nowhere. initialize() returning false and every runtime
+  /// error were both discarded, and the button was hidden -- so "it does not
+  /// work" was the whole of the available information, on the phone and in
+  /// the logs alike.
+  String? _speechProblem;
+  /// The best transcript so far, and whether it has already been sent.
+  ///
+  /// Android needs partial results switched on to transcribe at all, so
+  /// finality is decided here rather than by the recognizer: these two keep
+  /// the original promise that the agent is asked once, with a finished
+  /// sentence, never with half of one.
+  String _heard = '';
+  bool _heardSent = false;
+  /// Diagnostics for a session that ends with no words at all.
+  ///
+  /// error_no_match cannot distinguish "the microphone delivered silence" from
+  /// "speech arrived and was not matched", and those need opposite fixes. The
+  /// sound level says which: flat at zero means no audio is reaching the app,
+  /// which on Android is usually the system-wide microphone toggle muting
+  /// every app while still reporting the permission as granted. The stopwatch
+  /// says whether the session lasted its twelve seconds or ended at once.
+  double _loudest = 0;
+  Stopwatch? _listenWatch;
   bool _asking = false;
   Map<String, dynamic>? _answer;
   bool _answerImageBroken = false;
@@ -94,6 +120,10 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
     // waiting out a whole interval to find out is the wrong way round. This is
     // the counterpart of the web refreshing on visibilitychange.
     if (!wasForeground && _foreground && _shouldPoll) _loadEvents(quiet: true);
+    // Coming back from Android settings with the microphone now allowed is
+    // precisely when to try again, and nothing else would ever ask. See
+    // _initSpeech: this screen is never remounted.
+    if (!wasForeground && _foreground && !_speechReady) _initSpeech();
   }
 
   @override
@@ -104,46 +134,221 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
     if (old.isVisible != widget.isVisible) _syncRefreshTimer();
   }
 
-  Future<void> _initSpeech() async {
-    // Returns false where there is no recognizer or the microphone is refused.
-    // The button is hidden in that case rather than shown and failing.
+  /// Turn an Android recognizer error code into something a person can act on.
+  static String _explainSpeech(String code) {
+    switch (code) {
+      case 'error_insufficient_permissions':
+        return 'Microphone access for LOCUS is turned off in Android settings.';
+      case 'error_network':
+      case 'error_network_timeout':
+        return 'Speech recognition could not reach the network.';
+      case 'error_busy':
+        return 'Another app is using the microphone.';
+      default:
+        return 'Speech to text stopped: $code';
+    }
+  }
+
+  /// Get the microphone ready, and be able to say why when it is not.
+  ///
+  /// Callable more than once, which is the fix for what actually went wrong.
+  /// This screen lives in the bottom nav's IndexedStack, so it mounts once per
+  /// app launch and initState never runs a second time. The first attempt
+  /// decided _speechReady for the whole life of the process -- so allowing the
+  /// microphone afterwards, in the prompt or in Android settings, changed
+  /// nothing at all, the button stayed hidden, and the reason had already been
+  /// thrown away. It is now retried whenever the app returns to the foreground
+  /// and whenever the wearer taps the button.
+  Future<void> _initSpeech({bool askNow = false}) async {
+    if (_speechReady) return;
+    String? problem;
     bool ok = false;
     try {
-      ok = await _speech.initialize(
-        onError: (_) { if (mounted) setState(() => _listening = false); },
-        onStatus: (st) {
-          if (mounted && st != 'listening') setState(() => _listening = false);
-        },
-      );
+      // Asked for explicitly, the way step counting asks for its sensor,
+      // rather than left to the plugin's implicit request -- initialize()
+      // returns false while that prompt is still on screen, and false was
+      // being cached as "this phone cannot listen".
+      var status = await Permission.microphone.status;
+      // Only prompt when the wearer has actually asked to talk. Mounting a tab
+      // is not a request to be asked for the microphone.
+      if (!status.isGranted && askNow && !status.isPermanentlyDenied) {
+        status = await Permission.microphone.request();
+      }
+      if (!status.isGranted) {
+        problem = status.isPermanentlyDenied
+            ? 'Microphone access for LOCUS is turned off in Android settings.'
+            : 'LOCUS needs permission to use the microphone.';
+      } else {
+        ok = await _speech.initialize(
+          // The Android side's own account: whether onBeginningOfSpeech ever
+          // fires, and the RMS the recognizer itself measured. Everything this
+          // screen can see says the audio is fine and Google still returns
+          // no_match, so the next thing to read is the recognizer's own log.
+          debugLogging: true,
+          onError: (e) {
+            debugPrint('[speech] ${e.errorMsg} (permanent: ${e.permanent}) '
+                'after ${_listenWatch?.elapsedMilliseconds ?? 0}ms, '
+                'loudest ${_loudest.toStringAsFixed(1)}, '
+                'heard "$_heard"');
+            if (!mounted) return;
+            // A no-match is not a fault, whatever permanent says.
+            //
+            // Android reports error_no_match with permanent: true, so it was
+            // being filed as a standing problem with speech on this phone. It
+            // is the ordinary outcome of saying nothing into the microphone --
+            // or of speaking a language the recognizer is not set to listen
+            // for. Either way the button must keep working.
+            final ordinary = e.errorMsg == 'error_no_match' ||
+                e.errorMsg == 'error_speech_timeout';
+            setState(() {
+              _listening = false;
+              if (e.permanent && !ordinary) {
+                _speechProblem = _explainSpeech(e.errorMsg);
+              }
+            });
+            if (ordinary && _heard.trim().isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Did not catch that. Try again, a little closer.'),
+                duration: Duration(seconds: 3),
+              ));
+            }
+          },
+          onStatus: (st) {
+            debugPrint('[speech] status $st at '
+                '${_listenWatch?.elapsedMilliseconds ?? 0}ms, '
+                'loudest ${_loudest.toStringAsFixed(1)}');
+            if (!mounted || st == 'listening') return;
+            // The session has ended. If a transcript arrived but was never
+            // flagged final -- which Android does -- this is where it gets
+            // sent, and _heardSent stops it being sent twice.
+            setState(() => _listening = false);
+            _sendHeard();
+          },
+        );
+        if (!ok) {
+          problem = 'This phone has no speech recogniser installed. On most '
+              'Android phones that is Speech Services by Google, which can be '
+              'disabled or missing.';
+        } else {
+          // Which language it will actually listen for. A recognizer set to
+          // one language and a wearer speaking another returns error_no_match
+          // and nothing else, which is indistinguishable from silence.
+          try {
+            final sys = await _speech.systemLocale();
+            debugPrint('[speech] ready, listening in ${sys?.localeId} '
+                '(${sys?.name})');
+          } catch (_) {
+            // Diagnostics only; never worth failing initialisation over.
+          }
+        }
+      }
     } catch (e) {
       // MissingPluginException where the platform channel is absent, which is
       // every widget test and any platform the plugin does not cover. Without
       // this the whole screen fails to settle instead of just losing its mic.
-      debugPrint('speech unavailable: $e');
+      problem = 'Speech to text is not available on this device.';
+      debugPrint('[speech] unavailable: $e');
     }
-    if (mounted) setState(() => _speechReady = ok);
+    if (!mounted) return;
+    setState(() {
+      _speechReady = ok;
+      _speechProblem = ok ? null : problem;
+    });
   }
 
   Future<void> _listen() async {
-    if (!_speechReady || _listening) return;
+    if (_listening) return;
+    if (!_speechReady) {
+      await _initSpeech(askNow: true);
+      if (!_speechReady) {
+        if (!mounted) return;
+        final perm = await Permission.microphone.status;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_speechProblem ?? 'Speech to text is unavailable.'),
+          duration: const Duration(seconds: 6),
+          // Only where tapping Allow is no longer offered. Android stops
+          // showing the prompt after two refusals, and from then on the only
+          // way back is the settings page.
+          action: perm.isPermanentlyDenied
+              ? SnackBarAction(label: 'Settings', onPressed: openAppSettings)
+              : null,
+        ));
+        return;
+      }
+    }
+    if (!mounted) return;
+    _heard = '';
+    _heardSent = false;
+    _loudest = 0;
+    _listenWatch = Stopwatch()..start();
     setState(() => _listening = true);
     await _speech.listen(
       onResult: (r) {
-        if (!r.finalResult) return;
-        _searchCtrl.text = r.recognizedWords;
-        _askAgent(r.recognizedWords);
+        debugPrint('[speech] result "${r.recognizedWords}" '
+            'final=${r.finalResult}');
+        // Keep the best transcript so far; decide when it is finished below.
+        if (r.recognizedWords.isNotEmpty) _heard = r.recognizedWords;
+        if (r.finalResult) _sendHeard();
+      },
+      // The microphone's own level. Nothing is shown from it; it is here to
+      // tell silence apart from unmatched speech.
+      onSoundLevelChange: (level) {
+        if (level > _loudest) _loudest = level;
       },
       listenOptions: SpeechListenOptions(
-        // Only the final transcript: a half-recognised question would be sent
-        // to the agent and answered before the sentence was finished.
-        partialResults: false,
-        cancelOnError: true,
+        // ponytail: ON, against the comment that used to be here.
+        //
+        // This was false, to keep a half-recognised question from reaching the
+        // agent. But on Android the flag does not mean "only the final
+        // result" -- with partial results off, its SpeechRecognizer commonly
+        // returns ERROR_NO_MATCH and no transcript whatsoever, which is
+        // exactly what a Pixel 6 did here. The guarantee it was protecting is
+        // now kept in _sendHeard instead, where it does not depend on an
+        // Android flag behaving as its name suggests.
+        partialResults: true,
+        // A no-match no longer has to end everything; the words already heard
+        // are still worth sending.
+        cancelOnError: false,
         // Both belong here rather than as arguments to listen(), where they
-        // are deprecated. 3 s of silence ends a question; 12 s caps it.
-        listenFor: const Duration(seconds: 12),
-        pauseFor: const Duration(seconds: 3),
+        // are deprecated.
+        //
+        // pauseFor was 3 s, and that was the whole bug. It is described as the
+        // silence after which listening stops, but the plugin resets its timer
+        // on incoming RESULTS, not on sound level -- so a session that has not
+        // yet received a partial is cut off at exactly pauseFor however loudly
+        // the wearer is speaking. Measured on a Pixel 6: notListening at
+        // 3086ms with the microphone at full scale, then no_match on the
+        // truncated audio. And because no_match yields no result, the timer
+        // was never reset, so every attempt failed at the same three seconds.
+        //
+        // 8 s was tried and made no difference: the session then ran its full
+        // eight seconds, with audio at 10.0, and Google still returned
+        // no_match. So the window was never what was wrong, and 4 s is kept
+        // for what pauseFor actually governs once speech onset is detected --
+        // the wait AFTER the wearer stops talking, since the plugin cancels
+        // this timer on onBeginningOfSpeech and restarts it on
+        // onEndOfSpeech. Eight seconds of that is a long silence before the
+        // question is sent; three truncated real speech. 30 s caps a question
+        // that never ends.
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 4),
       ),
     );
+  }
+
+  /// Ask the agent, exactly once, with whatever was heard.
+  ///
+  /// Called when the recognizer declares a result final AND when the session
+  /// ends, because Android does not reliably do the former -- a question can
+  /// be fully transcribed and then simply stop, with the last result never
+  /// flagged. _heardSent is what keeps that from asking twice.
+  void _sendHeard() {
+    final words = _heard.trim();
+    if (_heardSent || words.isEmpty) return;
+    _heardSent = true;
+    _searchCtrl.text = words;
+    _askAgent(words);
   }
 
   Future<void> _askAgent(String question) async {
@@ -663,24 +868,31 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                       ),
                     ),
                   ),
-                  // Hidden where the platform has no recognizer or the
-                  // microphone was refused, so it is never a button that
-                  // does nothing. Typing works either way.
-                  if (_speechReady) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: _listening ? AppColors.danger : AppColors.primary,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: IconButton(
-                        onPressed: _asking ? null : _listen,
-                        tooltip: _listening ? 'Listening' : 'Ask out loud',
-                        icon: Icon(_listening ? Icons.mic : Icons.mic_none,
-                            color: Colors.white, size: 20),
-                      ),
+                  // Shown even when the microphone is not ready, greyed out.
+                  //
+                  // It used to be hidden, so that it was never a button that
+                  // did nothing. But that also meant a phone which could not
+                  // listen gave no sign of why and offered no way to fix it,
+                  // and a microphone allowed after launch looked identical to
+                  // one refused. Greyed out it still does something: it asks,
+                  // and failing that it says what is wrong.
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: _listening
+                          ? AppColors.danger
+                          : (_speechReady ? AppColors.primary : AppColors.textMuted),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                  ],
+                    child: IconButton(
+                      onPressed: _asking ? null : _listen,
+                      tooltip: _listening
+                          ? 'Listening'
+                          : (_speechReady ? 'Ask out loud' : 'Allow the microphone'),
+                      icon: Icon(_listening ? Icons.mic : Icons.mic_none,
+                          color: Colors.white, size: 20),
+                    ),
+                  ),
                 ],
               ),
               if (_asking)
