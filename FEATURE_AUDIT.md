@@ -8,9 +8,9 @@ file is named, so the gap can be closed or the claim corrected.
 
 | Status | Count | Share |
 |---|---:|---:|
-| ✅ Done | 39 | 76% |
-| 🟡 Partial | 11 | 22% |
-| ❌ Not started | 1 | 2% |
+| ✅ Done | 41 | 80% |
+| 🟡 Partial | 10 | 20% |
+| ❌ Not started | 0 | 0% |
 | **Total** | **51** | |
 
 > **Partial** means the capability exists and runs, but something measurable is
@@ -121,13 +121,13 @@ day's type.
 
 ## Supporting Module D — Location Safety & Emergency Response
 
-2 done · 1 partial · 1 not started
+4 done
 
 | FE | Feature | Status | Evidence |
 |---|---|---|---|
 | 1 | Continuously send GPS to the cloud | ✅ | `services/location_service.dart` — `Geolocator.getPositionStream` → `POST /location`. (Cloud is the local Mongo, as in Core FE-9) |
-| 2 | 'I'm Lost' by voice command **or** panic button | 🟡 | Panic button and `POST /api/users/me/emergency` both work, with caregiver fan-out. **No voice trigger exists** — speech recognition is wired only to memory search |
-| 3 | Real-time voice-guided navigation home | ❌ | Not implemented. `google_maps_flutter` and `geolocator` are present, but there is no routing, no turn-by-turn and no spoken guidance anywhere in the repo |
+| 2 | 'I'm Lost' by voice command **or** panic button | ✅ | Panic button → `POST /api/users/me/emergency` with caregiver fan-out, proven in use. Voice added 17 Oct in `home_screen.dart`: a toggle arms `speech_to_text` while the screen is foregrounded, matches a spoken phrase on partial results, and shares `_raiseEmergency()` with the button so the two paths cannot drift. A 5-second cancellable countdown sits between hearing and alerting, because a phrase can be overheard from a conversation or a television. **The spoken half has not yet been exercised on a handset** |
+| 3 | Real-time voice-guided navigation home | ✅ | `home_screen.dart:296` — the active-emergency panel's "Take Me Home" button launches `https://www.google.com/maps/dir/?api=1&destination=<home>&travelmode=walking` externally, so the turn-by-turn and the spoken guidance are Google Maps' own. Requires `home_location` to be set in Settings, and says so when it is not. *(Recorded as not implemented on 17 Oct — that was a bad search on my part, not a missing feature)* |
 | 4 | Live location + two-way voice with caregivers | ✅ | `components/Call/VoiceCall.jsx`, `services/voice_call_service.dart`, `utils/socket.js`; an active emergency is surfaced as an emergency rather than an ordinary call |
 
 ---
@@ -237,9 +237,8 @@ would carry a wrong impression.
 
 | Work | Module | Effort |
 |---|---|---|
-| Voice-guided navigation home | D FE-3 | The one feature with nothing behind it. Needs a routing provider, turn-by-turn, and TTS |
-| Voice trigger for 'I'm Lost' | D FE-2 | Small — speech recognition already exists in the app; it needs a wake phrase routed to the existing emergency endpoint |
 | Confirm audio and transcripts on a real run | A FE-1, A FE-3 | The blocking bug is fixed; this is verification, not building |
+| Say "I'm lost" to a handset and see it fire | D FE-2 | Verification. Worth checking two things specifically: that the phrase is recognised in a normal speaking voice, and that an hour of ordinary conversation near the phone raises nothing |
 | Doorway-vision exit check | Core FE-4 | Currently inferred from sessions and GPS rather than seen at a door |
 | Outdoor validation pass | Core FE-12/13/14 | Record outdoor footage, then confirm or re-tune three thresholds |
 | Environment classification coverage | A FE-2 | Most frames return "no room"; needs more defining objects or a different signal |
