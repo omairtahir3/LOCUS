@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:url_launcher/url_launcher.dart';
 import '../chat/chat_screen.dart';
 import '../../theme/app_theme.dart';
@@ -19,13 +22,42 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _summary;
   List<dynamic> _schedule = [];
   bool _loading = true;
   bool _isEmergencyActive = false;
 
   Timer? _refreshTimer;
+
+  // -- "I'm lost", said out loud (Module D FE-2) ----------------------------
+  //
+  // The panic button below is already one tap, so a voice path that ALSO
+  // needed a tap would add nothing at all. The point of saying it is that it
+  // is hands-free: somebody disoriented enough to need this is not reliably
+  // going to find a button, and may be holding the phone without looking at
+  // it.
+  //
+  // It listens only while this screen is in front of them, only while the app
+  // is in the foreground, and only once they have switched it on -- which
+  // keeps the battery and privacy cost somewhere they can see and undo. The
+  // microphone indicator is visible the whole time it is open, because a
+  // microphone nobody can tell is running is the thing worth avoiding.
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _voiceArmed = false;   // their choice, remembered between launches
+  bool _voiceReady = false;   // plugin initialised and permission granted
+  bool _hearing = false;      // the microphone is open right now
+  Timer? _sosCountdown;       // the cancellable pause before alerting anyone
+  static const String _prefVoiceArmed = 'sos_voice_armed';
+
+  // Deliberately NOT a bare "lost". "I lost my glasses" is a sentence people
+  // say in the room they are standing in, and raising a caregiver alert for it
+  // would teach them to switch this off -- which costs far more than the
+  // occasional missed phrasing.
+  static const List<String> _sosPhrases = [
+    "i'm lost", "im lost", "i am lost",
+    "help me", "i need help", "need help",
+  ];
 
   @override
   void initState() {
@@ -39,8 +71,11 @@ class HomeScreenState extends State<HomeScreen> {
     SocketService().connect();
     SocketService().addSosResolvedListener(_handleSosResolved);
 
+    WidgetsBinding.instance.addObserver(this);
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+    // Only the person being looked after has an SOS button to speak instead of.
+    if (_isElderly) _restoreVoicePreference();
     
     // Start tracking location if elderly or user (normal user)
     if (ApiService.userRole == 'elderly' || ApiService.userRole == 'user') {
@@ -82,8 +117,150 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _sosCountdown?.cancel();
+    _speech.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     SocketService().removeSosResolvedListener(_handleSosResolved);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The microphone closes with the app, every time. Listening on in the
+    // background would be a different product from the one described on this
+    // screen, and not one anybody agreed to.
+    if (state == AppLifecycleState.resumed) {
+      if (_voiceArmed) _listenForSos();
+    } else {
+      _speech.stop();
+      if (mounted) setState(() => _hearing = false);
+    }
+  }
+
+  Future<void> _restoreVoicePreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_prefVoiceArmed) ?? false) {
+      await _setVoiceArmed(true, persist: false);
+    }
+  }
+
+  Future<void> _setVoiceArmed(bool on, {bool persist = true}) async {
+    if (on && !_voiceReady) {
+      // Asked for here rather than at startup, so the request arrives with a
+      // reason attached: they have just chosen to be listened to.
+      final status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Microphone access is needed to listen for "I\'m lost"'),
+          ));
+        }
+        return;
+      }
+      _voiceReady = await _speech.initialize(
+        // The recogniser stops by itself after a pause in speech, so both of
+        // these exist to re-open the ear rather than to report anything. An
+        // error here is usually ordinary silence; disarming on it would leave
+        // somebody believing they could be heard when they could not.
+        onStatus: (st) {
+          if (mounted && _voiceArmed && !_speech.isListening) _listenForSos();
+        },
+        onError: (_) {
+          if (mounted && _voiceArmed) _listenForSos();
+        },
+      );
+      if (!_voiceReady) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Speech recognition is not available on this phone'),
+          ));
+        }
+        return;
+      }
+    }
+    if (mounted) setState(() => _voiceArmed = on);
+    if (persist) {
+      (await SharedPreferences.getInstance()).setBool(_prefVoiceArmed, on);
+    }
+    if (on) {
+      _listenForSos();
+    } else {
+      await _speech.stop();
+      if (mounted) setState(() => _hearing = false);
+    }
+  }
+
+  Future<void> _listenForSos() async {
+    if (!_voiceArmed || !_voiceReady) return;
+    if (_speech.isListening || _isEmergencyActive || _sosCountdown != null) return;
+    if (mounted) setState(() => _hearing = true);
+    await _speech.listen(
+      // Partial results, because the phrase should act while it is being said
+      // rather than after the recogniser decides the sentence has ended.
+      onResult: (r) => _onHeard(r.recognizedWords),
+      listenFor: const Duration(minutes: 1),
+      pauseFor: const Duration(seconds: 6),
+      partialResults: true,
+      cancelOnError: false,
+    );
+  }
+
+  void _onHeard(String words) {
+    if (_sosCountdown != null || _isEmergencyActive) return;
+    final said = words.toLowerCase();
+    if (!_sosPhrases.any(said.contains)) return;
+    _speech.stop();
+    if (mounted) setState(() => _hearing = false);
+    _startSosCountdown();
+  }
+
+  void _startSosCountdown() {
+    // Five seconds between hearing it and acting on it. A phrase can be
+    // overheard from somebody else's conversation or from a television, and
+    // five seconds is long enough to say no while being short enough not to
+    // matter when it is real.
+    _sosCountdown = Timer(const Duration(seconds: 5), () {
+      _sosCountdown = null;
+      _raiseEmergency();
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 5),
+      backgroundColor: AppColors.danger,
+      content: const Text('Heard you. Alerting your caregiver...',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      action: SnackBarAction(
+        label: 'Cancel',
+        textColor: Colors.white,
+        onPressed: () {
+          _sosCountdown?.cancel();
+          _sosCountdown = null;
+          _listenForSos();
+        },
+      ),
+    ));
+  }
+
+  Future<void> _raiseEmergency() async {
+    // One path for both ways of asking for help, so the spoken route cannot
+    // drift from the button route.
+    try {
+      final pos = await LocationService().getCurrentPosition();
+      if (pos == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not acquire location')));
+        }
+        return;
+      }
+      await ApiService.triggerEmergency(pos.latitude, pos.longitude);
+      if (mounted) setState(() => _isEmergencyActive = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 
   void _handleSosResolved(Map<String, dynamic> data) {
@@ -347,20 +524,11 @@ class HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return GestureDetector(
-      onTap: () async {
-        try {
-          final pos = await LocationService().getCurrentPosition();
-          if (pos != null) {
-            await ApiService.triggerEmergency(pos.latitude, pos.longitude);
-            if (mounted) setState(() => _isEmergencyActive = true);
-          } else {
-            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not acquire location')));
-          }
-        } catch (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-        }
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+      onTap: _raiseEmergency,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
@@ -380,6 +548,34 @@ class HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+        ),
+        const SizedBox(height: 8),
+        _buildVoiceSosToggle(),
+      ],
+    );
+  }
+
+  Widget _buildVoiceSosToggle() {
+    final label = !_voiceArmed
+        ? 'Or just say "I\'m lost"'
+        : (_hearing ? 'Listening - say "I\'m lost"' : 'Listening starts again in a moment');
+    return Row(
+      children: [
+        Icon(_hearing ? Icons.mic : Icons.mic_none,
+            size: 20, color: _hearing ? AppColors.danger : Colors.black54),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: _hearing ? AppColors.danger : Colors.black54)),
+        ),
+        Switch(
+          value: _voiceArmed,
+          onChanged: (v) => _setVoiceArmed(v),
+        ),
+      ],
     );
   }
 
