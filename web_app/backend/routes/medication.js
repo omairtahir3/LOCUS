@@ -49,10 +49,93 @@ function intakeMoment({ takenAt, method, scheduledTime }) {
 async function rejectIntakeEventLog(userId, logId) {
   if (!logId) return;
   const EventLog = require('../models/EventLog');
-  await EventLog.updateMany(
-    { user_id: userId, event_type: 'medication_intake', 'details.medication_log_id': logId },
-    { $set: { verification_status: 'rejected' } }
-  );
+  const filter = {
+    user_id: userId, event_type: 'medication_intake',
+    'details.medication_log_id': logId,
+  };
+
+  // The photograph goes with the answer.
+  //
+  // Marking the row rejected kept the evidence frame on disk, so a picture of
+  // the wearer lifting their laptop stayed in the Keyframe Audit, filed as
+  // evidence of a dose, after they had said it was not one. The row stays and
+  // stays rejected, which is the audit trail -- "the camera once thought it
+  // saw an intake" is still recorded. What goes is the image, the same way
+  // the privacy purge separates the two.
+  const doomed = await EventLog.find(filter)
+    .select('keyframe_id details.medication_id timestamp').lean();
+  for (const ev of doomed) {
+    if (!ev.keyframe_id) continue;
+    try {
+      const r = await fetch(
+        `${process.env.AI_BACKEND_URL || 'http://127.0.0.1:8000'}`
+        + `/api/keyframes/${encodeURIComponent(ev.keyframe_id)}`
+        + `?user_id=${encodeURIComponent(String(userId))}`,
+        { method: 'DELETE', signal: AbortSignal.timeout(6000) });
+      if (!r.ok) console.warn(`[Medication] could not delete frame ${ev.keyframe_id}: HTTP ${r.status}`);
+    } catch (e) {
+      // The row is still rejected and still hidden from every memory view;
+      // a frame that outlives it is untidy, not a correctness failure.
+      console.warn(`[Medication] could not delete frame ${ev.keyframe_id}: ${e.message}`);
+    }
+  }
+
+  // ── and the frames the event never named ──────────────────────────────
+  //
+  // Deleting by keyframe_id finds nothing when the event has no keyframe_id,
+  // which is how a rejected Panadol dose kept its Phase 2 and Phase 3
+  // pictures in the Keyframe Audit on 14 Oct. The audit lists medication
+  // evidence straight from storage, so the two were joined only by a field
+  // that is not always filled.
+  //
+  // Evidence sidecars always carry user_id and medication_id, so the frames
+  // are removed by the medication they claim to be evidence OF, bounded to a
+  // day either side of the event so another dose of the same medicine on
+  // another date is untouched.
+  const meds = new Set(doomed.map(
+    (ev) => ev?.details?.medication_id).filter(Boolean).map(String));
+  // Three hours each way, and this is a HEURISTIC join, not an exact one.
+  //
+  // The event is stamped at the scheduled slot while the evidence carries the
+  // moment of detection, and those were 90 minutes apart on 14 Oct (event
+  // 02:15:00Z, frames 00:47:47Z). So the window must be wide enough to cross
+  // that offset. But this wearer's Panadol is due at 03:00, 03:15, 03:55,
+  // 05:10 and 05:15 -- gaps of fifteen minutes, which NO time window can
+  // separate. Rejecting one dose can therefore still clear the pictures of an
+  // adjacent dose of the same medicine.
+  //
+  // The durable fix is upstream: write medication_log_id into the evidence
+  // sidecar when the frame is saved, and match on that instead of on
+  // medication_id plus a guess about time. Until then a day was far too wide
+  // and three hours is the narrowest that still covers the observed offset.
+  const stamps = doomed.map((ev) => ev.timestamp).filter(Boolean);
+  const WINDOW_MS = 3 * 60 * 60 * 1000;
+  const lo = stamps.length ? new Date(Math.min(...stamps.map(Number)) - WINDOW_MS) : null;
+  const hi = stamps.length ? new Date(Math.max(...stamps.map(Number)) + WINDOW_MS) : null;
+  for (const medicationId of meds) {
+    const qs = new URLSearchParams({ user_id: String(userId), medication_id: medicationId });
+    if (lo) qs.set('since', lo.toISOString());
+    if (hi) qs.set('until', hi.toISOString());
+    try {
+      const r = await fetch(
+        `${process.env.AI_BACKEND_URL || 'http://127.0.0.1:8000'}`
+        + `/api/keyframes/medication_frames?${qs.toString()}`,
+        { method: 'DELETE', signal: AbortSignal.timeout(6000) });
+      if (!r.ok) {
+        console.warn(`[Medication] could not clear evidence for ${medicationId}: HTTP ${r.status}`);
+      }
+    } catch (e) {
+      // Same reasoning as above: the row is rejected either way, and an
+      // orphaned picture is untidy rather than wrong.
+      console.warn(`[Medication] could not clear evidence for ${medicationId}: ${e.message}`);
+    }
+  }
+
+  await EventLog.updateMany(filter, {
+    $set: { verification_status: 'rejected', rejected_at: new Date() },
+    // Nothing should point at a picture that is gone.
+    $unset: { keyframe_id: '' },
+  });
 }
 
 async function writeIntakeEventLog({
