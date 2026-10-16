@@ -101,6 +101,37 @@ EVENT_WINDOW_MAX_BYTES = int(os.environ.get("EVENT_WINDOW_MAX_BYTES", 96 * 1024 
 MIN_FRAME_LUMINANCE = float(os.environ.get("MIN_FRAME_LUMINANCE", 15.0))
 
 
+# Where the API caches width-bounded copies for the audit grid. Defined here
+# rather than in routes.py because retention has to be able to delete them and
+# routes.py imports this module, not the other way round.
+THUMB_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "thumb_cache")
+
+
+def _drop_thumbnails(keyframe_id: str) -> int:
+    """Remove every cached rendering of a frame that is going away.
+
+    A thumbnail is named `{id}.{mtime}.{size}.w{width}.jpg`, so one frame can
+    have several, and the glob has to be by id rather than by exact name.
+
+    Deleting the frame without this left the rendered copy on disk forever.
+    Measured on a live machine: 493 thumbnails against 85 frames, 486 of them
+    (99%) belonging to frames retention had already removed, the oldest 14.2
+    days old against a 36 h TTL. The manual delete endpoints and the privacy
+    sweep in ai/privacy.py already did this; retention was the one path out of
+    three that did not, which made "gone after 36 hours" untrue of the only
+    copy a viewer actually sees in the grid.
+    """
+    dropped = 0
+    for t in glob.glob(os.path.join(THUMB_CACHE_DIR, keyframe_id + ".*")):
+        try:
+            os.remove(t)
+            dropped += 1
+        except OSError:
+            pass
+    return dropped
+
+
 # ── Retention sweepers (Core FE-8) ──────────────────────────────────────────
 #
 # Retention used to be a side effect of WRITING. Each storage class started a
@@ -509,6 +540,8 @@ class KeyframeStorage:
             try:
                 if os.path.exists(img_path): os.remove(img_path)
                 if os.path.exists(meta_path): os.remove(meta_path)
+                # The rendered copies too, or they outlive the frame forever.
+                _drop_thumbnails(kid)
                 deleted += 1
             except Exception:
                 pass
@@ -883,6 +916,8 @@ class MedicationEvidenceStorage:
             try:
                 if os.path.exists(img_path): os.remove(img_path)
                 if os.path.exists(meta_path): os.remove(meta_path)
+                # The rendered copies too, or they outlive the frame forever.
+                _drop_thumbnails(kid)
                 deleted += 1
             except Exception:
                 pass
@@ -1311,10 +1346,21 @@ class KeyframeExtractor:
         anybody is moving. This is what gives an inactivity stretch something to
         show; a still wearer previously produced an empty memory view.
         """
-        if (time.time() - self._last_any_save) < COVERAGE_SECONDS:
+        quiet = time.time() - self._last_any_save
+        if quiet < COVERAGE_SECONDS:
             return None
-        return self.capture_event(
+        kf = self.capture_event(
             "coverage", label="Routine check", extra={"reason": "coverage_floor"})
+        if kf is None:
+            # The one promise this makes is that a still stretch is never
+            # blank, so a refusal has to be visible. Every reason capture_event
+            # can refuse for -- privacy, cooldown, an empty window, a dark or
+            # soft frame -- prints its own line above this one; this says the
+            # floor asked and did not get one, which is the thing a reader of
+            # the timeline would otherwise have to infer from an absence.
+            print(f"[KeyframeExtractor] coverage wanted a frame after "
+                  f"{quiet:.0f}s of quiet and did not get one")
+        return kf
 
     def _save_event_async(self, keyframe_id, frame, metadata, kind, index_frame=None):
         try:

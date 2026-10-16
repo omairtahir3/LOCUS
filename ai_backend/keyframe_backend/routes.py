@@ -3,9 +3,12 @@ from fastapi.responses import FileResponse
 import glob
 import json
 import os
+import re
+import shutil
 import threading
+import time
 
-from .keyframe import KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR, ItemStorage
+from .keyframe import KEYFRAME_TTL_HOURS, KeyframeStorage, KEYFRAME_STORAGE_DIR, MedicationEvidenceStorage, MEDICATION_EVIDENCE_STORAGE_DIR, SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR, ItemStorage
 from db_config import get_client, get_db_name
 
 router = APIRouter(prefix="/api/keyframes", tags=["Keyframes"])
@@ -45,7 +48,9 @@ _PATH_CACHE_MAX = 4096
 # thereafter. Thumbnails live in their own directory rather than next to the
 # original because _resolve_frame globs by id and a sibling file would be found
 # instead of the frame itself.
-THUMB_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "thumb_cache")
+# Defined in keyframe.py, where retention can also reach it: a second copy of
+# this path here is how the sweeper came to delete frames and leave renderings.
+from .keyframe import THUMB_CACHE_DIR
 # What a caller may ask for. An open integer would let anyone fill the disk with
 # one file per width.
 THUMB_WIDTHS = (160, 240, 480)
@@ -199,6 +204,197 @@ def _parse_timestamp(ts):
         except:
             return 0.0
     return 0.0
+
+@router.delete("/medication_frames")
+async def delete_medication_frames(user_id: str = "", medication_id: str = "",
+                                   since: str = "", until: str = ""):
+    """Destroy the evidence frames for one medication, for one wearer.
+
+    The per-id delete cannot do this. An intake event does not always carry a
+    keyframe_id -- the one the wearer rejected on 14 Oct carried none -- and
+    rejectIntakeEventLog deletes by exactly that field, so the Phase 2 and
+    Phase 3 pictures survived being told the dose never happened. Meanwhile
+    list_medication_frames reads the store directly and never looks at
+    eventlogs, so they stayed visible in the audit.
+
+    Evidence sidecars always carry user_id and medication_id, so that is what
+    this matches on: the medication the frames claim to be evidence OF.
+
+    `since` and `until` are optional ISO timestamps bounding detected_at, so
+    rejecting one dose cannot take out the frames of a different dose of the
+    same medicine on another day. Both are compared as strings, which is safe
+    because detected_at is written in ISO 8601 with a fixed offset.
+
+    Declared BEFORE /{keyframe_id} so the literal path wins the route match;
+    FastAPI resolves in declaration order and would otherwise read
+    "medication_frames" as a keyframe id.
+    """
+    if not user_id or not medication_id:
+        raise HTTPException(status_code=400,
+                            detail="user_id and medication_id are required")
+
+    removed, kept = [], 0
+    for meta_path in glob.glob(os.path.join(
+            MEDICATION_EVIDENCE_STORAGE_DIR, "*", "*", "*.json")):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except Exception:
+            continue
+        if str(meta.get("user_id", "")) != str(user_id):
+            continue
+        if str(meta.get("medication_id", "")) != str(medication_id):
+            kept += 1
+            continue
+        when = str(meta.get("detected_at", ""))
+        if since and when and when < since:
+            kept += 1
+            continue
+        if until and when and when > until:
+            kept += 1
+            continue
+        stem = meta_path[:-len(".json")]
+        for path in (stem + ".json", stem + ".jpg", stem + ".jpeg", stem + ".png"):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    removed.append(os.path.basename(path))
+                except OSError:
+                    pass
+        base = os.path.basename(stem)
+        for t in glob.glob(os.path.join(THUMB_CACHE_DIR, base + "*")):
+            try:
+                os.remove(t)
+                removed.append(os.path.basename(t))
+            except OSError:
+                pass
+
+    print(f"[Keyframes] removed {len(removed)} medication evidence file(s) for "
+          f"medication {medication_id}; {kept} other frame(s) left alone")
+    return {"deleted": len(removed), "files": removed, "kept": kept}
+
+
+@router.delete("/{keyframe_id}")
+async def delete_keyframe(keyframe_id: str, user_id: str = ""):
+    """Destroy one frame across every store (and its thumbnail).
+
+    For a sighting the wearer has said did not happen. Rejecting a medication
+    intake marked the event row and left the photograph on disk, so a frame of
+    somebody lifting a laptop stayed in the Keyframe Audit, filed as evidence
+    of a dose, after they had answered "no". The row stays and stays rejected,
+    which is the audit trail; what goes is the picture, exactly as the privacy
+    purge does it.
+
+    `user_id` is required and is checked against the sidecar, so an id alone
+    cannot delete another wearer's frame.
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", keyframe_id or ""):
+        # The id goes into a glob; anything that could climb out of the store
+        # is refused rather than sanitised.
+        raise HTTPException(status_code=400, detail="bad keyframe id")
+
+    roots = [KEYFRAME_STORAGE_DIR, MEDICATION_EVIDENCE_STORAGE_DIR,
+             SOCIAL_STORAGE_DIR, ACTIVITY_STORAGE_DIR, ITEMS_STORAGE_DIR]
+    removed = []
+    for root in roots:
+        for path in glob.glob(os.path.join(root, "*", "*", keyframe_id + ".*")):
+            meta = path[:path.rfind(".")] + ".json"
+            owner = ""
+            if os.path.exists(meta):
+                try:
+                    with open(meta, "r", encoding="utf-8") as fh:
+                        owner = str(json.load(fh).get("user_id", ""))
+                except Exception:
+                    owner = ""
+            if owner and owner != str(user_id):
+                continue
+            try:
+                os.remove(path)
+                removed.append(os.path.basename(path))
+            except OSError:
+                pass
+    # The rendered thumbnail too, or the audit page keeps showing it.
+    for t in glob.glob(os.path.join(THUMB_CACHE_DIR, keyframe_id + "*")):
+        try:
+            os.remove(t)
+            removed.append(os.path.basename(t))
+        except OSError:
+            pass
+    print(f"[Keyframes] deleted {len(removed)} file(s) for {keyframe_id[:8]} "
+          f"at the wearer's request")
+    return {"deleted": len(removed), "files": removed}
+
+
+@router.get("/storage")
+async def storage_usage(user_id: str = ""):
+    """What this device is actually holding, per store (Module 6 FE-4).
+
+    The AI backend is the only part of the system that can answer this: the
+    frames live on ITS disk, and the gateway has never had a way to see them.
+    Reported per store rather than as one number, because the five stores
+    expire on different clocks and a reader deciding what to clean up needs to
+    know which pile is which.
+
+    `user_id` narrows it to one wearer. Left out, it reports the whole device,
+    which is what an operator wants and what a wearer must never be shown.
+    """
+    stores = {
+        "keyframes": KEYFRAME_STORAGE_DIR,
+        "medication_evidence": MEDICATION_EVIDENCE_STORAGE_DIR,
+        "social": SOCIAL_STORAGE_DIR,
+        "activities": ACTIVITY_STORAGE_DIR,
+        "items": ITEMS_STORAGE_DIR,
+    }
+    now = time.time()
+    out, total_bytes, total_files, oldest = {}, 0, 0, None
+    for name, root in stores.items():
+        base = os.path.join(root, user_id) if user_id else root
+        files = 0
+        nbytes = 0
+        store_oldest = None
+        for dirpath, _dirs, names in os.walk(base):
+            for fn in names:
+                if not fn.lower().endswith((".jpg", ".jpeg", ".png", ".json")):
+                    continue
+                fp = os.path.join(dirpath, fn)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                files += 1
+                nbytes += st.st_size
+                if store_oldest is None or st.st_mtime < store_oldest:
+                    store_oldest = st.st_mtime
+        out[name] = {
+            "files": files,
+            "bytes": nbytes,
+            "oldest_hours": round((now - store_oldest) / 3600.0, 1) if store_oldest else None,
+        }
+        total_bytes += nbytes
+        total_files += files
+        if store_oldest and (oldest is None or store_oldest < oldest):
+            oldest = store_oldest
+
+    # Free space on the volume the frames live on, so "is this a problem?" can
+    # be answered rather than guessed at from a number of megabytes.
+    try:
+        usage = shutil.disk_usage(KEYFRAME_STORAGE_DIR)
+        disk = {"free_bytes": usage.free, "total_bytes": usage.total}
+    except Exception:
+        disk = None
+
+    return {
+        "stores": out,
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "oldest_hours": round((now - oldest) / 3600.0, 1) if oldest else None,
+        "retention_hours": KEYFRAME_TTL_HOURS,
+        "disk": disk,
+        "scope": user_id or "all users",
+    }
+
 
 @router.get("")
 async def list_keyframes(limit: int = 50, user_id: str = ""):
