@@ -14,6 +14,33 @@ const userItemSchema = new mongoose.Schema({
     type: [[Number]],
     default: []
   },
+  // Sightings the camera was sure enough about to learn from.
+  //
+  // Enrolment photos are taken with a phone in good light, close up: lightness
+  // around 150 on this wearer's items. The same belongings through the chest
+  // camera arrive at 48-79. The gallery was built in one world and asked about
+  // another, and that gap is what matching was losing to. Letting a confident
+  // sighting join the gallery teaches it THIS camera: 23 of 41 real crops
+  // matched correctly before, 33 after, with no new wrong matches.
+  //
+  // Kept separate from item_embeddings on purpose. Adoption is judged against
+  // the enrolment vectors ALONE, so an adopted vector can never vouch for the
+  // next candidate and one mistake cannot breed. The textureless-item floor is
+  // likewise computed on enrolment alone, or these deliberately varied crops
+  // would drag the internal similarity down and strip the floor off the items
+  // that most need it. Clearing this array returns the item to how it was
+  // enrolled, without re-enrolling it.
+  adopted_embeddings: {
+    type: [[Number]],
+    default: []
+  },
+  // Provenance for each adopted vector: when, how well it matched enrolment,
+  // and which frame it came from, so a gallery that drifts can be explained
+  // rather than guessed at.
+  adopted_meta: {
+    type: [mongoose.Schema.Types.Mixed],
+    default: []
+  },
   // Which enrolment PHOTO each embedding came from. Every photo is expanded
   // across lighting and angle before embedding, so the gallery holds several
   // vectors per photo. Judging how coherent a gallery is only means something
@@ -60,6 +87,22 @@ const userItemSchema = new mongoose.Schema({
   representative_image: {
     type: String,
     default: null
+  },
+  // Every enrolment photograph, not just the first.
+  //
+  // Enrolment used to embed fifteen photographs and keep one. The vectors it
+  // kept are MobileNet-space numbers and cannot be converted, so when a second
+  // model was added to check matches it had a single photograph to learn each
+  // belonging from -- and a verifier taught one bright top-down photo of a
+  // teal case on a desk duly refused every dark side-on view the camera
+  // actually produced, at 0.47 to 0.53 against a 0.55 bar.
+  //
+  // Fifteen 240x320 JPEGs is about 200 KB, which is nothing against being
+  // unable to adopt a better model without asking the wearer to photograph
+  // everything they own again.
+  enrollment_images: {
+    type: [String],
+    default: []
   },
   enrolled_by: {
     type: String,

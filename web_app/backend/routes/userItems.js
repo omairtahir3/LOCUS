@@ -210,6 +210,10 @@ router.post('/enroll', auth, async (req, res) => {
       detector_class: detectorClass,
       box_aspect: boxAspect,
       representative_image: representativeImage,
+      // Keep the sources, not only what one model made of them. See the
+      // field comment on UserItem; this is what lets a better model be
+      // adopted later without re-photographing anything.
+      enrollment_images: frames,
       enrolled_by: req.user.role === 'caregiver' ? 'caregiver' : (req.user.role || 'user'),
       is_active: true
     });
@@ -287,7 +291,7 @@ router.get('/', auth, async (req, res) => {
     // there and stored. Items enrolled before that are filled in lazily below,
     // once each, rather than in a migration nobody would remember to run.
     const items = await UserItem.find({ user_id: userId, is_active: true })
-      .select('-item_embeddings -embedding_sources')
+      .select('-item_embeddings -embedding_sources -adopted_embeddings -enrollment_images')
       .sort({ createdAt: -1 }).lean();
 
     const missing = items.filter(i => i.gallery === undefined || i.gallery === null);
@@ -394,7 +398,7 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const userId = await resolveUserId(req);
     const item = await UserItem.findOne({ _id: req.params.id, user_id: userId })
-      .select('-item_embeddings');
+      .select('-item_embeddings -adopted_embeddings -enrollment_images');
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
     }
@@ -416,7 +420,7 @@ router.put('/:id', auth, async (req, res) => {
       { _id: req.params.id, user_id: userId, is_active: true },
       { item_name: item_name.trim() },
       { new: true }
-    ).select('-item_embeddings');
+    ).select('-item_embeddings -adopted_embeddings -enrollment_images');
 
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
