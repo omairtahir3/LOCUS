@@ -67,6 +67,7 @@ app.use('/api/relationships', relationshipRoutes);
 app.use('/api/user-items',    userItemRoutes);
 app.use('/api/location',      locationRoutes);
 app.use('/api/users',         userRoutes);
+app.use('/api/storage',       require('./routes/storage'));
 
 // Health check
 app.get('/', (req, res) => res.json({

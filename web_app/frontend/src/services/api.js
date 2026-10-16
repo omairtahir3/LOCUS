@@ -173,6 +173,11 @@ export const detectionAPI = {
 };
 
 // ── Normal User API (Node.js backend) ─────────────────────────────────────────
+export const storageAPI = {
+  // Device (frames on the camera machine) and cloud (records), added up.
+  getUsage: () => api.get('/storage/usage'),
+};
+
 export const userAPI = {
   getSchedule:    () => api.get('/medications/schedule/today'),
   getMedications: () => api.get('/medications'),

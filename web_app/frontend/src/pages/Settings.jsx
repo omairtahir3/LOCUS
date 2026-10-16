@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { User, Bell, Shield, Save, Link as LinkIcon, Users, Package } from 'lucide-react';
 import PrivacyPanel from '../components/Privacy/PrivacyPanel';
+import StorageUsage from '../components/Storage/StorageUsage';
 import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
@@ -104,6 +105,15 @@ export default function SettingsPage() {
         </div>
         <div style={{ padding: '0 4px' }}>
           <PrivacyPanel />
+        </div>
+      </div>
+
+      {/* Storage, device and cloud (Module 6 FE-4, Module 10 FE-5). Beside
+          Privacy because both answer the same question -- what is being kept
+          about me, and for how long. */}
+      <div className="card mb-4">
+        <div style={{ padding: '0 4px' }}>
+          <StorageUsage />
         </div>
       </div>
 
