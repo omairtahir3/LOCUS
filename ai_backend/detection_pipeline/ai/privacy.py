@@ -307,10 +307,116 @@ def blur_frame(frame):
         return None            # refusing to store beats storing it sharp
 
 
+# ── The automatic room rule, switched OFF ───────────────────────────────────
+#
+# Turned off at the wearer's instruction after it destroyed a moment they were
+# present for: sitting on their couch with their phone beside them, which the
+# scene classifier called a bathroom. It had done the same thing once before.
+#
+# The evidence that it is wrong is strong and the evidence of WHAT it saw is
+# nil, because the rule deletes its own proof. Over the 90 surviving frames --
+# all desk and bed, none of the couch -- the detector already invents bathroom
+# fixtures in this home: a phantom Sink at 0.839 and a Towel at 0.511 in
+# ordinary shots of a desk. Neither can fire the rule alone; it needs a Toilet
+# or a Bathtub at 0.55, and it fired at least twice inside thirty seconds, so
+# whatever it is misreading it misreads consistently. A threshold nudge would
+# postpone the failure, not fix it.
+#
+# Switched off rather than deleted, because this is a diagnosis waiting on one
+# piece of data. With it off the classifier still runs and still says when it
+# WOULD have gone dark, recording the classes and confidences -- see
+# note_would_have_fired. So the culprit gets identified from ordinary use, at
+# no risk to anybody's frames, and the rule can be turned back on with the one
+# bad class removed from DEFINING_OBJECTS.
+#
+# What is NOT affected: the privacy button, which is the wearer's own
+# decision; blur mode; and sensitive PLACES, which are addresses the wearer
+# named themselves and have never produced a false positive.
+#
+# ── BACK ON, 14 Oct 2026, on the wearer's instruction and on that data ──────
+#
+# A washroom visit was stored, and the wearer asked for the rule back. The
+# measurement the comment above was waiting for, taken over every frame stored
+# in the 36 h to 14 Oct 01:30 -- 35 of them holding any bathroom-weighted class:
+#
+#     Toilet    ONCE, at 0.95, in the one genuine washroom frame
+#     Bathtub   never
+#     Mirror    31 frames, up to 0.70 -- every one of them the desk
+#     Towel     4 frames, up to 0.36 -- every one of them the desk
+#     Sink      twice, 0.74 and 0.22, both genuine washroom frames
+#
+# Only Toilet and Bathtub can fire this, because DEFINING_OBJECTS keeps the
+# classes weighted >= 0.8 and Sink is 0.6, Towel 0.55, Toothbrush and Soap 0.7.
+# So the phantom Sink at 0.839 named above was never able to be the culprit,
+# and the two classes that CAN fire produced no false appearance at all here.
+#
+# What it does to the visit that prompted this:
+#
+#     01:24:39  Toilet 0.95  -> bathroom, gate closes, frame purged
+#     01:24:48  Sink 0.74    -> would not classify alone, but the gate is
+#                              already shut for AUTO_DEAD_SECONDS, so nothing
+#                              is stored
+#
+# What it is NOT: a guarantee that such a frame is never written. Classification
+# runs BEHIND capture, inside the item indexer, so the capture loop writes the
+# frame first and this purges it afterwards -- and the indexer is the stage that
+# sheds work under load, so a visit during a backlog may be classified late or
+# missed. "Removed promptly" is the honest claim.
+#
+# The protection against a repeat of the couch incident is unchanged and is the
+# reason this is safe to arm: the gate closes on the FIRST sighting, but nothing
+# is DESTROYED until CONFIRM_FRAMES sightings inside CONFIRM_WINDOW_SECONDS,
+# with PROBE_SECONDS for a second opinion that can lift it. One misread costs a
+# gap in capture, not a memory. Set AUTO_ROOM_PRIVACY=0 to disarm it again.
+AUTO_ROOM_PRIVACY = os.environ.get("AUTO_ROOM_PRIVACY", "1") != "0"
+
+
 def is_sensitive_room(user_id: str, room: str | None) -> bool:
+    if not room or not AUTO_ROOM_PRIVACY:
+        return False
+    return room in (settings(user_id).get("sensitive_rooms") or [])
+
+
+def would_be_sensitive_room(user_id: str, room: str | None) -> bool:
+    """What is_sensitive_room would say if the automatic rule were on.
+
+    Separate so the classifier can keep reporting its opinion while being
+    denied the power to act on it.
+    """
     if not room:
         return False
     return room in (settings(user_id).get("sensitive_rooms") or [])
+
+
+def note_would_have_fired(user_id: str, room: str, trigger: dict | None) -> None:
+    """Record a near-miss of the disabled rule. Destroys nothing.
+
+    This is the diagnostic the rule could never produce while it was armed:
+    the classes and confidences that convinced it, with every frame left
+    exactly where it is, so a wrong call can finally be read rather than
+    inferred.
+    """
+    text = _trigger_text(trigger)
+    print(f"[Privacy] would have called this a {room} "
+          f"({(trigger or {}).get('score')}) from {text or 'no scoring classes'}; "
+          f"the automatic rule is OFF, so nothing was stopped or deleted")
+    try:
+        _db().eventlogs.insert_one({
+            "user_id": _ids(str(user_id))[-1],
+            "event_type": "activity",
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
+            "confidence": float((trigger or {}).get("score") or 0.0),
+            "details": {
+                "action": "privacy_auto_would_fire",
+                "room": room,
+                "seen": (trigger or {}).get("seen") or {},
+                "runner_up": (trigger or {}).get("runner_up"),
+                "description": f"Would have gone dark for a {room}",
+            },
+            "createdAt": datetime.now(timezone.utc).replace(tzinfo=None),
+        })
+    except Exception as e:
+        print(f"[Privacy] could not record the near-miss: {e}")
 
 
 # ── the retroactive half ─────────────────────────────────────────────────────
@@ -345,7 +451,17 @@ def _sidecar_time(meta: dict) -> float | None:
     return None
 
 
-def purge_since(user_id: str, reason: str, since_epoch: float) -> dict:
+def _trigger_text(trigger: dict | None) -> str:
+    """"Bathtub 0.71, Sink 0.58" -- the classes, never the picture."""
+    if not trigger:
+        return ""
+    seen = (trigger or {}).get("seen") or {}
+    return ", ".join(f"{n} {c:.2f}" for n, c in
+                     sorted(seen.items(), key=lambda kv: -kv[1]))
+
+
+def purge_since(user_id: str, reason: str, since_epoch: float,
+                trigger: dict | None = None) -> dict:
     """Destroy this user's stored frames captured at or after `since_epoch`.
 
     Image, sidecar and any rendered thumbnail, across all five stores, and the
@@ -408,10 +524,19 @@ def purge_since(user_id: str, reason: str, since_epoch: float) -> dict:
     events = 0
     if removed_ids:
         try:
+            mark = {"privacy_redacted": True, "privacy_reason": reason}
+            # The classes that made this a private room, so a wrong call can be
+            # argued with. Words only: no box, no crop, no image.
+            if trigger:
+                mark["privacy_trigger"] = {
+                    "room": trigger.get("room"),
+                    "score": trigger.get("score"),
+                    "seen": trigger.get("seen"),
+                    "runner_up": trigger.get("runner_up"),
+                }
             res = _db().eventlogs.update_many(
                 {"user_id": {"$in": _ids(key)}, "keyframe_id": {"$in": list(removed_ids)}},
-                {"$set": {"privacy_redacted": True, "privacy_reason": reason},
-                 "$unset": {"keyframe_id": ""}})
+                {"$set": mark, "$unset": {"keyframe_id": ""}})
             events = res.modified_count
         except Exception as e:
             print(f"[Privacy] could not redact event rows: {e}")
@@ -424,7 +549,8 @@ def purge_since(user_id: str, reason: str, since_epoch: float) -> dict:
 
 
 def enter_sensitive_room(user_id: str, room: str,
-                         frame_epoch: float | None = None) -> dict:
+                         frame_epoch: float | None = None,
+                         trigger: dict | None = None) -> dict:
     """A sensitive room was just recognised: close the gate and clean up.
 
     `frame_epoch` is when the frame being classified was CAPTURED, which is
@@ -432,6 +558,15 @@ def enter_sensitive_room(user_id: str, room: str,
     the boundary of the purge, and the earliest one seen during a visit is the
     one that sticks, so a visit whose frames are classified out of order still
     cleans up from its true start.
+
+    `trigger` is WHICH detections made this a bathroom, and it exists because
+    the rule destroys its own evidence. A wearer sitting on their couch with
+    their phone beside them had the moment wiped as a washroom visit, and
+    nothing in the record could say what the camera thought it saw: the only
+    proof was in the frames, and the frames are exactly what this deletes. So
+    the class names and confidences are kept, the pixels are not. That is the
+    whole point -- a list of words cannot show anyone a bathroom, but it can
+    tell us a couch is being read as a bathtub.
     """
     key = str(user_id)
     reason = f"the {room} is private"
@@ -464,10 +599,11 @@ def enter_sensitive_room(user_id: str, room: str,
         # within PROBE_SECONDS, and if it names another room the gate lifts and
         # nothing was lost.
         print(f"[Privacy] {room} seen once; recording stopped, nothing deleted "
-              f"until a second frame agrees")
+              f"until a second frame agrees"
+              + (f" (saw {_trigger_text(trigger)})" if trigger else ""))
         return {"files": 0, "events": 0, "since": since, "confirmed": False}
 
-    out = purge_since(key, reason, min(first, since))
+    out = purge_since(key, reason, min(first, since), trigger=trigger)
     out["confirmed"] = True
     return out
 

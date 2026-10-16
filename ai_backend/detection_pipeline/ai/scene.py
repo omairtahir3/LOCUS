@@ -127,6 +127,56 @@ MIN_SCENE_MARGIN = 0.15    # winner must beat the runner-up by this much
 # room has to be more than half believed.
 MIN_DEFINING_CONF = 0.55
 
+# ...and a HIGHER bar for a room whose recognition destroys data.
+#
+# One threshold cannot serve two costs. Naming a desk a bedroom wrongly
+# mislabels a session; naming it a bathroom wrongly deletes the wearer's
+# frames, which is what happened when a frame of them on their own couch was
+# purged as a washroom visit -- and the rule destroyed the evidence of its own
+# mistake in the process.
+#
+# Raising MIN_DEFINING_CONF for everything is the wrong answer: room
+# recognition is already too slow to be useful much of the day, and every
+# bedroom between 0.55 and 0.80 would stop being named. The asymmetry belongs
+# here instead.
+#
+# 0.80, from what this installation has actually produced. The single
+# unambiguous washroom frame read Toilet=0.95. Over the 35 stored frames
+# carrying any bathroom-weighted class, Toilet appeared nowhere else and
+# Bathtub nowhere at all; what recurred was Mirror (31 frames, up to 0.70) and
+# Towel (4, up to 0.36), and neither is a defining object. So 0.80 sits 0.15
+# below the only true sighting and well above anything the detector invented in
+# a bedroom.
+#
+# Only the room's RECOGNITION is hardened. The destructive step beyond it still
+# needs privacy.CONFIRM_FRAMES sightings inside CONFIRM_WINDOW_SECONDS, with a
+# second-opinion probe that can lift the gate. And the gate itself -- store
+# nothing further -- still closes on the first sighting, so raising this costs
+# no protection, only false deletions.
+# The fallback for callers with no user context. A missing setting should fail
+# toward caution, so the washroom keeps the higher bar even when nobody says so.
+DESTRUCTIVE_ROOMS = {"bathroom"}
+MIN_DESTRUCTIVE_DEFINING_CONF = float(
+    os.environ.get("MIN_DESTRUCTIVE_DEFINING_CONF", 0.80))
+
+
+def defining_conf_floor(room: str, destructive: set[str] | None = None) -> float:
+    """The confidence this room's defining object must reach to name it.
+
+    `destructive` is the set of rooms that, for THIS wearer, trigger a
+    destructive action -- their own sensitive_rooms, or empty when the
+    automatic rule is switched off. It is a parameter rather than a constant
+    because the settings screen offers six rooms and any of them can be
+    ticked: hardcoding the washroom protected one room and left Bedroom armed
+    at the ordinary 0.55, in the room where a wearer spends their day.
+
+    An empty set means nothing is destructive, so every room keeps the
+    ordinary floor and recognition behaves as it did before this existed.
+    """
+    rooms = DESTRUCTIVE_ROOMS if destructive is None else destructive
+    return (MIN_DESTRUCTIVE_DEFINING_CONF if room in rooms
+            else MIN_DEFINING_CONF)
+
 # One object is not a room. The same false session had a single contributing
 # class; every correct session in the calibration set had several. Requiring two
 # distinct classes costs nothing where the evidence is real and removes the
@@ -210,7 +260,8 @@ MAX_SESSION_SECONDS = float(os.environ.get("MAX_SESSION_SECONDS", 600))
 MIN_SESSION_SECONDS = 10
 
 
-def explain_scene(detections: dict[str, float]) -> str:
+def explain_scene(detections: dict[str, float],
+                  destructive_rooms: set[str] | None = None) -> str:
     """Why no room was claimed, in one short phrase.
 
     Without this, "no room was recognised" is indistinguishable from "the
@@ -227,9 +278,12 @@ def explain_scene(detections: dict[str, float]) -> str:
         if not defining:
             continue
         strongest = max(detections[c] for c in defining)
-        if strongest < MIN_DEFINING_CONF:
+        floor = defining_conf_floor(room, destructive_rooms)
+        if strongest < floor:
             note = (f"{room}: {max(defining, key=lambda c: detections[c])} only "
-                    f"{strongest:.2f}, needs {MIN_DEFINING_CONF}")
+                    f"{strongest:.2f}, needs {floor}"
+                    + (" (a room that deletes frames must be clearer)"
+                       if floor > MIN_DEFINING_CONF else ""))
         else:
             contributing = [c for c in weights if c in detections]
             if len(contributing) < MIN_CONTRIBUTING_CLASSES and strongest < STRONG_DEFINING_CONF:
@@ -265,17 +319,27 @@ def validate_against_model(model_names) -> list[str]:
     return unknown
 
 
-def classify_scene(detections: dict[str, float]) -> tuple[Optional[str], float, dict[str, float]]:
+def classify_scene(detections: dict[str, float],
+                   destructive_rooms: set[str] | None = None,
+                   ) -> tuple[Optional[str], float, dict[str, float]]:
     """Classify one frame's room from {objects365_class_name: confidence}.
 
     Returns (room or None, winning score, all room scores).
+
+    `destructive_rooms` are the rooms that would be ACTED on destructively for
+    this wearer; those are held to a higher defining-object confidence. See
+    defining_conf_floor.
     """
     scores: dict[str, float] = {}
     for room, weights in SCENE_WEIGHTS.items():
         # The room is unlocked only by a defining object seen clearly enough.
         strongest = max((detections.get(cls, 0.0) for cls in DEFINING_OBJECTS[room]),
                         default=0.0)
-        if strongest < MIN_DEFINING_CONF:
+        # defining_conf_floor, not MIN_DEFINING_CONF: a room whose recognition
+        # deletes the wearer's frames is held to a higher standard. This is the
+        # DECIDING gate -- explain_scene above only reports; hardening that one
+        # alone changed the message and not the behaviour.
+        if strongest < defining_conf_floor(room, destructive_rooms):
             scores[room] = 0.0
             continue
         contributing = [cls for cls in weights if cls in detections]

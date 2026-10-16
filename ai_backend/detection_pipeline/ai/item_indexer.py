@@ -236,6 +236,113 @@ MIN_SHAPE_SAMPLES = int(os.environ.get("MIN_SHAPE_SAMPLES", 5))
 # How far apart the two ranges must sit before the gap means anything.
 ASPECT_RANGE_GAP = float(os.environ.get("ASPECT_RANGE_GAP", 0.10))
 
+# ── Near-miss retry: a second look at the crops that almost matched ─────────
+#
+# Enrollment covers lighting by storing ten views of each photo. The LIVE crop
+# gets one, so a sighting under light the gallery happens not to span scores
+# just under its bar and is thrown away. Giving the live crop the same lighting
+# views and keeping its best score recovers those, measured on 36 real boxes of
+# one wearer's phone and earbuds against their real galleries:
+#
+#     one view (as before)   26/36 usable   own 0.673  other 0.622
+#     + flip                 26/36          own 0.677  other 0.627
+#     + 2 gammas             27/36          own 0.686  other 0.634
+#     + 4 gammas             27/36          own 0.690  other 0.638
+#     + flipped gammas       28/36          own 0.693  other 0.640
+#
+# "usable" means it cleared its bar AND beat the other belonging. Nothing was
+# lost at any step and the gap between the right item and the wrong one held at
+# +0.051 to +0.053, so this is not the bar being quietly lowered: both gains
+# were earbuds, the item that was failing.
+#
+# Those rows are best-of over the views on EVERY crop. Gated, as it ships, the
+# means move far less -- own 0.673 to 0.677 -- while recovering the same two
+# frames, which is the whole argument for gating.
+#
+# It is GATED because it costs 3.3-5.8x a single crop (81-153 ms against 23-26 ms
+# for one, batched). Spending it only where the plain crop already came close
+# recovers the whole gain on 6 crops in 36 rather than all of them. A crop that
+# scored far below its bar is not a near miss and more views will not rescue
+# it; one that already cleared it needs nothing.
+#
+# Through the real matcher over 67 of this wearer's frames: 24 matches without
+# it, 27 with, nothing lost, five crops retried. The two gates below are what
+# make that 27 rather than 28-with-a-fabrication -- see each one for the box it
+# was written against.
+#
+# What this does NOT fix: these galleries resemble EACH OTHER (0.797-0.808)
+# more than they resemble themselves (0.656-0.665). That is the real ceiling,
+# it lives in the gallery rather than the crop, and no treatment of the live
+# crop moves it. Context margins, sharper upscaling and cropping inside the box
+# were all measured and all made it worse; see crop_zoom_tta_benchmark.py.
+NEAR_MISS_RETRY = os.environ.get("NEAR_MISS_RETRY", "1") != "0"
+NEAR_MISS_BAND = float(os.environ.get("NEAR_MISS_BAND", 0.05))
+
+# ── Learning the item as the CAMERA sees it ─────────────────────────────────
+#
+# Enrollment photos are taken with a phone, in good light, close up: measured
+# on this wearer's three items, lightness L around 150. The same belongings
+# through the chest camera come in at L 48-79. The gallery was built in one
+# world and asked about another, and that gap -- not texture, not colour, not
+# the crop -- is what the matching has been losing to.
+#
+# Colour was tried first and failed outright. Four representations against the
+# real galleries, on 41 real crops, where chance for three items is 13/41:
+#
+#     HSV histogram      separation -0.002   right item wins 10-15/41
+#     r,g chromaticity   separation -0.152   right item wins     0/41
+#     hue only, masked   separation -0.043   right item wins    13/41
+#     mean Lab a,b       separation -0.564   right item wins    17/41
+#
+# Every separation NEGATIVE: the wrong item scored higher. In Lab these three
+# belongings sit within 3 of neutral grey -- a black phone, a black earbuds
+# case, dark keys. They have no colour to compare, so colour is not a weak
+# signal here, it is an absent one.
+#
+# What does work is letting a sighting the system was sure about join the
+# gallery, so the gallery learns this camera. Walked forward in time, each crop
+# scored against the gallery AS IT STOOD BEFORE that crop existed, so nothing
+# is ever scored against a gallery holding itself:
+#
+#     no adoption (as it was)             23/41 correct, 1 wrong
+#     adopt at >=0.80                     25/41 (+2),    1 wrong, 3 adopted
+#     adopt at >=0.75  <- shipped         33/41 (+10),   1 wrong, 6 adopted
+#     adopt at >=0.70                     33/41 (+10),   1 wrong, 19 adopted
+#
+# 0.75 buys the whole gain from six sightings; 0.70 adopts three times as many
+# for nothing more. Nothing is lost at any setting.
+#
+# THE DANGER IS A FEEDBACK LOOP, and the guard against it is that adoption is
+# judged against the ENROLLMENT vectors alone. An adopted vector can never
+# recruit another, so one mistake cannot breed. Tested by forcing the worst
+# wrong crop available -- an earbuds case scoring 0.729 into the Phone gallery
+# -- into the gallery deliberately: 33/41 still correct, 1 still wrong, no
+# further wrong adoptions. Judging adoption on the GROWN gallery instead took
+# the adoptions from 6 to 26 with no better result, which is the loop starting.
+# TURNED OFF at the wearer's instruction, and they were right.
+#
+# It measured well in isolation -- 23/41 real sightings to 33/41, six adopted
+# crops buying ten recoveries -- and then cost a false positive within hours.
+# The three vectors it learned that day all came from the desk beside the
+# wearer's laptop, and they taught the Phone gallery to answer to a dark bezel
+# with a lit panel: that laptop corner went 0.695 on enrolment alone to 0.763
+# with the adopted views, over the bar, and was logged as the phone while the
+# phone itself lay on the bed and was missed.
+#
+# The deeper reason it cannot be left running: it learns only POSITIVES. Every
+# vector it adds widens what an item may look like and nothing ever narrows
+# it, so the gallery drifts outward until it swallows the furniture. What the
+# system was missing is the other half -- a record of what these things are
+# NOT -- and that is what should be built instead. See the background-negative
+# work in the notes for this session.
+ADOPT_SIGHTINGS = os.environ.get("ADOPT_SIGHTINGS", "0") != "0"
+ADOPT_THRESHOLD = float(os.environ.get("ADOPT_THRESHOLD", 0.75))
+# A ceiling, so enrollment stays the anchor and a run of odd sightings cannot
+# redefine the item. At 10 the adopted vectors are at most 1 in 16 of a full
+# gallery. The cap REFUSES when full rather than rotating: rotation would keep
+# adapting as the seasons change, but it was not measured, and this was.
+ADOPT_MAX_PER_ITEM = int(os.environ.get("ADOPT_MAX_PER_ITEM", 10))
+
 # How many candidates may be embedded per frame. Batched at a measured 61 ms
 # each, so this is the frame's embedding budget: 8 is about half a second in the
 # worst case, on a background worker with its own queue. Boxes above the normal
@@ -268,7 +375,25 @@ ITEM_DEDUP_SECONDS = 900  # 15 minutes
 # a glance a move. And only against a recent sighting, since two boxes minutes
 # apart may be different views rather than different places.
 MOVED_SPOT_IOU = float(os.environ.get("MOVED_SPOT_IOU", 0.0))
-MOVED_SPOT_MAX_AGE = float(os.environ.get("MOVED_SPOT_MAX_AGE", 300))
+# As long as the dedup window itself, so there is no interval in which a move
+# is invisible.
+#
+# This was 300 against a 900-second dedup window, which left a dead zone: a
+# belonging moved between five and fifteen minutes after its last sighting was
+# too old for the position rule to examine and too recent for the window to
+# have elapsed, so it produced nothing. The wearer hit it directly -- logged
+# the first time, silent after moving -- and their events show the move rule
+# never fired once: three sightings of their phone in three different places,
+# 40 and 110 minutes apart, every one admitted by window expiry.
+#
+# The age limit was guarding against a worn camera turning the wearer's head
+# and making one object look like two places. MOVED_SPOT_IOU already answers
+# that by demanding ZERO shared pixels, which a head turn rarely produces
+# against the same object. An age cap on top added no safety and only created
+# the gap. Beyond the window the rule is moot anyway, because the sighting is
+# admitted on time alone.
+MOVED_SPOT_MAX_AGE = float(os.environ.get("MOVED_SPOT_MAX_AGE",
+                                          ITEM_DEDUP_SECONDS))
 
 # The same gate for a HELD sighting, which is a different kind of record. A held
 # sighting writes no keyframe and never reaches the feed; it exists so the
@@ -366,7 +491,41 @@ INDEX_QUEUE_HIGH_WATER = int(os.environ.get("INDEX_QUEUE_HIGH_WATER", 8))
 # alert either never fires or arrives about somewhere they have long since left.
 # Detection has to land inside the window an alert can still act on, so a frame
 # past this age is dropped unprocessed rather than delaying every newer one.
-MAX_INDEX_AGE_SECONDS = float(os.environ.get("MAX_INDEX_AGE_SECONDS", 45))
+#
+# 90 s, raised from 45 s, because at 45 s this was discarding memories to
+# protect alerts and the wearer lost sightings they could see in the frame.
+# Observed on their backend, three times consecutively:
+#
+#     skipped 10 frame(s) older than 45s on dequeue
+#     skipped 13 frame(s) older than 45s on dequeue
+#     skipped 16 frame(s) older than 45s on dequeue
+#
+# Their phone, plainly in view at 03:35:45, never reached Memory Search -- and
+# not because matching failed: _process_keyframe_task on that very frame yields
+# 'Cell Phone' -> 'Phone' at 0.660, the verifier agrees at 0.75, and it would
+# have been written. The frame never reached the matcher.
+#
+# 45 s could not hold, for two reasons that compound. The queue sits at
+# INDEX_QUEUE_HIGH_WATER under load, so with a frame costing ~10 s the oldest
+# waiting frame is already ~80 s old when it is reached -- against a 45 s bar
+# that discards nearly everything, which is what those three lines are. And
+# routineMonitor's own end-to-end measurement records +68 s from capture to the
+# sighting being written, so one half of the system treated 68 s as normal
+# while this half dropped anything past 45 s.
+#
+# The trade was also pointed the wrong way. The cutoff protects ALERT
+# timeliness, which is a real thing to protect. It does nothing for Memory
+# Search, which asks where something was left: an event carries its CAPTURE
+# time, not its indexing time, so a late write is correct data arriving late,
+# and it can never be the newest sighting of an item that has since moved.
+#
+# The ceiling is ITEM_GONE_MIN, 2 minutes. Once visibility refreshes are
+# running, silence that long is read as the belonging having left the view, so
+# indexing that lagged past 120 s would let the monitor decide before the
+# refresh arrived -- a phone still on the desk reported as left behind, which is
+# wrong rather than late. 90 s clears the measured 68 s and keeps 30 s below
+# that ceiling, with the queue's depth limit still bounding the worst case.
+MAX_INDEX_AGE_SECONDS = float(os.environ.get("MAX_INDEX_AGE_SECONDS", 90))
 
 # ── Learning the item from the camera that has to recognise it ──────────────
 #
@@ -492,6 +651,136 @@ TILE_REGION_X = (0.05, 0.95)        # horizontal search bounds
 # 0.10 it is found at sim=0.825 for 5/6, still 0 false positives, ~100 regions.
 TILE_REGION_Y0 = 0.10
 TILE_MIN_PX = 20
+
+# ---- Candidates the frame suggests, not just a grid laid over it ----------
+#
+# The grid is fixed: 120px and 199px windows every 90px and 149px from a fixed
+# origin, so whether a window lands squarely on a belonging is arithmetic luck.
+# Measured on a frame where the phone sat in plain view, well lit:
+#
+#     a crop placed ON it    phone fills 100% of the window   0.788
+#     the four grid windows  phone fills  22-38%              0.479 - 0.588
+#
+# An embedding averages everything inside the window, so a window that is three
+# quarters bedspread embeds as bedspread. The classifier was never the problem:
+# given the right crop it says 0.788 on enrolment vectors alone.
+#
+# So the frame proposes its own candidates. MSER finds regions whose shape
+# stays stable as an intensity threshold sweeps, run over the image AND its
+# inverse so dark-on-light and light-on-dark both count; Canny contours catch
+# objects whose interior is too textured to be one stable region. Neither knows
+# anything about phones, which is the point: the next belonging may be pale,
+# shiny or tiny.
+#
+# Measured against the grid on four frames whose truth was confirmed with the
+# wearer: the grid localised the phone in 0 of them, the proposer in 2, using
+# 34-48 crops against the grid's 100.
+PROPOSE_REGIONS = os.environ.get("PROPOSE_REGIONS", "1") != "0"
+PROPOSE_MAX = int(os.environ.get("PROPOSE_MAX", 40))
+# Padded to match the margin the GALLERY was built with: enrolment crops carry
+# ENROLL_CROP_MARGIN around the object, so a proposal trimmed exactly to the
+# contour is tighter than anything it is compared against. Measured on the same
+# phone: 0.723 bare, 0.809 padded.
+PROPOSE_MARGIN = float(os.environ.get("PROPOSE_MARGIN", 0.15))
+PROPOSE_MIN_AREA_FRAC = 0.0004
+PROPOSE_MAX_AREA_FRAC = 0.06
+
+# ---- A belonging rests ON things; it is never INSIDE another device -------
+#
+# Fitted boxes help the wrong things as much as the right ones. The corner of
+# the wearer's laptop screen -- dark bezel, lit panel -- scored 0.695 as a grid
+# window and 0.772 once a proposal cropped it cleanly. Nothing separates it by
+# score: its runner-up gap (0.231) is as healthy as the real phone's (0.264),
+# and frame-level corroboration passes both because hands are in shot.
+#
+# What separates them is what CONTAINS them. The real phone sat inside a Desk;
+# the impostor sat inside a Laptop. A phone can lie on a desk, a bed or a sofa.
+# It cannot be inside a laptop, a television or a person. So a candidate almost
+# wholly inside a confident box of some other DISCRETE object is refused, and
+# nothing is tuned to make that work.
+SURFACE_CLASSES = {
+    "Desk", "Bed", "Couch", "Sofa", "Dining Table", "Coffee Table", "Side Table",
+    "Table", "Carpet", "Nightstand", "Cabinet/shelf", "Chair", "Stool", "Bench",
+    "Pillow", "Towel", "Blanket", "Bed Sheet", "Mattress",
+}
+SWALLOWED_FRAC = 0.80        # how much of the candidate must sit inside
+SWALLOWED_CONF = 0.60        # how sure the detector must be of the container
+
+# ---- The bar a BLIND region must clear, when something checks it after ----
+#
+# A tile or proposal has no class, no hand and no detector behind it, so it
+# has always faced the strictest bar in the system. That caution cost real
+# sightings: the wearer's phone, in plain view and well lit, reached 0.724
+# and was dropped.
+#
+# A verifier changes the economics. Measured over four of their frames, with
+# proposals scored by MobileNet and the survivors checked by DINOv2:
+#
+#     bar    verifier   phones found   false positives
+#     0.74      no          0/4              1
+#     0.74      yes         0/4              0
+#     0.70      no          2/4              3
+#     0.70      yes         2/4              0      <- shipped
+#     0.62      yes         2/4              0
+#
+# Every false positive the lower bar admits is caught, and below 0.70 nothing
+# more is found, only more crops to verify. So MobileNet is allowed to be the
+# recall half of the pair, which is what it is good at: it ranked the real
+# phone first in a blind sweep even when its score was too low to claim.
+#
+# ONLY where a verifier gallery exists. An item with nothing to be checked
+# against keeps the strict bar, because for that item nothing has changed.
+# The bar a DETECTOR box faces when its class is a measured fact about the item
+# and a verifier gallery exists to check it against.
+#
+# A shortlisting bar, not a deciding one. Measured over all 94 class-agreeing
+# boxes of 12-13 Oct, the lowest MobileNet score among crops the verifier
+# confirms is 0.561, and the bars in force were 0.65 and 0.75 -- so roughly
+# twenty genuine sightings were discarded before the verifier saw them,
+# including the wearer's phone at 05:23:44 (sim 0.716, verifier 0.728).
+#
+# 0.55 sits below that 0.561 with a little room. It is deliberately permissive:
+# everything it lets through is then judged by DINOv2, which on the same crops
+# refuses the laptop screen at 0.156 to 0.296 while agreeing with real phones at
+# 0.61 to 0.98. Raising recall here costs nothing in precision because the
+# decision moved, it did not loosen.
+#
+# This is also what makes an item recognisable after it is MOVED. MobileNet
+# similarity decays as pose and lighting leave the enrolment photo, which is
+# why true crops in a new spot sit at 0.56-0.65; DINOv2 holds them at 0.61-0.94.
+VERIFIED_BOX_THRESHOLD = float(os.environ.get("VERIFIED_BOX_THRESHOLD", 0.55))
+
+VERIFIED_TILE_THRESHOLD = float(os.environ.get("VERIFIED_TILE_THRESHOLD", 0.70))
+
+# ── Why the grid is NOT refined around near misses ─────────────────────────
+#
+# It is tempting, and it was tried and measured. The grid is coarse: 120px and
+# 199px tiles at 90px and 149px strides, and nothing makes one land squarely on
+# an object. On a frame where the wearer's phone lay in plain view, well lit,
+# about 100px across:
+#
+#     a tile placed ON it (100px at 736,482)   0.788   over the 0.74 bar
+#     the grid's nearest 120px tile            0.588
+#     the grid's nearest 199px tile            0.573
+#
+# So the phone was entirely recognisable and the scanner simply never looked at
+# it squarely, out by about forty pixels. Re-sampling a few offsets and scales
+# around each near miss looked like the obvious answer. It was not:
+#
+#   * it found a dark object leaning against the dresser and polished it to
+#     0.756, over the bar, logged as the phone
+#   * it still missed the real phone, because the best near miss per item was
+#     that same dark object, which crowded the right location out
+#   * it took the scan from 2.4s to 7.6s
+#
+# The lesson generalises past this one idea. These galleries separate the
+# wearer's belongings from the background by a thin margin, so SEARCHING
+# HARDER finds more background than object: every extra crop examined is
+# another chance for a dark rectangle to clear 0.74. Effort spent on search is
+# effort spent amplifying the weakest part of the system.
+#
+# What would actually help is a gallery that covers how the camera sees these
+# things, which is the enrolment problem, not the search problem.
 
 # How long an unenrolled sighting stays in the suggestion queue before MongoDB
 # expires it. Long enough that the user sees it next time they open the
@@ -825,6 +1114,18 @@ class DailyItemIndexer:
         detections = []
         scene_detections: dict[str, float] = {}
         orig_h, orig_w = image.shape[:2]
+        # What the detector calls each of this wearer's belongings, measured on
+        # their own enrolment photographs. A box with one of these labels is a
+        # CANDIDATE belonging, and the position gate below does not apply to
+        # it -- see the comment there.
+        _enrolled_classes = set()
+        try:
+            _enrolled_classes = {
+                it.get("detector_class") for it in
+                self._get_user_items_cached(str(metadata.get("user_id", "")))
+                if it.get("detector_class")}
+        except Exception:
+            pass
 
         for box in boxes:
             cls_id = int(box.cls[0].item())
@@ -852,7 +1153,25 @@ class DailyItemIndexer:
             norm_cx = ((xyxy[0] + xyxy[2]) / 2.0) / orig_w
             norm_cy = ((xyxy[1] + xyxy[3]) / 2.0) / orig_h
             norm_y2 = float(xyxy[3]) / orig_h
-            if not (0.10 <= norm_cx <= 0.90 and (norm_cy >= 0.38 or norm_y2 >= 0.45)):
+            # ── The gate filters CLUTTER, not a belonging we can name ──
+            #
+            # This rejects boxes outside the central band or high in the frame,
+            # to drop distant background objects. For anonymous clutter that is
+            # right. Applied to a box the gallery can identify it is not: at
+            # 05:45:03 it discarded a Cell Phone box scoring 0.673 against the
+            # wearer's phone, which the verifier then put at 0.750, because
+            # y2 was 0.400 against a floor of 0.45 -- 27 pixels.
+            #
+            # Measured over 162 frames of 13-14 Oct, 30 boxes of an enrolled
+            # class were dropped here: 7 would be claimed by both models and
+            # none of those sat inside a laptop or monitor, 0 would be claimed
+            # wrongly, and 16 the verifier refuses anyway at 0.086 to 0.516.
+            # Six of the seven sat at cy 0.20-0.28 -- a belonging on a shelf or
+            # held up is simply higher in the frame than this rule assumes, and
+            # no choice of numbers fixes that. Only asking who the object is.
+            if (cls_name not in _enrolled_classes
+                    and not (0.10 <= norm_cx <= 0.90
+                             and (norm_cy >= 0.38 or norm_y2 >= 0.45))):
                 continue
 
             detections.append({
@@ -931,7 +1250,8 @@ class DailyItemIndexer:
                           f"tile scan to catch up")
                 else:
                     tiles = self._scan_tiles_for_enrolled_items(
-                        image, user_id_str, exclude_item_ids=already_matched)
+                        image, user_id_str, exclude_item_ids=already_matched,
+                        boxed=detections)
                     if tiles:
                         tiles = self._corroborated_tiles(tiles, detections, image)
                     detections.extend(tiles)
@@ -995,7 +1315,20 @@ class DailyItemIndexer:
                 # off at the frame edge, or simply missed, and the phone was
                 # 10.1% of the frame at the time -- squarely in its own held
                 # range of 8.2 to 14.9%, against 0.6% on a desk.
-                size_held = thr is not None and d["area_frac"] >= thr
+                # ── Size means nothing for a TILE SCAN ─────────────────────
+                #
+                # The tile scanner does not box the object; it reports the
+                # fixed square it was scanning, so area_frac is the TILE's
+                # area and identical for every hit. On this wearer that is
+                # 1.56% of the frame, and their phone's learned held size is
+                # 1.55% -- so every single tile-scan sighting cleared the bar
+                # and was filed "in hand", which stores no frame and is left
+                # out of the timeline. The phone WAS found, at 0.756, in dull
+                # light where YOLO could not box it. It simply became
+                # invisible: detected, matched, and then discarded by a
+                # number that describes the scanner rather than the object.
+                from_tile = d.get("generic_name") == "tile_scan"
+                size_held = (not from_tile) and thr is not None and d["area_frac"] >= thr
                 # ...and size can VETO a hand overlap as well as assert one.
                 #
                 # _is_held measures the overlap as a fraction of the ITEM's own
@@ -1011,7 +1344,8 @@ class DailyItemIndexer:
                 # A thing in your hand is about 30 cm from a camera on your
                 # chest. If it is far smaller than this item has ever been while
                 # held, it is not in a hand, whatever the boxes overlap.
-                size_says_placed = thr is not None and d["area_frac"] < thr
+                size_says_placed = ((not from_tile) and thr is not None
+                                    and d["area_frac"] < thr)
                 # ── Seeing the hands beats guessing from size ───────────
                 #
                 # size_held used to outrank this, and it claimed a phone lying
@@ -1036,8 +1370,40 @@ class DailyItemIndexer:
                     # evidence, not an absence of it.
                     d["placement"] = "placed"
                 elif size_held:
-                    # No hands to be seen; size is the only thing left.
-                    d["placement"] = "in_hand"
+                    # No hand anywhere, and size thinks the thing is close.
+                    #
+                    # This used to claim "in_hand", and that is the call that
+                    # lost the wearer two sightings of their earbuds at
+                    # 02:38:18 and 02:39:35 -- hands_seen false, no hand box in
+                    # the frame at all, placement asserted from area alone.
+                    #
+                    # Size cannot support that claim for every item. Over every
+                    # earbuds sighting ever recorded, held runs 0.0027-0.0156
+                    # with a median of 0.0057 and placed runs 0.0011-0.0430
+                    # with a median of 0.0060: the held median is the LOWER of
+                    # the two. There is no threshold in that, and the one
+                    # derived from three hands-decided samples is the geometric
+                    # midpoint of a single distribution split in half.
+                    #
+                    # "Unknown" is the honest reading: the item is there, and
+                    # nothing present can say whether a hand is on it. It is
+                    # not "placed", because that would assert a put-down and
+                    # could raise a left-behind alert about something in the
+                    # wearer's pocket. The frame is kept regardless -- see
+                    # frame_worthy below -- so an uncertain placement costs a
+                    # label, not a memory.
+                    d["placement"] = "unknown"
+                    print(f"[Items] {d.get('matched_item', d['name'])} is "
+                          f"{d['area_frac']:.4f} of the frame against its own "
+                          f"{thr:.3f} held size, but NO hand is in view; "
+                          f"placement unknown, frame kept")
+                elif from_tile:
+                    # The tile scanner runs where YOLO found nothing, which is
+                    # the small, dim, stationary case -- an object on a
+                    # surface, not one held up to a chest camera. With no hand
+                    # on it and no size to appeal to, "put down" is the honest
+                    # reading, and it is the one that keeps a frame.
+                    d["placement"] = "placed"
                 else:
                     # No hands seen and no size opinion yet: nothing is known.
                     d["placement"] = "unknown"
@@ -1226,7 +1592,14 @@ class DailyItemIndexer:
         # window -- but they are not memories of where anything was left, so
         # they get no picture and never reach the feed.
         import uuid
-        placed_now = [d for d in detections if d.get("placement") == "placed"]
+        # A frame is worth keeping for a confident identity, even when the
+        # placement is uncertain. "placed" still means PUT DOWN and is what the
+        # left-behind check reads; "unknown" means the item was here and
+        # nothing could say whether it was held. Both deserve the picture --
+        # losing it loses the memory, and that was the expensive half of a
+        # decision that used to be made by one number for both purposes.
+        placed_now = [d for d in detections
+                      if d.get("placement") in ("placed", "unknown")]
         # ── One frame per place ──────────────────────────────────────────────
         #
         # A belonging resting in one spot was keeping several frames of that one
@@ -1478,8 +1851,9 @@ class DailyItemIndexer:
                 query = {"user_id": user_id_str, "is_active": True}
 
             cursor = db.useritems.find(
-                query, {"item_name": 1, "item_embeddings": 1,
-                        "detector_class": 1, "box_aspect": 1})
+                query, {"item_name": 1, "item_embeddings": 1, "adopted_embeddings": 1,
+                        "detector_class": 1, "box_aspect": 1,
+                        "verify_embeddings": 1})
             for doc in cursor:
                 embs = doc.get("item_embeddings", [])
                 if embs:
@@ -1517,6 +1891,22 @@ class DailyItemIndexer:
                     # above record as already fixed.
                     item_floor = 0.72 if mean_internal_sim >= 0.96 else None
 
+                    # Sightings this camera was sure about, kept apart from the
+                    # enrollment vectors above. They widen what the item may
+                    # LOOK like without touching what it was enrolled as:
+                    #
+                    #  * the floor is decided on enrollment alone, just above.
+                    #    Adopted crops are deliberately varied, so folding them
+                    #    in would drag mean_internal_sim under 0.96 and quietly
+                    #    strip the floor off exactly the textureless items that
+                    #    need it most.
+                    #  * adoption is judged on enrollment alone too, so no
+                    #    adopted vector can ever recruit another. See
+                    #    ADOPT_SIGHTINGS for the poisoning test.
+                    adopted = [np.array(e, dtype=np.float32)
+                               for e in (doc.get("adopted_embeddings") or [])
+                               if len(e) == _dim]
+
                     items.append({
                         "id": str(doc["_id"]),
                         "name": doc.get("item_name", "Unknown Item"),
@@ -1526,7 +1916,18 @@ class DailyItemIndexer:
                         # The shape of its box, which separates items the
                         # embedding cannot. See the ambiguity tie-break.
                         "box_aspect": doc.get("box_aspect"),
-                        "embeddings": embs_arr,
+                        # What the item is matched against: how it was enrolled
+                        # AND how this camera has since seen it.
+                        "embeddings": embs_arr + adopted,
+                        # What adoption itself is judged against, never grown.
+                        "enrol_embeddings": embs_arr,
+                        # A second opinion, in a feature space that can
+                        # actually tell one object from another. Absent for
+                        # items enrolled before it existed, and an absent
+                        # gallery means "do not second-guess" rather than
+                        # "refuse". See ai/verifier.py.
+                        "verify_embeddings": doc.get("verify_embeddings") or [],
+                        "adopted_count": len(adopted),
                         "threshold_floor": item_floor,
                     })
         except Exception as e:
@@ -1534,6 +1935,169 @@ class DailyItemIndexer:
 
         self._user_items_cache[user_id_str] = (now, items)
         return items
+
+    def _maybe_adopt(self, user_id_str: str, d: dict, crop_emb, item_id: str,
+                     user_items: list[dict]) -> bool:
+        """Let a sighting the system was sure about join the gallery it matched.
+
+        Everything here is decided against the ENROLLMENT vectors alone, never
+        against the gallery as it has grown. That is the one rule that stops a
+        mistake breeding: an adopted vector can widen what the item looks like,
+        but it can never vouch for the next candidate. See ADOPT_SIGHTINGS for
+        the measurements and the poisoning test.
+        """
+        if not ADOPT_SIGHTINGS:
+            return False
+        item = next((it for it in user_items if it["id"] == str(item_id)), None)
+        if item is None:
+            return False
+        if item.get("adopted_count", 0) >= ADOPT_MAX_PER_ITEM:
+            return False
+        # The same evidence the near-miss retry demands: a label this item was
+        # MEASURED to get, not two names sharing an English word. Adoption is
+        # permanent in a way a single match is not, so it answers to the
+        # stronger signal.
+        if d.get("name", "") != item.get("detector_class"):
+            return False
+
+        enrol = item.get("enrol_embeddings") or []
+        if not enrol:
+            return False
+        mine = float(np.max(np.asarray(enrol) @ crop_emb))
+        if mine < ADOPT_THRESHOLD:
+            return False
+        # And it must be unmistakable: anything another belonging could nearly
+        # claim is exactly what must not be learned.
+        for other in user_items:
+            if other["id"] == item["id"]:
+                continue
+            theirs = other.get("enrol_embeddings") or []
+            if theirs and mine - float(np.max(np.asarray(theirs) @ crop_emb)) < AMBIGUOUS_MARGIN:
+                return False
+
+        try:
+            from bson import ObjectId
+            if self._db_client is None:
+                self._db_client = get_client(serverSelectionTimeoutMS=2000)
+            db = self._db_client[get_db_name()]
+            res = db.useritems.update_one(
+                {"_id": ObjectId(item["id"]),
+                 # Re-checked in the write itself, so two frames landing at
+                 # once cannot both slip past a cap that was read from cache.
+                 f"adopted_embeddings.{ADOPT_MAX_PER_ITEM - 1}": {"$exists": False}},
+                {"$push": {
+                    "adopted_embeddings": [float(v) for v in crop_emb],
+                    # No keyframe id: this runs on the detections, which are
+                    # not told which capture they came from. The time and the
+                    # score are enough to find the frame if a gallery ever
+                    # needs explaining.
+                    "adopted_meta": {
+                        "at": datetime.utcnow(),
+                        "similarity": round(mine, 3),
+                        "detector_class": d.get("name"),
+                    },
+                }})
+            if not res.modified_count:
+                return False
+        except Exception as e:
+            print(f"[DailyItemIndexer] could not adopt a sighting: {e}")
+            return False
+
+        item["adopted_count"] = item.get("adopted_count", 0) + 1
+        item["embeddings"] = list(item.get("embeddings") or []) + [np.asarray(crop_emb)]
+        self._user_items_cache.pop(user_id_str, None)
+        print(f"[DailyItemIndexer] '{item['name']}' learned a new view of itself "
+              f"from this camera (matched its enrolment at {mine:.3f}); "
+              f"{item['adopted_count']}/{ADOPT_MAX_PER_ITEM} adopted")
+        return True
+
+    def _class_agrees(self, d: dict, item: dict) -> bool:
+        """Does the label this box carries describe this item?
+
+        Preferably because the label was MEASURED on the item's own enrolment
+        photos, which is a fact about the detector; failing that because the
+        two names share a word, which is a guess from English and is kept only
+        for items enrolled before the measurement existed.
+        """
+        _cls = d.get("name", "")
+        return bool(self._names_agree(_cls, item["name"])
+                    or (item.get("detector_class") and _cls == item["detector_class"]))
+
+    def _verified(self, crop, item, sim, how: str) -> tuple[bool, str, float]:
+        """Does a second, instance-level model agree this is really the item?
+
+        MobileNet ranks; this decides. It is asked only about candidates that
+        already cleared their bar, which is a handful per frame, because it
+        costs about 1.2 s a crop against MobileNet's 40 ms.
+
+        Fails OPEN: no verifier gallery, or a verifier that will not load,
+        leaves the match exactly as MobileNet found it. A check that silently
+        deleted working behaviour whenever a model file was missing would be
+        worse than no check.
+        """
+        from ai import verifier
+        if not verifier.VERIFY_MATCHES:
+            return True, "off", 0.0
+        gal = item.get("verify_embeddings")
+        if gal is None or not len(gal):
+            return True, "no_gallery", 0.0
+        if self._verify_budget <= 0:
+            # Out of budget for this frame. Keeping the match is the same
+            # answer the system gave before the verifier existed.
+            return True, "no_budget", 0.0
+        if not verifier.available():
+            return True, "unavailable", 0.0
+        self._verify_budget -= 1
+        ok, vs = verifier.agrees(crop, gal)
+        if not ok:
+            print(f"[DailyItemIndexer] '{item['name']}' matched at {sim:.3f} via "
+                  f"{how}, but the verifier puts it at {vs:.3f} against "
+                  f"{verifier.VERIFY_THRESHOLD}; not claimed")
+        return ok, ("agreed" if ok else "refused"), vs
+
+    def _match_threshold(self, d: dict, item: dict) -> float:
+        """How well this box must score to be called this item.
+
+        Extracted so the near-miss gate can ask for the bar that will ACTUALLY
+        apply to a box rather than assuming the easiest one. Gating on the
+        class-agreeing bar alone sent nine extra embeddings after every Clock,
+        Bottle, Desk and Person that happened to score 0.60-0.65 against some
+        gallery -- boxes whose real bar is 0.85, which no amount of relighting
+        was ever going to reach.
+        """
+        # YOLO named this box. Whether that name describes this item moves the
+        # bar in BOTH directions: down when it agrees, which is the one path
+        # with no observed false positives, and up when it plainly does not,
+        # which is where every observed false positive came from. This is the
+        # BASE bar and it always applies; it was previously skipped whenever
+        # the item carried a stored threshold, which was always, so it never
+        # applied at all.
+        #
+        # Agreement is a fact about the DETECTOR, not about English. Objects365
+        # boxes a pair of earbuds as "Mouse", which overlaps no word in "Rover
+        # Earbuds", so the name test called it a disagreement and raised the
+        # bar to 0.85 -- a bar those earbuds could never clear however well
+        # they were embedded. The class measured on their own enrolment photos
+        # is what settles it; the name test stays as a fallback for items
+        # enrolled before that was recorded.
+        thresh = (self.CLASS_AGREE_MATCH_THRESHOLD if self._class_agrees(d, item)
+                  else self.CLASS_DISAGREE_MATCH_THRESHOLD)
+        # An item with almost no surface texture matches ambient clutter too
+        # easily, so it carries a floor of its own. A floor can only raise the
+        # bar, never lower it below what the class demands.
+        floor = item.get("threshold_floor")
+        if floor:
+            thresh = max(thresh, floor)
+        # Faint boxes must prove themselves harder. Candidates now come in from
+        # ENROLLED_CANDIDATE_CONF rather than conf_threshold, so the gallery
+        # sees boxes the detector barely believes in, and on those the ordinary
+        # bar is too generous: over the 04:40-04:50 window the two real
+        # put-downs scored 0.885 and 0.891 while the marginal junk scored 0.663
+        # and 0.666, straddling this bar exactly. One source of evidence being
+        # weak is a reason to demand more of the other, not to shrug.
+        if d.get("confidence", 1.0) < self.conf_threshold:
+            thresh = max(thresh, LOW_CONF_MATCH_THRESHOLD)
+        return thresh
 
     def _enrich_with_exemplar_matches(self, detections: list[dict], image: np.ndarray, user_id_str: str):
         """
@@ -1591,7 +2155,88 @@ class DailyItemIndexer:
 
         # Stack each item's gallery once so scoring is a single matrix product
         # per item instead of a Python loop over individual embeddings.
-        for d, crop_emb in zip(crop_dets, crop_embs):
+        from ai.verifier import VERIFY_MAX_PER_FRAME
+        self._verify_budget = VERIFY_MAX_PER_FRAME
+        galleries = {str(item["id"]): np.asarray(item["embeddings"]) for item in user_items}
+        # ── Adopted views answer only for the class they were learned under ──
+        #
+        # Adoption teaches a gallery what this camera makes of the item. It
+        # must not also teach it to accept a box of some OTHER kind. Measured
+        # on 41 real crops, the highest an earbuds crop could score against the
+        # Phone gallery:
+        #
+        #     enrolment only                         0.729   (under the 0.85 bar)
+        #     with adopted vectors, used everywhere  0.939   (over it)
+        #     with adopted vectors, agreeing class   0.729
+        #
+        # The culprit was a genuine phone crop: 0.754 to the phone's own
+        # enrolment and only 0.470 to the earbuds', so the adoption ambiguity
+        # guard saw a margin of 0.284 and approved it. It still sat 0.939 from
+        # a real earbuds crop, because that guard compares against ENROLMENT
+        # galleries, which live in the bright close-up world, while the
+        # dangerous neighbours are live crops in the dim one. The guard was
+        # measuring in the wrong space.
+        #
+        # Scoping the adopted vectors to an agreeing class costs nothing --
+        # 37/41 either way -- and takes the wrong-crop ceiling back to exactly
+        # where enrolment alone left it, while the right crops keep the lift
+        # (earbuds median 0.665 -> 0.870, phone 0.705 -> 0.797).
+        galleries_enrol = {str(item["id"]): np.asarray(item["enrol_embeddings"] or [])
+                           for item in user_items}
+
+        # ── A second look at the crops that almost matched ───────────────────
+        #
+        # See NEAR_MISS_RETRY. A crop is a near miss when SOME item scores it
+        # within NEAR_MISS_BAND of the bar THAT ITEM would demand of it. Asking
+        # per item matters: gating on the easiest bar in play instead sent nine
+        # extra embeddings after every Clock, Bottle, Desk and Person that
+        # scraped 0.60 against some gallery, when the bar those boxes actually
+        # face is 0.85 and relighting them was never going to close 0.24.
+        extra_embs: dict[int, list] = {}
+        if NEAR_MISS_RETRY and galleries:
+            for i, (crop, crop_emb) in enumerate(zip(crops, crop_embs)):
+                near = None
+                for item in user_items:
+                    G = galleries.get(str(item["id"]))
+                    if G is None or not G.size:
+                        continue
+                    # Only where the class agreement is a MEASURED fact about
+                    # the detector, never where it rests on two names sharing
+                    # an English word.
+                    #
+                    # Objects365 boxed a 0.6%-of-frame scrap of bedding in the
+                    # corner of one frame as "Car" at 0.312 confidence. "Car"
+                    # is a word in "Car Keys", so the name test called that
+                    # agreement and dropped the bar from 0.85 to 0.65; the
+                    # plain crop scored 0.631 and was refused, and the extra
+                    # lightings carried it to 0.653. The keys were not in the
+                    # room. A retry is a boost, so it has to answer to the
+                    # stronger evidence: the label this item was MEASURED to
+                    # get on its own enrolment photos. The ordinary one-view
+                    # path is untouched and the name test still serves it.
+                    if crop_dets[i].get("name", "") != item.get("detector_class"):
+                        continue
+                    sim = float((G @ crop_emb).max())
+                    bar = self._match_threshold(crop_dets[i], item)
+                    if bar - NEAR_MISS_BAND <= sim < bar:
+                        near = (item["name"], sim, bar)
+                        break
+                if not near:
+                    continue
+                try:
+                    extra_embs[i] = backbone.extract_batch(extra_views_for_near_miss(crop))
+                except Exception as e:
+                    print(f"[DailyItemIndexer] near-miss retry failed: {e}")
+                else:
+                    print(f"[DailyItemIndexer] '{crop_dets[i].get('name', '?')}' scored "
+                          f"{near[1]:.3f} against {near[0]}, just under its bar of "
+                          f"{near[2]:.2f}; looking again under "
+                          f"{len(extra_embs[i])} more lightings")
+
+        for crop_i, (d, crop_emb) in enumerate(zip(crop_dets, crop_embs)):
+            # One view normally; ten for a near miss. Each item's score is
+            # the best its gallery manages against ANY of them.
+            views = [crop_emb] + extra_embs.get(crop_i, [])
             best_match_name = None
             best_sim = 0.0
             best_item_id = None
@@ -1601,6 +2246,7 @@ class DailyItemIndexer:
             second_sim = 0.0
             second_name = None
             second_id = None
+            best_strict = None
 
             for item in user_items:
                 # YOLO named this box. Whether that name describes this item
@@ -1618,30 +2264,21 @@ class DailyItemIndexer:
                 # The class measured on their own enrolment photos is what
                 # settles it; the name test stays as a fallback for items
                 # enrolled before that was recorded.
-                _cls = d.get("name", "")
-                _agrees = (self._names_agree(_cls, item["name"])
-                           or (item.get("detector_class")
-                               and _cls == item["detector_class"]))
-                thresh = (self.CLASS_AGREE_MATCH_THRESHOLD if _agrees
-                          else self.CLASS_DISAGREE_MATCH_THRESHOLD)
-                # An item with almost no surface texture matches ambient clutter
-                # too easily, so it carries a floor of its own. A floor can only
-                # raise the bar, never lower it below what the class demands.
-                floor = item.get("threshold_floor")
-                if floor:
-                    thresh = max(thresh, floor)
-                # Faint boxes must prove themselves harder. Candidates now come
-                # in from ENROLLED_CANDIDATE_CONF rather than conf_threshold, so
-                # the gallery sees boxes the detector barely believes in, and on
-                # those the ordinary bar is too generous: over the 04:40-04:50
-                # window the two real put-downs scored 0.885 and 0.891 while the
-                # marginal junk scored 0.663 and 0.666, straddling this bar
-                # exactly. One source of evidence being weak is a reason to
-                # demand more of the other, not to shrug.
-                if d.get("confidence", 1.0) < self.conf_threshold:
-                    thresh = max(thresh, LOW_CONF_MATCH_THRESHOLD)
-                sims = np.asarray(item["embeddings"]) @ crop_emb
-                sim = float(sims.max()) if sims.size else 0.0
+                strict = self._match_threshold(d, item)
+                thresh = strict
+                # MobileNet shortlists, the verifier decides -- but only where
+                # there is a verifier able to decide. See VERIFIED_BOX_THRESHOLD.
+                from ai import verifier as _vb
+                if (self._class_agrees(d, item) and _vb.VERIFY_MATCHES
+                        and len(item.get("verify_embeddings") or [])
+                        and _vb.available() and self._verify_budget > 0):
+                    thresh = min(strict, VERIFIED_BOX_THRESHOLD)
+                # Enrolment plus what this camera has learned when the class
+                # agrees; enrolment alone when it does not. See galleries_enrol.
+                gallery = (galleries if self._class_agrees(d, item)
+                           else galleries_enrol).get(str(item["id"]))
+                sim = (max(float((gallery @ v).max()) for v in views)
+                       if gallery is not None and gallery.size else 0.0)
                 if sim >= thresh:
                     if sim > best_sim:
                         second_sim, second_name, second_id = (
@@ -1650,6 +2287,10 @@ class DailyItemIndexer:
                         best_match_name = item["name"]
                         best_item_id = item["id"]
                         best_thresh = thresh
+                        # The bar this match would have faced without a
+                        # verifier, kept so the relaxation can be withdrawn
+                        # with the thing that justified it.
+                        best_strict = strict
                     elif sim > second_sim:
                         second_sim, second_name, second_id = sim, item["name"], item["id"]
 
@@ -1719,11 +2360,34 @@ class DailyItemIndexer:
                     best_item_id = None
 
             if best_match_name:
+                _item = next((it for it in user_items
+                              if it["id"] == str(best_item_id)), None)
+                if _item is not None:
+                    _ok, _why, _vs = self._verified(
+                        crops[crop_i], _item, best_sim, "a detector box")
+                    if not _ok:
+                        continue
+                    # A box admitted on the shortlisting bar that was NOT
+                    # actually checked keeps the bar it would have faced before
+                    # the verifier existed. The licence and the check are one
+                    # decision; see VERIFIED_BOX_THRESHOLD.
+                    if (_why != "agreed" and best_strict is not None
+                            and best_sim < best_strict):
+                        print(f"[DailyItemIndexer] '{best_match_name}' at "
+                              f"{best_sim:.3f} was shortlisted but not verified "
+                              f"({_why}); its own bar is {best_strict:.2f}, so it "
+                              f"is not claimed")
+                        continue
+                    d["verified"] = _why
+                    d["verify_score"] = round(_vs, 3)
                 generic_name = d["name"]
                 d["matched_item"] = best_match_name
                 d["enrolled_item_id"] = best_item_id
                 d["exemplar_similarity"] = round(best_sim, 3)
                 d["generic_name"] = generic_name
+                # A sighting this sure about itself is worth keeping, so the
+                # gallery learns what this camera makes of the thing.
+                self._maybe_adopt(user_id_str, d, crop_emb, best_item_id, user_items)
                 d["name"] = best_match_name
                 print(f"[DailyItemIndexer] Exemplar MATCH: '{generic_name}' -> '{best_match_name}' (sim={best_sim:.3f} >= {best_thresh})")
 
@@ -2290,6 +2954,78 @@ class DailyItemIndexer:
         return None
 
     @staticmethod
+    def _file_activity_frame(keyframe_id: str | None, user_id_str: str,
+                             session_id: str | None = None,
+                             base: str | None = None) -> bool:
+        """Copy a closed session's chosen frame into activities_storage.
+
+        activities_storage is swept by retention, searched by _surviving_frame
+        and reported by /keyframes/storage, and until now nothing wrote to it:
+        its only writer is the egocentric activity plugin, off by decision in
+        plugins/registry.py. So the record of an activity rested entirely on a
+        frame kept for a different reason -- a scene_change in the day's
+        memory -- and _surviving_frame exists because one of those was deleted
+        between a session's last frame and the session closing.
+
+        A COPY, not a move. The Keyframe Audit lists keyframe_storage alone, so
+        moving the frame would remove the moment from the day's memory in order
+        to file it as an activity. saved_at is carried over untouched, so the
+        copy expires on the same 36 h clock as its original instead of
+        outliving it, and every path that deletes a frame -- the delete
+        endpoint, the privacy sweep, both retention sweepers -- already walks
+        all five stores, so the two copies go together.
+
+        Idempotent: a session is persisted each time it grows, and only one
+        copy of any frame is wanted.
+        """
+        if not keyframe_id or not user_id_str:
+            return False
+        import io
+        import json
+        import shutil
+        # The stores' parent. Only a test passes it; it is what lets the
+        # copy be exercised against real files without writing into the
+        # wearer's own keyframe_storage.
+        base = base or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "..", "keyframe_backend")
+        act_root = os.path.normpath(os.path.join(base, "activities_storage"))
+        try:
+            if glob.glob(os.path.join(act_root, "*", "*", f"{keyframe_id}.jpg")):
+                return False
+            src_root = os.path.normpath(os.path.join(base, "keyframe_storage"))
+            hits = glob.glob(os.path.join(src_root, "*", "*", f"{keyframe_id}.jpg"))
+            if not hits:
+                return False
+            src = hits[0]
+            # The source's own date folder, so a frame keeps the day it was
+            # captured on rather than the day its session happened to close.
+            day = os.path.basename(os.path.dirname(src))
+            dest_dir = os.path.join(act_root, user_id_str, day)
+            os.makedirs(dest_dir, exist_ok=True)
+            shutil.copy2(src, os.path.join(dest_dir, f"{keyframe_id}.jpg"))
+            meta_src = src[:-4] + ".json"
+            meta = {}
+            if os.path.exists(meta_src):
+                with io.open(meta_src, encoding="utf-8") as f:
+                    meta = json.load(f)
+            # saved_at is NOT rewritten: retention reads it, and a fresh one
+            # here would keep the copy alive after the original had gone.
+            meta["filed_as"] = "activity"
+            if session_id:
+                meta["activity_session_id"] = session_id
+            with io.open(os.path.join(dest_dir, f"{keyframe_id}.json"), "w",
+                         encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            print(f"[DailyItemIndexer] [Scene] filed {keyframe_id[:8]} in "
+                  f"activities_storage as this session's evidence")
+            return True
+        except Exception as e:
+            # Never at the cost of the event row itself: the session is the
+            # record, this is a second copy of its picture.
+            print(f"[DailyItemIndexer] could not file the activity frame: {e}")
+            return False
+
+    @staticmethod
     def _captured_epoch(metadata: dict) -> float:
         """When the frame in this metadata was CAPTURED, as a unix timestamp.
 
@@ -2334,7 +3070,32 @@ class DailyItemIndexer:
             tracker = SceneSessionTracker()
             self._scene_trackers[user_id_str] = tracker
 
-        room, score, scores = classify_scene(all_detections)
+        # Which rooms would be acted on DESTRUCTIVELY for this wearer.
+        #
+        # Their own sensitive_rooms, not a constant. The settings screen offers
+        # six rooms and any of them can be ticked; hardcoding the washroom
+        # protected one room and left Bedroom armed at the ordinary 0.55 floor
+        # -- in the room where this wearer spends their day, with Bed reading
+        # 0.62 routinely. One tap would have wiped it.
+        #
+        # Empty when the automatic rule is off, because then nothing is
+        # destroyed and no room needs a harder bar: recognition goes back to
+        # behaving exactly as it did before any of this. See
+        # scene.defining_conf_floor.
+        _destructive: set[str] = set()
+        try:
+            from ai.privacy import AUTO_ROOM_PRIVACY, settings as _pset
+            if AUTO_ROOM_PRIVACY:
+                _destructive = set(_pset(user_id_str).get("sensitive_rooms") or [])
+        except Exception as e:
+            # Unreadable settings must not quietly drop the protection, so this
+            # falls back to the cautious default rather than to nothing.
+            from ai.scene import DESTRUCTIVE_ROOMS as _fallback
+            _destructive = set(_fallback)
+            print(f"[Scene] could not read sensitive rooms ({e}); holding "
+                  f"{sorted(_destructive)} to the higher bar")
+
+        room, score, scores = classify_scene(all_detections, _destructive)
 
         # ── The washroom rule (Module A FE-5) ────────────────────────────────
         #
@@ -2350,20 +3111,48 @@ class DailyItemIndexer:
         # ever opened, named, or given a cover photograph.
         try:
             from ai.privacy import (is_sensitive_room, enter_sensitive_room,
-                                    left_sensitive_room)
-            if is_sensitive_room(user_id_str, room):
-                # The CAPTURE time, not now. Classification runs behind the
-                # capture loop, so "now" would place the boundary seconds late
-                # and leave the first frames of the visit on disk; and a purge
-                # measured backwards from now took the previous room's frames,
-                # which is how a wearer lost their bedroom by walking into the
-                # washroom.
-                print(f"[Privacy] {room} recognised ({score:.2f}); going dark "
-                      f"and destroying what this visit already stored")
-                enter_sensitive_room(user_id_str, room,
-                                     self._captured_epoch(metadata))
-                return True
-            if room:
+                                    left_sensitive_room, would_be_sensitive_room,
+                                    note_would_have_fired)
+            if would_be_sensitive_room(user_id_str, room):
+                # WHAT it saw, carried with the decision. The rule deletes the
+                # frames that would show whether it was right, so without this
+                # a wrong call cannot be argued with -- a wearer sitting on
+                # their couch lost that moment to "the bathroom is private"
+                # and there was nothing on record to contradict it. Class
+                # names and confidences only; the picture is still destroyed.
+                from ai.scene import SCENE_WEIGHTS
+                _runner = sorted((s for r, s in (scores or {}).items() if r != room),
+                                 reverse=True)
+                trigger = {
+                    "room": room,
+                    "score": round(float(score), 3),
+                    "seen": {n: round(float(c), 3)
+                             for n, c in (all_detections or {}).items()
+                             if n in (SCENE_WEIGHTS.get(room) or {})},
+                    "runner_up": round(float(_runner[0]), 3) if _runner else None,
+                }
+                # The automatic rule is OFF (see AUTO_ROOM_PRIVACY). The
+                # classifier still gets to state its opinion and have it
+                # written down, which is how the bad class will be identified;
+                # it just no longer gets to delete anything on the strength of
+                # it. Switching it back on restores the old behaviour exactly.
+                if not is_sensitive_room(user_id_str, room):
+                    note_would_have_fired(user_id_str, room, trigger)
+                else:
+                    print(f"[Privacy] {room} recognised ({score:.2f}) from "
+                          f"{trigger['seen']}; going dark and destroying what "
+                          f"this visit already stored")
+                    # The CAPTURE time, not now. Classification runs behind the
+                    # capture loop, so "now" would place the boundary seconds
+                    # late and leave the first frames of the visit on disk; and
+                    # a purge measured backwards from now took the previous
+                    # room's frames, which is how a wearer lost their bedroom
+                    # by walking into the washroom.
+                    enter_sensitive_room(user_id_str, room,
+                                         self._captured_epoch(metadata),
+                                         trigger=trigger)
+                    return True
+            elif room:
                 # A room was named and it is not a private one, so the wearer
                 # has left. Only ever called with a RECOGNISED room: lifting on
                 # "no room recognised" would let any unclassifiable frame from
@@ -2396,7 +3185,7 @@ class DailyItemIndexer:
                       f"| rooms {live} | saw {top}")
             else:
                 print(f"[Scene] {str(keyframe_id)[:8]} -> no room: "
-                      f"{explain_scene(all_detections)} | saw {top}")
+                      f"{explain_scene(all_detections, _destructive)} | saw {top}")
         except Exception:
             pass
 
@@ -2500,6 +3289,12 @@ class DailyItemIndexer:
                 doc["createdAt"] = ts_now
                 db.eventlogs.insert_one(doc)
 
+            # Closed sessions only. The row above is upserted every time the
+            # session grows, and the frame wants filing once.
+            if not in_progress:
+                self._file_activity_frame(keyframe_id, str(user_id_str),
+                                          session_id)
+
             state = "open" if in_progress else "closed"
             print(f"[DailyItemIndexer] [Scene] {sentence} ({state}, "
                   f"{session['keyframes']} keyframes, evidence "
@@ -2547,6 +3342,77 @@ class DailyItemIndexer:
                   f"support it, no hands and no detected object; not recording it")
         return []
 
+    def _propose_regions(self, image) -> list[tuple[int, int, int, int]]:
+        """Candidate boxes the frame itself suggests. See PROPOSE_REGIONS.
+
+        Generic by construction: nothing here knows what a phone looks like.
+        Returns (x1, y1, x2, y2), the same shape as _tile_regions.
+        """
+        h, w = image.shape[:2]
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        boxes = []
+        try:
+            mser = cv2.MSER_create()
+            mser.setMinArea(int(PROPOSE_MIN_AREA_FRAC * w * h))
+            mser.setMaxArea(int(PROPOSE_MAX_AREA_FRAC * w * h))
+            for src in (gray, cv2.bitwise_not(gray)):
+                for r in mser.detectRegions(src)[0]:
+                    boxes.append(cv2.boundingRect(r.reshape(-1, 1, 2)))
+            edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 40, 120)
+            edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+            for c in cv2.findContours(edges, cv2.RETR_EXTERNAL,
+                                      cv2.CHAIN_APPROX_SIMPLE)[0]:
+                boxes.append(cv2.boundingRect(c))
+        except Exception as e:
+            print(f"[DailyItemIndexer] region proposal failed: {e}")
+            return []
+
+        keep = []
+        for (x, y, bw, bh) in boxes:
+            area = bw * bh
+            if area < PROPOSE_MIN_AREA_FRAC * w * h or area > PROPOSE_MAX_AREA_FRAC * w * h:
+                continue
+            if not (0.2 <= bw / float(bh) <= 5.0):
+                continue
+            keep.append([int(x), int(y), int(bw), int(bh)])
+        if not keep:
+            return []
+        try:
+            idxs = cv2.dnn.NMSBoxes(keep, [1.0] * len(keep), 0.0, 0.5)
+            if len(idxs):
+                keep = [keep[int(i)] for i in np.array(idxs).ravel()]
+        except Exception:
+            pass
+        keep.sort(key=lambda b: -b[2] * b[3])
+
+        out = []
+        for (x, y, bw, bh) in keep[:PROPOSE_MAX]:
+            mx, my = int(bw * PROPOSE_MARGIN), int(bh * PROPOSE_MARGIN)
+            out.append((max(0, x - mx), max(0, y - my),
+                        min(w, x + bw + mx), min(h, y + bh + my)))
+        return out
+
+    def _swallowed_by_other_object(self, region, boxed, item):
+        """Is this candidate sitting INSIDE some other device? See SURFACE_CLASSES."""
+        rx0, ry0, rx1, ry1 = region
+        ra = float((rx1 - rx0) * (ry1 - ry0))
+        if ra <= 0:
+            return None
+        for d in boxed or []:
+            name = d.get("generic_name") or d.get("name") or ""
+            if name in SURFACE_CLASSES or name == (item or {}).get("detector_class"):
+                continue
+            if d.get("confidence", 0.0) < SWALLOWED_CONF:
+                continue
+            bb = d.get("bbox") or {}
+            if not bb:
+                continue
+            ix = max(0, min(rx1, bb.get("x2", 0)) - max(rx0, bb.get("x1", 0)))
+            iy = max(0, min(ry1, bb.get("y2", 0)) - max(ry0, bb.get("y1", 0)))
+            if (ix * iy) / ra >= SWALLOWED_FRAC:
+                return name
+        return None
+
     def _tile_regions(self, img_w: int, img_h: int) -> list[tuple[int, int, int, int]]:
         """Multi-scale sliding windows over the searchable region of the frame."""
         x0 = int(TILE_REGION_X[0] * img_w)
@@ -2562,7 +3428,8 @@ class DailyItemIndexer:
         return regions
 
     def _scan_tiles_for_enrolled_items(self, image: np.ndarray, user_id_str: str,
-                                       exclude_item_ids: set | None = None) -> list[dict]:
+                                       exclude_item_ids: set | None = None,
+                                       boxed: list | None = None) -> list[dict]:
         """Find enrolled items that YOLO failed to box, by scanning the frame directly.
 
         Decision rule is deliberately winner-take-all per item rather than
@@ -2575,6 +3442,12 @@ class DailyItemIndexer:
         existing dedup and identity-gated persistence path handles them unchanged.
         """
         user_items = self._get_user_items_cached(user_id_str)
+        if not hasattr(self, "_verify_budget"):
+            from ai.verifier import VERIFY_MAX_PER_FRAME
+            self._verify_budget = VERIFY_MAX_PER_FRAME
+        # Why each claim was or was not second-guessed, carried onto the event
+        # so the database can answer this instead of a person guessing.
+        self._verify_note = {}
         if exclude_item_ids:
             # Items already matched from a YOLO box in this frame need no scan.
             user_items = [it for it in user_items if it["id"] not in exclude_item_ids]
@@ -2586,7 +3459,10 @@ class DailyItemIndexer:
 
         img_h, img_w = image.shape[:2]
         regions, crops = [], []
-        for r in self._tile_regions(img_w, img_h):
+        candidates = list(self._tile_regions(img_w, img_h))
+        if PROPOSE_REGIONS:
+            candidates = self._propose_regions(image) + candidates
+        for r in candidates:
             if (r[2] - r[0]) < TILE_MIN_PX or (r[3] - r[1]) < TILE_MIN_PX:
                 continue
             crop = image[r[1]:r[3], r[0]:r[2]]
@@ -2608,13 +3484,91 @@ class DailyItemIndexer:
         for region, emb in zip(regions, embs):
             for item in user_items:
                 thresh = item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD)
-                sims = np.asarray(item["embeddings"]) @ emb
+                # Relaxed only when something stronger will check the
+                # result afterwards. See VERIFIED_TILE_THRESHOLD.
+                # The relaxation and the check are ONE decision, not two.
+                #
+                # A blind region was allowed down to 0.70 only because
+                # something stronger would look at it afterwards. If that
+                # something cannot run -- model missing, load failed, budget
+                # spent -- the licence goes with it and the strict bar comes
+                # back. Leaving the lower bar in place while the check was
+                # silently absent is how a dark patch of bedroom was logged as
+                # the wearer's car keys at 0.705, three minutes after this
+                # code went live, with nothing in the record to say the
+                # verifier had not run.
+                from ai import verifier as _v
+                if (_v.VERIFY_MATCHES and len(item.get("verify_embeddings") or [])
+                        and _v.available() and self._verify_budget > 0):
+                    thresh = min(thresh, VERIFIED_TILE_THRESHOLD)
+                # ── ENROLMENT ONLY here, never the adopted views ───────────
+                #
+                # Adopted views are scoped to an agreeing detector class
+                # everywhere else, because they widen what an item may look
+                # like and that latitude is only safe when something else has
+                # already said what the object is. A TILE has no class. It is
+                # a blind square of pixels, so there is nothing for the scope
+                # to agree with, and the guard silently did not apply here.
+                #
+                # It cost a real false positive. On one frame the corner of
+                # the wearer's laptop screen -- dark bezel, lit panel -- was
+                # logged as their phone, while the phone itself lay on the
+                # bed beside it and was missed:
+                #
+                #                        laptop corner   the real phone
+                #     enrolment only         0.695           0.608
+                #     with adopted views     0.763           0.715
+                #
+                # Adoption lifted both, which is what it is for, but it
+                # pushed the WRONG one over the 0.74 bar and left the right
+                # one under. Enrolment alone refuses the laptop outright.
+                #
+                # The phone on the bed is still missed, and that is the
+                # honest trade: a tile scan is the weakest evidence in the
+                # system -- no detector, no class, no hand, just a square
+                # that resembles something -- so it answers to the vectors
+                # the wearer actually enrolled and to nothing the system
+                # taught itself.
+                gallery = item.get("enrol_embeddings") or item["embeddings"]
+                sims = np.asarray(gallery) @ emb
                 sim = float(sims.max()) if sims.size else 0.0
                 if sim < thresh:
+                    continue
+                inside = self._swallowed_by_other_object(region, boxed, item)
+                if inside:
+                    print(f"[DailyItemIndexer] refusing {item['name']} at {sim:.3f}: "
+                          f"it sits inside a {inside}, and a belonging rests ON "
+                          f"things rather than inside them")
                     continue
                 cur = best.get(item["id"])
                 if cur is None or sim > cur[0]:
                     best[item["id"]] = (sim, region, item)
+
+        # ---- The second opinion, once per item and on its BEST candidate ----
+        #
+        # Deliberately after the loop. Verifying inside it spent the frame's
+        # budget on whichever region happened to be scanned first, which on a
+        # raster scan is the top-left of the room rather than the best match.
+        # One verification per item is also naturally bounded: three enrolled
+        # belongings can cost at most three.
+        for item_id in list(best.keys()):
+            sim, region, item = best[item_id]
+            crop = image[region[1]:region[3], region[0]:region[2]]
+            if not crop.size:
+                continue
+            ok, why, vscore = self._verified(crop, item, sim, "a blind region")
+            if not ok:
+                del best[item_id]
+                continue
+            # A blind region that was NOT actually checked keeps the strict
+            # bar it would have faced before the verifier existed.
+            if why != "agreed" and sim < item.get("threshold", self.EXEMPLAR_MATCH_THRESHOLD):
+                print(f"[DailyItemIndexer] '{item['name']}' at {sim:.3f} was not "
+                      f"verified ({why}); the relaxed bar does not apply, so it "
+                      f"is not claimed")
+                del best[item_id]
+                continue
+            self._verify_note[item_id] = (why, round(vscore, 3))
 
         elapsed = (time.perf_counter() - t0) * 1000
         if not best:
@@ -2634,6 +3588,8 @@ class DailyItemIndexer:
                 "enrolled_item_id": item_id,
                 "exemplar_similarity": round(sim, 3),
                 "generic_name": "tile_scan",
+                "verified": self._verify_note.get(item_id, ("unknown", 0.0))[0],
+                "verify_score": self._verify_note.get(item_id, ("unknown", 0.0))[1],
             })
         return out
 
@@ -2677,6 +3633,24 @@ def _clahe(image_bgr: np.ndarray) -> np.ndarray:
     l, a, b = cv2.split(lab)
     l = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(l)
     return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
+def extra_views_for_near_miss(crop_bgr: np.ndarray) -> list[np.ndarray]:
+    """The same lighting spread enrollment gets, applied to one live crop.
+
+    Enrollment varies lighting and angle; this varies lighting only. Rotation
+    is left out deliberately -- the gallery already holds rotated views of the
+    item, so rotating the crop as well buys nothing, and a rotated crop pads
+    with black that the embedding then has to look past.
+
+    Returns the EXTRA views. The caller already has the plain crop.
+    """
+    flipped = cv2.flip(crop_bgr, 1)
+    views = [flipped]
+    for source in (crop_bgr, flipped):
+        for g in (0.55, 0.75, 1.35, 1.8):
+            views.append(_gamma(source, g))
+    return views
 
 
 def augment_for_enrollment(image_bgr: np.ndarray) -> list[np.ndarray]:
