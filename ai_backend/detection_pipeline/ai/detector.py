@@ -12,6 +12,33 @@ PILL_CLASSES = {
 
 PILL_CONFIDENCE_THRESHOLD = 0.20
 
+# ── How big a pill can possibly be, as a fraction of frame width ──────────
+#
+# The model finds round pale discs and has no idea how far away they are. In
+# one wearer's bedroom it labelled the WALL CLOCK a pill at 0.770 and the
+# FAN's circular dial at 0.778, in the same frame, while they were lifting a
+# laptop with both hands. That frame was then filed as medication evidence
+# needing confirmation.
+#
+# Every guard downstream is RELATIVE -- overlap with a hand, size against that
+# hand, distance from the palm -- and relative tests cannot see depth. A clock
+# three metres away is small next to a hand held close, in the flat projection
+# the camera gives us. The same mistake, in the same codebase, once read a
+# phone on a bed as a phone in a hand.
+#
+# So an absolute ceiling, derived from physical size rather than fitted to
+# these two false positives. A 500mg tablet is about 13mm across. The camera
+# is 1280px wide with roughly a 70 degree horizontal field, so at 50cm it
+# spans about 70cm of the world: a tablet is then around 24px, and about 40px
+# at arm's length of 30cm. 5% of frame width is 64px, which is comfortably
+# past any way a hand can hold a tablet up to a chest camera, and well under
+# the clock (71px) and the fan dial (108px).
+#
+# NOT validated against a confirmed pill detection: there is no true-positive
+# evidence frame in this installation to check it against. It is derived, not
+# measured, and the first real dose taken on camera is what will confirm it.
+MAX_PILL_FRAC = float(os.environ.get("MAX_PILL_FRAC", 0.05))
+
 
 class PillDetector:
     """
@@ -32,10 +59,30 @@ class PillDetector:
             )
 
         print(f"Loading pill detection model: {model_path}")
+        # One core fewer than the machine has, deliberately.
+        #
+        # This runs in 60-frame batches costing ~87 s of CPU, and ONNX Runtime
+        # takes every core by default. The item indexer shares the machine, and
+        # measured against that default its tile scan went from 4.6 s between
+        # batches to 24.6 s and 34.6 s during one -- five to seven times slower,
+        # for about three quarters of a medication window, which is what the
+        # wearer experienced as items being logged a minute or two late.
+        #
+        # Reducing the batch's SIZE or pre-filtering its frames was the
+        # alternative and is worse: MediaPipe reports "No hands detected"
+        # constantly in this lighting, and the Gemini fallback exists to rescue
+        # frames where a pill was found with no hand recognised. A hand-based
+        # filter would remove exactly the evidence that fallback depends on.
+        # So every frame is still examined; the batch just stops being greedy.
+        _opts = ort.SessionOptions()
+        _opts.intra_op_num_threads = max(1, (os.cpu_count() or 2) - 1)
         self.session = ort.InferenceSession(
             model_path,
+            sess_options=_opts,
             providers=["CPUExecutionProvider"]
         )
+        print(f"Pill detector using {_opts.intra_op_num_threads} of "
+              f"{os.cpu_count()} cores, leaving room for the item indexer")
         self.input_name  = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
         self.img_size    = self.input_shape[2] if isinstance(self.input_shape[2], int) else 640
@@ -76,6 +123,10 @@ class PillDetector:
 
             x1 = max(0, x1); y1 = max(0, y1)
             x2 = min(orig_w, x2); y2 = min(orig_h, y2)
+
+            # Too big to be a pill anybody could swallow. See MAX_PILL_FRAC.
+            if max(x2 - x1, y2 - y1) > MAX_PILL_FRAC * orig_w:
+                continue
 
             # Aspect ratio filter: pills are roughly round or oval
             # Fingers are elongated (aspect ratio > 3:1) — reject them

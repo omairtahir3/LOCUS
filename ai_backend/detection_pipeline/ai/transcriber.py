@@ -38,7 +38,7 @@ from datetime import datetime, timezone, timedelta
 
 from .audio_capture import AudioCapture, is_silent
 
-MODEL_SIZE = os.environ.get("WHISPER_MODEL", "tiny")
+MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base")
 # int8 on CPU. float32 is slower for no accuracy gain at this size.
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
 
@@ -90,12 +90,49 @@ def _looks_invented(text: str) -> bool:
     return len(words) > 3 and len(set(words)) == 1
 
 
+def _stitch(parts: list[str], max_overlap: int = 8) -> str:
+    """Join consecutive windows, dropping words repeated across the seam.
+
+    The reads are disjoint now, so a true audio overlap should not happen; the
+    repetition that does happen is Whisper finishing a half-heard word at the
+    end of one window and starting the next with the whole of it. Only a run of
+    words that ends one part and begins the next is removed, longest first, so
+    a sentence that genuinely repeats a phrase keeps it.
+    """
+    out: list[str] = []
+    for part in parts:
+        words = part.split()
+        if not words:
+            continue
+        if out:
+            n = min(max_overlap, len(out), len(words))
+            while n > 0:
+                tail = [w.lower().strip(".,!?") for w in out[-n:]]
+                head = [w.lower().strip(".,!?") for w in words[:n]]
+                if tail == head:
+                    words = words[n:]
+                    break
+                n -= 1
+        out.extend(words)
+    return " ".join(out).strip()
+
+
 class Transcriber:
     """Turns the audio ring buffer into stored text, on its own thread."""
 
     def __init__(self, user_id: str, capture: AudioCapture | None = None,
                  model_size: str = MODEL_SIZE, window_seconds: float = WINDOW_SECONDS,
-                 continuous: bool = CONTINUOUS):
+                 continuous: bool = CONTINUOUS, allowed=None):
+        # Does privacy permit hearing anything right now?
+        #
+        # This had no answer at all, which made the README's promise that
+        # Privacy Mode "instantly pauses all recording and analysis" untrue of
+        # audio: pressing the button stopped frames being written and left the
+        # microphone running. A sensitive room did the same. The predicate is
+        # consulted before a session opens and again on every window, so the
+        # worst case between pressing the button and the microphone closing is
+        # one window rather than the rest of the conversation.
+        self.allowed = allowed or (lambda: True)
         self.user_id = str(user_id)
         self.capture = capture or AudioCapture()
         self.model_size = model_size
@@ -111,6 +148,18 @@ class Transcriber:
         self.windows_skipped_silent = 0
         self.windows_skipped_invented = 0
         self.last_error = None
+        # ── Conversation sessions ────────────────────────────────────────
+        #
+        # A face event used to transcribe the last CONVERSATION_SECONDS and
+        # stop, so a twenty-minute conversation left twenty-five seconds of
+        # text: a sample, not a transcript. While a session is open the loop
+        # below runs continuously and every window is kept, so what is stored
+        # is the conversation rather than a moment of it.
+        #
+        # "No face, no transcription" still holds -- the session only exists
+        # because a face opened it, and closing it stops the loop again.
+        self._session = None          # {"key", "started_at", "parts", "last_seen"}
+        self._session_lock = threading.Lock()
 
     # -- the model --------------------------------------------------------
 
@@ -275,20 +324,132 @@ class Transcriber:
     # -- the loop ---------------------------------------------------------
 
     def _run(self):
+        """Transcribe continuously, leaving no gap between windows.
+
+        The old loop slept for a window and then read exactly one window, so
+        everything spoken WHILE it was transcribing fell on the floor. Measured
+        on this machine, tiny takes 0.87 s per ten seconds of audio and base
+        1.47 s, so the hole was 9-13% of every conversation, spread evenly
+        through it -- which is the worst shape for a transcript, because the
+        text reads as continuous while sentences are quietly missing from it.
+        #
+        Reading from where the last pass ENDED closes it. The read is capped at
+        the ring buffer's length: if a pass ever overran that far the audio is
+        already gone, and asking for more than exists would return nothing at
+        all rather than what is left.
+        """
+        # The ring buffer's true length, from what it actually allocated.
+        cap = float(getattr(self.capture, "capacity", 0) or 0) / float(
+            getattr(self.capture, "sample_rate", 16000) or 16000) or 30.0
+        last_end = time.monotonic()
         # Staggered so the first pass has a full window behind it rather than
         # reading a buffer that is still mostly the zeros it started as.
         while not self._stop.wait(self.window_seconds):
             try:
-                samples = self.capture.read_window(self.window_seconds)
+                # Privacy outranks the conversation. Checked every window, so
+                # pressing the button or walking into a private room stops the
+                # microphone within one window rather than at the end of the
+                # chat. The session is closed with whatever was heard up to
+                # that point; nothing from after it is kept.
+                if not self.allowed():
+                    if self.session_open():
+                        print("[Transcriber] privacy closed an open conversation")
+                        self.end_session()
+                    self.capture.stop()
+                    self._paused_by_privacy = True
+                    continue
+                if getattr(self, "_paused_by_privacy", False):
+                    self._paused_by_privacy = False
+                    self.capture.start()
+                    last_end = time.monotonic()
+                    continue
+
+                now = time.monotonic()
+                want = min(max(self.window_seconds, now - last_end), cap)
+                samples = self.capture.read_window(want)
                 if samples is None:
                     continue
+                # Claimed BEFORE transcribing: the audio has been taken out of
+                # the buffer's future as far as this loop is concerned, so a
+                # slow pass does not make the next one re-read the same words.
+                last_end = now
+                if want > cap - 0.5:
+                    print(f"[Transcriber] fell {want:.0f}s behind, at the "
+                          f"buffer's limit; some audio was lost")
                 text = self.transcribe_window(samples)
                 if text:
                     self.store(text)
+                    self._append_to_session(text)
             except Exception as e:
                 # A worker that dies takes transcription down for the session,
                 # so every pass is contained.
                 self.last_error = f"{type(e).__name__}: {e}"
+
+    # -- conversation sessions -------------------------------------------
+
+    def _append_to_session(self, text: str) -> None:
+        with self._session_lock:
+            if self._session is not None:
+                self._session["parts"].append(text)
+
+    def begin_session(self, key: str) -> bool:
+        """A conversation started. Keep every word until it ends.
+
+        Returns True when this opened a new session, False when one was
+        already open for `key` (the same person seen again mid-conversation).
+        """
+        if not self.allowed():
+            # The gate, before a single word is kept.
+            return False
+        with self._session_lock:
+            if self._session is not None and self._session["key"] == key:
+                self._session["last_seen"] = datetime.now(timezone.utc)
+                return False
+            # A different person: close the old one rather than blend two
+            # conversations into one transcript.
+            self._session = {"key": key, "started_at": datetime.now(timezone.utc),
+                             "parts": [], "last_seen": datetime.now(timezone.utc)}
+        self._ensure_loop()
+        return True
+
+    def end_session(self) -> dict | None:
+        """Close the open session and hand back everything heard during it."""
+        with self._session_lock:
+            s, self._session = self._session, None
+        if s is None:
+            return None
+        if not self.continuous:
+            self._stop_loop()
+        text = _stitch(s["parts"])
+        return {
+            "key": s["key"],
+            "transcript": text,
+            "started_at": s["started_at"],
+            "ended_at": datetime.now(timezone.utc),
+            "segments": len(s["parts"]),
+            "heard_seconds": (datetime.now(timezone.utc) - s["started_at"]).total_seconds(),
+        }
+
+    def session_open(self) -> bool:
+        with self._session_lock:
+            return self._session is not None
+
+    def _ensure_loop(self) -> None:
+        """Start the transcribing thread if it is not already running."""
+        if self._thread is not None or not self.capture.available:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run,
+                                        name=f"transcriber-{self.user_id[:6]}",
+                                        daemon=True)
+        self._thread.start()
+
+    def _stop_loop(self) -> None:
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=2.0)
+        self._stop.clear()
 
     def start(self) -> bool:
         """Begin capturing and transcribing. False when there is no microphone,
@@ -304,9 +465,7 @@ class Transcriber:
             # a window, which is what keeps this from being a recording of the
             # whole day.
             return True
-        self._thread = threading.Thread(target=self._run, name=f"transcriber-{self.user_id[:6]}",
-                                        daemon=True)
-        self._thread.start()
+        self._ensure_loop()
         return True
 
     def stop(self) -> None:

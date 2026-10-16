@@ -47,6 +47,20 @@ CAPTURE_FPS = float(os.environ.get("CAPTURE_FPS", 5.0))
 # the last pass, so no frame is skipped and none is examined twice.
 BUFFER_SECONDS = float(os.environ.get("BUFFER_SECONDS", 30.0))
 BATCH_ANALYSIS_FRAMES = int(BUFFER_SECONDS * CAPTURE_FPS)
+# ...and the same interval in WALL-CLOCK seconds, which is what it always meant.
+#
+# The frame count above assumes CAPTURE_FPS. The real stream runs at 10 to 38
+# fps -- the pipeline's own heartbeats say so -- so 150 frames arrive in four to
+# fifteen seconds and the batch fired several times more often than intended.
+# Since a pass costs ~86 s of all-core work and _batch_busy is released the
+# instant it ends, the next pass began immediately and the machine never got a
+# gap. Measured against that: item events were written a median of 70 s after
+# their frame was captured, while the frame itself reached the audit in 4 s.
+#
+# Measured from the END of the previous pass, so this is a guaranteed quiet
+# period for the item indexer rather than a target the batch can outrun.
+BATCH_ANALYSIS_MIN_GAP_SECONDS = float(
+    os.environ.get("BATCH_ANALYSIS_MIN_GAP_SECONDS", BUFFER_SECONDS))
 # How often the camera says "still here", regardless of movement. Comfortably
 # under routineMonitor's STREAM_ALIVE_MIN (30 min) so a single missed write
 # cannot be mistaken for the camera going off.
@@ -153,22 +167,77 @@ class MedicationDetectionPipeline:
         self.event_plugin = _plugin(ActionType.MEDICATION_INTAKE)
         self.face_plugin = _plugin(ActionType.SOCIAL_INTERACTION)
         self.activity_plugin = _plugin(ActionType.ACTIVITY)
+
+        # Before the audio block, which reads it. This was assigned at the end
+        # of __init__, so every session printed "Audio capture disabled:
+        # AttributeError: ... has no attribute 'user_id'" and transcription --
+        # on by default, by the decision recorded immediately below -- had
+        # never run once. The privacy check that guards the microphone needs
+        # the id too, and a check that cannot see whom it is protecting is
+        # worse than no microphone at all.
+        self.user_id = user_id
+
         # ── Module A FE-1 and FE-3: audio and speech to text ─────────
-        # OFF unless asked for. Turning on a microphone inside someone's home
-        # is not a default anybody should get by upgrading, so AUDIO_CAPTURE=1
-        # is the whole switch. When off, nothing is imported, no device is
-        # opened and no model is downloaded.
+        #
+        # ON by default, and governed by PRIVACY rather than by a flag.
+        #
+        # It shipped off behind AUDIO_CAPTURE=1 on the reasoning that a
+        # microphone should not arrive by upgrade. The effect was that a
+        # documented core feature -- conversation transcripts and summaries --
+        # had never run once, and nothing anywhere said so: the transcripts
+        # collection was simply empty and a wearer's interaction with a friend
+        # stored the face and no words. A consent control nobody can see is
+        # not a consent control.
+        #
+        # So the decision moved to where the wearer can actually make it: the
+        # same Privacy Mode that governs the camera now governs the
+        # microphone, checked before a conversation opens and again every
+        # window. AUDIO_CAPTURE=0 remains, for a deployment that wants no
+        # audio hardware touched at all.
+        #
+        # Why the microphone cannot simply "switch on when a conversation
+        # starts": recognising a face takes a second or two, and a greeting is
+        # over by then. The buffer has to be running BEFORE the system knows
+        # anyone is there. What protects the wearer is not a closed microphone
+        # but what happens to the sound: it lands in a 30-second ring buffer
+        # in memory, is overwritten continuously, is never written to disk,
+        # and is only ever transcribed once a face has been seen. No face, no
+        # transcript -- by construction, not by policy.
         #
         # The audio itself is never written to disk: the ring buffer lives in
         # memory and only the TEXT reaches the database, where it ages out on
         # the same clock as the keyframes beside it.
         self.transcriber = None
         self.audio_context = None
-        if os.environ.get("AUDIO_CAPTURE", "0") == "1":
+        if os.environ.get("AUDIO_CAPTURE", "1") == "1":
             try:
                 from .transcriber import Transcriber
                 from .core.context_providers import AudioContext
-                self.transcriber = Transcriber(user_id=self.user_id or "")
+
+                def _audio_allowed(_uid=str(self.user_id or "")):
+                    """Privacy decides, not a flag nobody can see.
+
+                    The same state that stops frames being written stops words
+                    being kept: the privacy button, and a room the wearer
+                    asked never to be recorded in. Blur counts as a refusal
+                    too -- blurring the picture and transcribing the audio of
+                    the same moment would make a nonsense of the gesture.
+
+                    Fails OPEN on an error, exactly as the image side does,
+                    because a privacy check that silently disables a feature
+                    whenever Mongo hiccups is its own kind of broken.
+                    """
+                    if not _uid:
+                        return True
+                    try:
+                        from ai.privacy import state as _ps
+                        st = _ps(_uid)
+                        return bool(st.get("capture")) and not st.get("blur")
+                    except Exception:
+                        return True
+
+                self.transcriber = Transcriber(user_id=self.user_id or "",
+                                               allowed=_audio_allowed)
                 self.transcriber.ensure_ttl_index()
                 self.audio_context = AudioContext(self.transcriber)
                 if self.transcriber.start():
@@ -204,7 +273,7 @@ class MedicationDetectionPipeline:
         self.medication_ids = medication_ids or []
         self.scheduled_time = scheduled_time
         self.token = token
-        self.user_id = user_id
+        # self.user_id is set near the top of __init__; the audio block reads it.
 
     def _attach_latest_location(self, db, doc, ts_now):
         try:
@@ -490,24 +559,39 @@ class MedicationDetectionPipeline:
             # the transcript and summary go with it.
             if event_type in ("social_interaction", "unknown_face") and self.transcriber is not None:
                 try:
-                    heard = self.transcriber.capture_conversation()
-                    if heard:
-                        details["conversation"] = {
-                            "transcript": heard["transcript"],
-                            "transcript_id": heard["transcript_id"],
-                            "heard_seconds": heard["heard_seconds"],
-                            # Summarised by the Node agent, which already owns the
-                            # Groq client, the fallback and the output guards.
-                            # Pending rather than absent so a failed pass can be
-                            # found and retried instead of silently never running.
-                            "summary": None,
-                            "summary_status": "pending",
-                        }
-                        print(f"[Pipeline] [Audio] Heard {len(heard['transcript'])} chars "
-                              f"with {event_type}")
+                    # A CONVERSATION, not a glance at one.
+                    #
+                    # This used to transcribe the last 25 seconds and stop, so
+                    # a twenty-minute conversation was stored as twenty-five
+                    # seconds of it -- and the person's own de-duplication
+                    # then suppressed them for three minutes, so a long chat
+                    # left a handful of disconnected snippets, each summarised
+                    # on its own with no knowledge of the others.
+                    #
+                    # Opening a session instead keeps every window until the
+                    # person has been out of view for CONVERSATION_GAP_SECONDS.
+                    # The row goes in now, so the interaction appears
+                    # immediately, and the transcript is filled in as it is
+                    # heard. 'collecting' is what tells the summariser to
+                    # leave it alone until it is whole.
+                    opened = self.transcriber.begin_session(
+                        str(person_id or kf_id or "unknown"))
+                    details["conversation"] = {
+                        "transcript": "",
+                        "transcript_id": None,
+                        "heard_seconds": 0,
+                        "summary": None,
+                        "summary_status": "collecting",
+                        "started_at": ts_now,
+                        "last_heard_at": ts_now,
+                    }
+                    self._convo_event_key = (event_type, kf_id)
+                    print(f"[Pipeline] [Audio] Conversation {'opened' if opened else 'continuing'} "
+                          f"for {details.get('person_name') or 'an unknown face'}")
                 except Exception as e:
                     # Never let the audio half stop a face event being recorded.
                     print(f"[Pipeline] [Audio] Conversation capture failed: {e}")
+
 
             doc = {
                 "user_id": ObjectId(str(self.user_id)),
@@ -521,12 +605,100 @@ class MedicationDetectionPipeline:
                 "updatedAt": ts_now
             }
             self._attach_latest_location(db, doc, ts_now)
+
+            # Putting a name to a conversation already in progress.
+            #
+            # An unknown face opens a conversation; a minute later the same
+            # person is seen properly and recognised. That is the SAME
+            # conversation, so it must not become a second row -- the whole
+            # point of anchoring identity to the conversation is that one chat
+            # is one record with one transcript and one summary. The row keeps
+            # its id and its collecting transcript, and gains the name.
+            renames = details.pop("renames_keyframe_id", None)
+            if renames:
+                res = db.eventlogs.update_one(
+                    {"keyframe_id": renames,
+                     "event_type": {"$in": ["social_interaction", "unknown_face"]}},
+                    {"$set": {
+                        "event_type": event_type,
+                        "person_id": person_id_obj,
+                        "confidence": confidence,
+                        "details.person_id": details.get("person_id"),
+                        "details.person_name": details.get("person_name"),
+                        "details.relationship_type": details.get("relationship_type"),
+                        "details.status": details.get("status"),
+                        "details.named_at": ts_now,
+                        "updatedAt": ts_now,
+                    }})
+                if res.modified_count:
+                    print(f"[Pipeline] [DB-Log] Named the conversation in progress: "
+                          f"{details.get('person_name')} (row {str(renames)[:8]})")
+                    return
+                # The row it meant to rename is gone; fall through and insert.
+
             db.eventlogs.insert_one(doc)
             print(f"[Pipeline] [DB-Log] Logged face event: {event_type} for {self.user_id} with conf {confidence:.2f}")
         except Exception as e:
             import traceback
             print(f"[Pipeline] [DB-Log] Error logging face event: {e}")
             traceback.print_exc()
+
+    def close_stale_conversation(self) -> bool:
+        """End a conversation whose person has been out of view long enough.
+
+        Called from the capture loop, which is the only thing guaranteed to
+        keep running: the face plugin suppresses a recognised person for the
+        length of the gap, so nothing in the recognition path fires again to
+        notice that they have gone.
+
+        The transcript is written onto the SAME event row the conversation
+        opened, so one conversation is one row with one summary however long
+        it ran. Flipping summary_status to 'pending' is what releases it to
+        the Node summariser; while it was 'collecting' that pass left it
+        alone, so a summary is never written over half a conversation.
+        """
+        t = self.transcriber
+        if t is None or not t.session_open():
+            return False
+        gap = getattr(self.face_plugin, "conversation_timeout_seconds", 180)
+        with t._session_lock:
+            s = t._session
+            last = s["last_seen"] if s else None
+        if last is None:
+            return False
+        if (datetime.now(timezone.utc) - last).total_seconds() < gap:
+            return False
+
+        done = t.end_session()
+        if not done:
+            return False
+        key = getattr(self, "_convo_event_key", None)
+        text = done["transcript"]
+        print(f"[Pipeline] [Audio] Conversation ended after "
+              f"{done['heard_seconds']:.0f}s, {done['segments']} window(s), "
+              f"{len(text)} chars")
+        if not key:
+            return True
+        try:
+            db = get_client()[get_db_name()]
+            # Empty is still an answer: a conversation nobody could hear must
+            # not sit as 'collecting' for ever, so it is closed as skipped.
+            db.eventlogs.update_one(
+                {"event_type": key[0], "keyframe_id": key[1]},
+                {"$set": {
+                    "details.conversation.transcript": text,
+                    "details.conversation.heard_seconds": round(done["heard_seconds"], 1),
+                    "details.conversation.segments": done["segments"],
+                    "details.conversation.ended_at": done["ended_at"],
+                    "details.conversation.summary_status":
+                        "pending" if text else "skipped_silent",
+                    "updatedAt": datetime.utcnow(),
+                }})
+        except Exception as e:
+            print(f"[Pipeline] [Audio] could not close the conversation row: {e}")
+        finally:
+            self._convo_event_key = None
+        return True
 
     def _log_activity_result_to_db(self, act_result):
         """
@@ -1651,9 +1823,32 @@ class MedicationDetectionPipeline:
             p1_idx = None
             p1_data = None
             best_p1_pill = -1.0
-            # Search up to ~70% of remaining buffer to leave room for P2/P3
-            remaining = len(analyzed) - search_start
-            p1_search_end = min(len(analyzed), search_start + max(3, int(remaining * 0.7)))
+            # Phase 1 may be found anywhere there is still room for the two
+            # phases that must follow it -- which is exactly what the `while`
+            # above already requires, so the bound is len - 2 and nothing more.
+            #
+            # This used to stop at 70% of the remaining buffer, "to leave room
+            # for P2/P3". That reserve was 18 of 60 frames, and the wearer's
+            # 07:15 dose fell inside it. The only pill-in-hand frames in the
+            # entire buffer were 48, 49 and 50, all outside the 0..41 window,
+            # so this printed "No Phase 1 (pill in hand) from frame 0" while
+            # their own log, moments earlier, read:
+            #
+            #     [F48] pill=0.79 in_hand=True hands=1 pills_count=1
+            #     [F49] pill=0.81 in_hand=True hands=1 pills_count=1
+            #     [F50] pill=0.77 in_hand=True hands=1 pills_count=1
+            #
+            # Replaying those 60 frames through this loop with the bound opened
+            # finds P1=49, P2=51 (hand gone), P3=54 at confidence 0.837 --
+            # needs_verification, with its three evidence frames.
+            #
+            # A proportional reserve could not have been right: it scales with
+            # the buffer instead of with the two frames actually needed, so the
+            # larger the buffer the more evidence it hid. Phase 2 and Phase 3
+            # already fail on their own terms when there is genuinely no room,
+            # and both advance search_start, so a late Phase 1 costs one pass
+            # of the loop rather than the whole sequence.
+            p1_search_end = len(analyzed) - 2
             for i in range(search_start, p1_search_end):
                 a = analyzed[i]
                 if a["pill_in_hand"] and a["best_pill"] >= 0.45 and a["hands"] > 0:
@@ -1743,15 +1938,39 @@ class MedicationDetectionPipeline:
                 p2_score = min(1.0, p2_score)
 
                 # Phase 2 previously ignored the pill signal entirely, judging
-                # only hand position. The ONNX model already scores the pill in
-                # this frame, so require it to still be present during the
-                # hand-to-mouth motion rather than trusting the gesture alone.
+                # only hand position, so "a hand near the face scored the same
+                # whether it held a pill, a pen, or nothing at all". The pill
+                # signal therefore belongs here -- but as evidence, NOT as a
+                # veto, and this used to reject the sequence outright whenever
+                # the pill was not visible.
+                #
+                # That rejected every genuine dose, for a physical reason. From
+                # the wearer's log:
+                #
+                #     F4:  pill=0.51  in_hand=True  hand_y=0.13
+                #     F18: pill=0.00  hands=1  hand_y=0.09  near_top=True
+                #     F22: pill=0.00  hands=1  hand_y=0.22  near_top=True
+                #
+                # Phase 1 had confirmed the pill in that hand (overlap 1.00,
+                # palm_ok). As the hand rises the fingers close round a 13 mm
+                # tablet and the detector reads 0.00 -- it is being asked to see
+                # through a fist. Worse, the disappearance is CONFIRMING
+                # evidence, not disqualifying: a pill vanishing between hand and
+                # mouth is the event, and Phase 3 exists to check it is gone.
+                #
+                # What rules out the pen is Phase 1, which has already vouched
+                # for a pill in this same hand moments earlier. So the signal
+                # now scales the score: still visible is worth something, no
+                # longer visible costs a little, and neither aborts a sequence.
                 p2_pill = p2_data.get("best_pill", 0.0)
-                if p2_pill < PHASE2_MIN_PILL_CONF:
-                    print(f"  [Phase2] REJECTED at frame {p2_idx}: pill not present "
-                          f"during motion (best_pill={p2_pill:.3f} < {PHASE2_MIN_PILL_CONF})")
-                    search_start = p1_idx + 1
-                    continue
+                if p2_pill >= PHASE2_MIN_PILL_CONF:
+                    p2_score = min(1.0, p2_score + 0.10)
+                else:
+                    p2_score = max(0.0, p2_score - 0.10)
+                    print(f"  [Phase2] pill not visible at frame {p2_idx} "
+                          f"(best_pill={p2_pill:.3f}); expected once the hand "
+                          f"closes, so the sequence continues with a reduced "
+                          f"score")
                 print(f"  [Phase2] OK Best hand-toward-mouth at frame {p2_idx} "
                       f"(hand_y={p2_data['hand_y']:.2f}, motion={p2_data['motion']:.2f}, "
                       f"composite={best_p2_composite:.2f}, score={p2_score:.2f})")
@@ -1868,6 +2087,38 @@ class MedicationDetectionPipeline:
 
             classification = self.classify_event(confidence)
 
+            # ── Three passed phases are never "missed" ────────────────────
+            #
+            # The wearer's dose at 08:34 scored 0.684 against a 0.70
+            # confirmation threshold and was classified "missed", action
+            # "discard" -- with Phase 1, Phase 2 and Phase 3 all OK and a pill
+            # confirmed in hand at overlap 1.00. Sixteen thousandths decided
+            # that they were told nothing.
+            #
+            # The phase gates and the aggregate are different evidence. Each
+            # phase cleared its own gate; the aggregate merely summarises them,
+            # and a summary of three passes landing under a bar is a fault in
+            # the summary, not grounds to throw the observation away. Asking
+            # the wearer is what the needs_confirmation band is for, and at
+            # 0.684 "we think you took this, please confirm" is the honest
+            # thing to say.
+            #
+            # Deliberately only a FLOOR. Nothing is promoted to auto_verified,
+            # so a dose is still never recorded as taken without either high
+            # confidence or the wearer's own answer.
+            if classification.get("classification") == "missed":
+                classification = {
+                    "classification": "needs_confirmation",
+                    "action": "request_user_confirmation",
+                    "message": ("All three phases of an intake were observed; "
+                                "confidence is low, so please confirm."),
+                    "confidence": confidence,
+                }
+                print(f"[BatchAnalysis] all three phases passed at "
+                      f"{confidence:.3f}, under the "
+                      f"{self.event_policy.confirmation_threshold} bar; asking "
+                      f"the wearer rather than discarding it")
+
             result = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "final_confidence": round(confidence, 3),
@@ -1919,12 +2170,31 @@ class MedicationDetectionPipeline:
         if not results:
             print("[BatchAnalysis] No complete 3-phase sequence found")
             
-            # --- FALLBACK MECHANISM ---
-            # If MediaPipe failed to detect hands (e.g. poor lighting, compressed stream),
-            # but YOLO successfully detected a pill, we manually construct a sequence
-            # from the best pill frames and let Gemini VLM verify it.
+            # --- A PILL WAS SEEN, AN INTAKE WAS NOT ---
+            # MediaPipe reports "No hands detected" constantly on this stream,
+            # so the three frames with the clearest pill are kept together here
+            # for review, and for whatever verifies them later.
+            #
+            # It does NOT claim an intake, and it must not: there is no VLM in
+            # this repository. This line used to read "Sending to Gemini VLM
+            # for verification" and nothing was sent anywhere -- Gemini is
+            # wired into the Node backend, for notification wording only. The
+            # phase dict below used to carry "pass": True three times and
+            # phases_passed: 3 for frames in which no hand was ever found,
+            # which cost nothing only because 0.50 sits under the 0.70 bar and
+            # the result was always discarded. Once a complete sequence became
+            # loggable on its phase count rather than its confidence, that same
+            # dict would have fabricated doses from a pill lying on a desk --
+            # and this detector reports 0.43 and 0.52 on frames with no hands
+            # in them at all.
+            #
+            # To make this verify an intake, something has to actually look at
+            # f1/f2/f3 and answer "is that hand putting a pill in a mouth".
+            # Until it does, a pill on its own is not evidence of a dose.
             if any_pill and len(analyzed) >= 3:
-                print("[BatchAnalysis] FALLBACK: Pill detected but MediaPipe failed. Sending to Gemini VLM for verification.")
+                print("[BatchAnalysis] A pill was detected but no hand was ever "
+                      "recognised, so no intake is claimed; keeping the 3 "
+                      "clearest pill frames for review")
                 import uuid as _uuid
                 sorted_by_pill = sorted(analyzed, key=lambda x: x["best_pill"], reverse=True)
                 top_3 = sorted(sorted_by_pill[:3], key=lambda x: analyzed.index(x))
@@ -1939,21 +2209,24 @@ class MedicationDetectionPipeline:
                         "frame_index": analyzed.index(f1),
                     },
                     "phase2_grip_and_motion": {
-                        "score": 0.50, "pass": True,
+                        "score": 0.50, "pass": False,
                         "motion": round(f2["motion"], 3),
                         "hand_y": round(f2["hand_y"], 3),
                         "keyframe_id": f2["kf"].get("id"),
                         "frame_index": analyzed.index(f2),
                     },
                     "phase3_medicine_gone": {
-                        "score": 0.50, "pass": True,
+                        "score": 0.50, "pass": False,
                         "pill_after": round(f3["best_pill"], 3),
                         "pill_drop": 0.0,
                         "keyframe_id": f3["kf"].get("id"),
                         "frame_index": analyzed.index(f3),
                         "_buffer_idx": analyzed.index(f3),
                     },
-                    "phases_passed": 3,
+                    # One: a pill was visible. The hand-to-mouth motion and
+                    # the empty hand afterwards were never observed, and saying
+                    # otherwise is what let this masquerade as a full sequence.
+                    "phases_passed": 1,
                     "min_phase_score": 0.50,
                     "weighted_avg": 0.50,
                 }
@@ -2174,6 +2447,15 @@ class MedicationDetectionPipeline:
                     threading.Thread(
                         target=self._log_heartbeat_to_db,
                         args=(peak, self._heartbeat_frames), daemon=True).start()
+                    # The only reliable place to notice a conversation has
+                    # ended: the recognition path stays quiet for the whole
+                    # gap by design, so it cannot tell "still talking" from
+                    # "left the room". See close_stale_conversation.
+                    if self.transcriber is not None:
+                        try:
+                            self.close_stale_conversation()
+                        except Exception as e:
+                            print(f"[Pipeline] [Audio] conversation sweep failed: {e}")
                     # Coverage floor. A motionless wearer trips no detector and
                     # no motion threshold, so without this the whole inactivity
                     # stretch has zero frames behind it and the caregiver who is
@@ -2195,6 +2477,9 @@ class MedicationDetectionPipeline:
                 if not hasattr(self, '_batch_last_analysis'):
                     self._batch_last_analysis = 0
                     self._batch_busy = False
+                    # When the last pass FINISHED. 0.0 lets the first one run at
+                    # once, so arming a window is not delayed.
+                    self._batch_done_at = 0.0
 
                 # Run batch analysis every BATCH_ANALYSIS_FRAMES (30 s at 5 FPS),
                 # which is exactly what the rolling buffer holds, so each pass
@@ -2206,7 +2491,14 @@ class MedicationDetectionPipeline:
                     and self.medicines_taken_count >= self.expected_medicine_count
                 )
                 has_active_medication = bool(self.medication_ids) and bool(self.scheduled_time)
+                # Both conditions: a full window's worth of FRAMES, and a real
+                # gap in SECONDS since the last pass ended. The frame count
+                # alone fired every few seconds on a fast stream and starved
+                # the item indexer; see BATCH_ANALYSIS_MIN_GAP_SECONDS.
+                _gap_ok = (time.time() - getattr(self, '_batch_done_at', 0.0)
+                           >= BATCH_ANALYSIS_MIN_GAP_SECONDS)
                 if (frame_count - self._batch_last_analysis >= BATCH_ANALYSIS_FRAMES
+                        and _gap_ok
                         and not self._batch_busy
                         and not all_meds_verified
                         and has_active_medication):
@@ -2227,6 +2519,19 @@ class MedicationDetectionPipeline:
                             for seq_idx, result in enumerate(results):
                                 confidence = result["final_confidence"]
                                 classification = result["classification"]
+                                evidence = result.get("_evidence_frames", [])
+                                p1_kf_id = result.get("_p1_kf_id")
+                                phases_passed = result.get("phase_details", {}).get("phases_passed", 0)
+
+                                # Will this result be recorded as an intake at
+                                # all? The branches below decide, so the
+                                # question is asked once, here, and the day's
+                                # memory frame follows the same answer.
+                                _will_log = (
+                                    phases_passed == 3
+                                    and (confidence >= self.event_policy.confirmation_threshold
+                                         or classification == "needs_confirmation"))
+
                                 # Persist a frame for the dose itself. The
                                 # three-phase evidence frames are stored
                                 # separately by _tag_detection_keyframes; this is
@@ -2234,16 +2539,22 @@ class MedicationDetectionPipeline:
                                 # and it is the single thing the old motion gate
                                 # was least likely to catch, because swallowing a
                                 # pill barely moves the camera.
-                                try:
-                                    self.extractor.capture_event(
-                                        "medication", label="Medication taken",
-                                        confidence=confidence,
-                                        extra={"classification": classification})
-                                except Exception as _e:
-                                    print(f"[Pipeline] medication capture failed: {_e}")
-                                evidence = result.get("_evidence_frames", [])
-                                p1_kf_id = result.get("_p1_kf_id")
-                                phases_passed = result.get("phase_details", {}).get("phases_passed", 0)
+                                #
+                                # Only for a dose actually being recorded. This
+                                # ran for every result, including the ones the
+                                # branches below then discarded, so the wearer's
+                                # 07:15 window wrote a frame labelled
+                                # "Medication taken" into the day's memory for an
+                                # intake that was never logged -- a frame with
+                                # nothing behind it to open.
+                                if _will_log:
+                                    try:
+                                        self.extractor.capture_event(
+                                            "medication", label="Medication taken",
+                                            confidence=confidence,
+                                            extra={"classification": classification})
+                                    except Exception as _e:
+                                        print(f"[Pipeline] medication capture failed: {_e}")
 
                                 if phases_passed == 3 and confidence >= self.event_policy.auto_verify_threshold:
                                     # When pills are held together, body-cam YOLO often
@@ -2273,7 +2584,20 @@ class MedicationDetectionPipeline:
                                     )
                                     self._tag_detection_keyframes(result, confidence, "taken", frames=evidence)
 
-                                elif phases_passed == 3 and confidence >= self.event_policy.confirmation_threshold:
+                                # The floor set in analyze_keyframes_batch --
+                                # three phases that each passed are never
+                                # "missed" -- had no effect here, because this
+                                # branch re-derived the decision from the raw
+                                # confidence and ignored the classification it
+                                # had just been handed. So the 0.684 dose was
+                                # still dropped in silence, which is the whole
+                                # thing that floor existed to prevent.
+                                #
+                                # Still only a floor: auto-verify above keeps
+                                # its own bar, so nothing is ever recorded as
+                                # taken on low confidence without the wearer
+                                # answering for it.
+                                elif _will_log:
                                     # 3-phase with moderate confidence → needs_verification
                                     # Log for ALL remaining medicines so they all appear
                                     #
@@ -2327,6 +2651,9 @@ class MedicationDetectionPipeline:
                             print('[Pipeline Batch Error] ' + traceback.format_exc())
                         finally:
                             self._batch_busy = False
+                            # The next pass waits BATCH_ANALYSIS_MIN_GAP_SECONDS
+                            # from HERE, which is the indexer's quiet period.
+                            self._batch_done_at = time.time()
 
                     threading.Thread(target=_run_batch, daemon=True).start()
 
