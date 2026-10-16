@@ -19,6 +19,62 @@ BLUR_THRESHOLD = 15.0
 # Minimum face bounding box area in pixels — reject tiny/far-away faces
 MIN_FACE_AREA = 3000
 
+# ── The quality bar a face must clear to become an identity ────────────────
+#
+# Frontality used to be advisory: it weighted the ranking and set a flag on
+# the stored event, and nothing was ever refused for it. One wearer's single
+# two-minute conversation therefore produced four separate "unknown" people
+# and one correct match, from five crops of the same friend:
+#
+#     looking down, dark          embedding agrees with the others 0.40-0.46
+#     turned to profile                                            0.33-0.45
+#     hand across the face                                         0.33-0.46
+#     looking down, motion blur                                    0.33-0.44
+#     frontal and lit             -> matched his gallery at 0.738
+#
+# ArcFace vectors of ONE person should sit far above that. These four agree
+# with each other about as well as strangers do, which is also why the
+# unknown-face de-duplicator could not collapse them: it needs 0.50 and they
+# never reach it. Bad embeddings cannot even recognise themselves.
+#
+# A face the system cannot embed reliably must therefore not be allowed to
+# create an identity. Rejecting below this bar is what turns those five events
+# into one, and it costs nothing real: the frames keep coming at several per
+# second, so a face worth recognising presents a good view within moments.
+MIN_FRONTALITY_FOR_IDENTITY = float(os.environ.get("MIN_FRONTALITY", 0.45))
+
+# ── Is this the person we are already talking to, or somebody else? ───────
+#
+# Absorbing every unrecognised face into the open conversation is what stopped
+# one friend becoming four strangers. Taken literally it has a cost: a second
+# person who has never been enrolled would be absorbed too, and two people
+# would share one transcript -- the one mistake this must never make.
+#
+# The embeddings are poor, but not uniformly poor, and on this wearer's own
+# data they separate cleanly in the direction that matters:
+#
+#     the SAME man, across his four worst crops     0.327 .. 0.460
+#     those crops against every OTHER enrolled face 0.012 .. 0.138
+#
+# Bad crops of one person stay well above bad crops of different people,
+# because ArcFace puts strangers near zero rather than merely lower. 0.25 sits
+# between the two with margin either side, and the comparison is against EVERY
+# face seen so far in this conversation, not just the first -- so a later bad
+# view only has to resemble one earlier view to be recognised as the same
+# person.
+#
+# Deliberately asymmetric: below the bar a face must ALSO be a good one before
+# it is allowed to open a second conversation. A poor crop that matches
+# nothing is far more likely to be a bad look at the same person than a new
+# arrival, and that is exactly the case that produced the four strangers.
+SAME_PERSON_IN_CONVO = float(os.environ.get("SAME_PERSON_IN_CONVO", 0.25))
+# How sure we must be that a face is WELL SEEN before it may split a
+# conversation in two. Higher than the bar for merely being recognised.
+NEW_PERSON_MIN_FRONTALITY = float(os.environ.get("NEW_PERSON_MIN_FRONTALITY", 0.70))
+# Views of the current speaker kept for that comparison. A conversation does
+# not need a hundred; the first few cover the range of how they are being seen.
+CONVO_ANCHORS = 8
+
 class FaceRecognitionPlugin(DetectorPlugin):
     action_type = ActionType.SOCIAL_INTERACTION
     model_name = "insightface_buffalo_l"
@@ -34,8 +90,37 @@ class FaceRecognitionPlugin(DetectorPlugin):
         self.similarity_threshold = similarity_threshold
         self.recent_unknowns = []
         self._ru_lock = threading.Lock()  # Protects recent_unknowns from concurrent access
-        self.conversation_timeout_seconds = 300
+        # How long a person may be out of view before the conversation is
+        # treated as over. Three minutes: long enough that turning away or
+        # stepping out of frame does not split one chat in two, short enough
+        # that two separate visits are not blended into a single transcript
+        # and a single summary, which is the worse of the two mistakes.
+        self.conversation_timeout_seconds = float(
+            os.environ.get("CONVERSATION_GAP_SECONDS", 180))
         self.last_face_seen_time = 0.0
+        self.faces_skipped_quality = 0
+        self.faces_skipped_in_convo = 0
+        # ── The conversation currently in progress ──────────────────────
+        #
+        # Identity is anchored to the CONVERSATION, not to each glimpse of a
+        # face, and this is the fix that actually works. One wearer's
+        # two-minute chat produced five rows: four strangers and one friend.
+        # The four were the same man looking down, in profile, with a hand
+        # across his face, and motion-blurred; their embeddings agreed with
+        # each other at 0.33-0.46, below the 0.50 the unknown-face
+        # de-duplicator needs, so bad vectors could not even recognise
+        # themselves and each one minted a new person.
+        #
+        # No threshold fixes that, because the vectors carry no usable signal.
+        # What is reliable is the situation: while someone is in front of the
+        # camera and a conversation is already open, an unrecognised face is
+        # overwhelmingly that same person seen badly. So it refreshes the
+        # conversation instead of inventing somebody.
+        #
+        # A face recognised as a DIFFERENT known person still opens its own
+        # conversation. Blending two people into one transcript is the worse
+        # error, and the one thing this must never do.
+        self._open_convo = None       # {"person_id", "keyframe_id", "last", "named"}
         self._social_storage = None   # see _storages(): one instance, one cleanup thread
         self._keyframe_storage = None
         
@@ -146,24 +231,60 @@ class FaceRecognitionPlugin(DetectorPlugin):
         Calculate a frontality score from 5-point facial landmarks.
         kps: (5, 2) array [left_eye, right_eye, nose, left_mouth, right_mouth]
         Returns a score from 0.0 (profile) to 1.0 (perfectly frontal).
+
+        This used to measure one thing: how far the nose sits to the LEFT or
+        RIGHT of the midpoint between the eyes. That catches a head turned to
+        profile and nothing else, which is how one wearer's conversation
+        produced four separate strangers. The four crops were a man looking
+        down, a man in profile, a man with his hand over his face, and a dark
+        motion-blurred frame -- and every one of them was recorded
+        `low_frontality: False`, because none of them was a sideways turn.
+
+        So it now also measures the face looking DOWN, which is vertical and
+        was invisible to the old test, and checks the landmarks are arranged
+        like a face at all, which is what a hand across the mouth breaks.
         """
-        if kps is None or len(kps) < 3:
-            return 1.0 # fallback if no kps
-            
+        if kps is None or len(kps) < 5:
+            return 0.0 if kps is None or len(kps) < 3 else 0.5
+
         left_eye, right_eye, nose = kps[0], kps[1], kps[2]
-        
+        left_mouth, right_mouth = kps[3], kps[4]
+
         # Interocular distance
         eye_dist = np.linalg.norm(left_eye - right_eye)
         if eye_dist < 1e-6:
             return 0.0
-            
+
         eye_midpoint = (left_eye + right_eye) / 2.0
-        nose_offset = abs(nose[0] - eye_midpoint[0])
-        
-        asymmetry_ratio = nose_offset / eye_dist
-        # Score drops to 0 if asymmetry >= 0.5
-        score = max(0.0, 1.0 - (asymmetry_ratio * 2.0))
-        return float(score)
+        mouth_midpoint = (left_mouth + right_mouth) / 2.0
+
+        # ── Turned left or right: the nose leaves the centre line ──
+        yaw_ratio = abs(nose[0] - eye_midpoint[0]) / eye_dist
+        yaw = max(0.0, 1.0 - (yaw_ratio * 2.0))
+
+        # ── Looking down or up: the face foreshortens vertically ──
+        #
+        # Eyes to mouth is about 1.1x the interocular distance on a face
+        # looking at you, and it collapses as the chin drops towards the
+        # chest. Below about 0.6 the camera is seeing a forehead.
+        vertical = float(np.linalg.norm(mouth_midpoint - eye_midpoint)) / eye_dist
+        pitch = float(np.clip((vertical - 0.55) / 0.45, 0.0, 1.0))
+
+        # ── Still shaped like a face? ──
+        #
+        # A hand over the mouth or across the chin leaves the detector
+        # guessing at the lower landmarks, and they come back bunched or
+        # crossed over. Neither a negative mouth width nor a mouth narrower
+        # than a fifth of the eye spacing happens on a face in the open.
+        mouth_width = float(np.linalg.norm(right_mouth - left_mouth)) / eye_dist
+        plausible = 1.0 if 0.2 <= mouth_width <= 1.6 else 0.0
+        # The nose should sit BETWEEN the eyes and the mouth, not outside them.
+        if not (min(eye_midpoint[1], mouth_midpoint[1]) - 0.2 * eye_dist
+                <= nose[1]
+                <= max(eye_midpoint[1], mouth_midpoint[1]) + 0.2 * eye_dist):
+            plausible = 0.0
+
+        return float(min(yaw, pitch) * plausible)
 
     @staticmethod
     def _laplacian_variance(img: np.ndarray) -> float:
@@ -208,6 +329,14 @@ class FaceRecognitionPlugin(DetectorPlugin):
                         continue
                         
                     frontality = self._calculate_frontality(f.kps)
+                    # Refused, not merely noted. An embedding taken from a
+                    # face this poor does not reliably match the person it
+                    # belongs to, nor even the next bad crop of the same
+                    # person, so letting it through manufactures strangers.
+                    # See MIN_FRONTALITY_FOR_IDENTITY.
+                    if frontality < MIN_FRONTALITY_FOR_IDENTITY:
+                        self.faces_skipped_quality += 1
+                        continue
                     score = area * f.det_score * frontality
                     
                     # Crop face with 20% padding
@@ -240,6 +369,13 @@ class FaceRecognitionPlugin(DetectorPlugin):
                             matched_cluster["best_frame"] = frame_meta
                             matched_cluster["cropped_face"] = cropped_face
                             matched_cluster["frontality"] = frontality
+                            # The EMBEDDING too. Every other field moved to the
+                            # better face and this one did not, so identity was
+                            # decided on whichever face happened to arrive
+                            # first while the picture saved beside it was the
+                            # best one -- a recognisable crop filed under a
+                            # vector taken from a glance at the floor.
+                            matched_cluster["embedding"] = emb
                     else:
                         clusters.append({
                             "embedding": emb,
@@ -272,18 +408,41 @@ class FaceRecognitionPlugin(DetectorPlugin):
             cropped_face = cluster["cropped_face"]
             
             match = self._match_face(embedding, context.user_id)
+
+            # ── Is a conversation already in progress? ──────────────────
+            with self._ru_lock:
+                convo = self._open_convo
+                if convo and (now - convo["last"]) >= self.conversation_timeout_seconds:
+                    convo = self._open_convo = None      # they left; it is over
+                if convo:
+                    convo["last"] = now
+
             if match:
                 # Deduplicate known faces to prevent event spam
                 person_id = str(match['_id'])
                 with self._ru_lock:
                     if not hasattr(self, 'recent_knowns'):
                         self.recent_knowns = {}
-                        
+
                     last_seen = self.recent_knowns.get(person_id, 0)
                     is_recent = (now - last_seen) < self.conversation_timeout_seconds
                     self.recent_knowns[person_id] = now
-                    
-                if is_recent:
+                    # Putting a name to the conversation already running is
+                    # news worth recording -- it is how an unknown face
+                    # becomes "Hammad" partway through -- but it is the SAME
+                    # conversation, so it updates that row rather than
+                    # starting a second one beside it.
+                    naming = bool(convo and not convo.get("named"))
+                    if naming:
+                        convo["named"] = True
+                        convo["person_id"] = person_id
+                    if convo is not None:
+                        _a = convo.get("anchors") or []
+                        if len(_a) < CONVO_ANCHORS:
+                            _a.append(embedding)
+                            convo["anchors"] = _a
+
+                if is_recent and not naming:
                     # We've seen this person recently. Don't emit another SOCIAL_INTERACTION event.
                     continue
                 
@@ -319,20 +478,58 @@ class FaceRecognitionPlugin(DetectorPlugin):
                     print(f"[{self.model_name}] Error saving face crop: {traceback.format_exc()}")
                     face_keyframe_id = best_frame.get("id", face_keyframe_id)
 
+                attrs = {
+                    "person_id": str(match['_id']),
+                    "person_name": match.get('person_name', 'Unknown'),
+                    "relationship_type": match.get('relationship_type', 'Unknown'),
+                    "status": "social_interaction",
+                    "low_frontality": cluster.get("frontality", 1.0) < 0.3,
+                }
+                with self._ru_lock:
+                    if naming and self._open_convo:
+                        # The same conversation, now with a name on it. The
+                        # row it already has is the one to change.
+                        attrs["renames_keyframe_id"] = self._open_convo["keyframe_id"]
+                    else:
+                        self._open_convo = {"person_id": str(match['_id']),
+                                            "keyframe_id": face_keyframe_id,
+                                            "last": now, "named": True,
+                                            "anchors": [embedding]}
+
                 return DetectionResult(
                     action_type=self.action_type,
                     confidence=match['match_confidence'],
                     evidence_keyframe_ids=[face_keyframe_id],
-                    attributes={
-                        "person_id": str(match['_id']),
-                        "person_name": match.get('person_name', 'Unknown'),
-                        "relationship_type": match.get('relationship_type', 'Unknown'),
-                        "status": "social_interaction",
-                        "low_frontality": cluster.get("frontality", 1.0) < 0.3
-                    },
+                    attributes=attrs,
                     model=ModelReference(self.model_name, "v1")
                 )
             else:
+                # A conversation is already running and this face is not
+                # anybody we know. It is the person already in front of the
+                # camera, seen badly -- see _open_convo. Refusing to mint a
+                # stranger here is what turns five rows into one.
+                if convo is not None:
+                    anchors = convo.get("anchors") or []
+                    seen_before = max((self._cosine_similarity(embedding, a)
+                                       for a in anchors), default=0.0)
+                    well_seen = cluster.get("frontality", 0.0) >= NEW_PERSON_MIN_FRONTALITY
+                    if seen_before >= SAME_PERSON_IN_CONVO or not well_seen:
+                        # The person already in front of the camera, seen
+                        # again -- possibly badly. Keep the conversation
+                        # whole instead of inventing somebody.
+                        self.faces_skipped_in_convo += 1
+                        with self._ru_lock:
+                            if self._open_convo is convo and len(anchors) < CONVO_ANCHORS:
+                                anchors.append(embedding)
+                                convo["anchors"] = anchors
+                        continue
+                    # Clearly a different face, and clearly enough seen to
+                    # say so. Somebody else has joined, and they get their
+                    # own conversation rather than sharing this transcript.
+                    print(f"[{self.model_name}] a second person has appeared "
+                          f"(best match to the current conversation "
+                          f"{seen_before:.2f}); starting a separate one")
+
                 # Unknown face - Deduplicate (thread-safe)
                 with self._ru_lock:
                     is_recent = False
@@ -390,6 +587,12 @@ class FaceRecognitionPlugin(DetectorPlugin):
                     except Exception as e:
                         import traceback
                         print(f"[{self.model_name}] Error saving face crop: {traceback.format_exc()}")
+
+                    with self._ru_lock:
+                        self._open_convo = {"person_id": None,
+                                            "keyframe_id": face_keyframe_id,
+                                            "last": now, "named": False,
+                                            "anchors": [embedding]}
 
                     return DetectionResult(
                         action_type=ActionType.UNKNOWN_FACE,
