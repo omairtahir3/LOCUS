@@ -277,6 +277,14 @@ class ApiService {
   static Future<void> _saveSession(String token, Map<String, dynamic> user) async {
     _token = token;
     _user = user;
+    // A new session means a new identity. The live socket was built with the
+    // previous token and the server pinned socket.user to it at connect, so
+    // leaving it up gives one app two identities: HTTP as the new person,
+    // socket as the old one. That is what refused a call for somebody who was
+    // not making it. Dropped here, in the one place a session is established,
+    // rather than depending on which screen is built first afterwards.
+    SocketService().reset();
+    SelectedUserService().clear();
     await _prefs.setString('locus_token', token);
     await _prefs.setString('locus_user', jsonEncode(user));
   }

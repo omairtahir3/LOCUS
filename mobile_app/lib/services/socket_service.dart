@@ -101,7 +101,12 @@ class SocketService {
   }
 
   void connect() {
-    if (socket == null) init();
+    // Always through init(), never only when the socket is missing. A socket
+    // belonging to the PREVIOUS account is not null, so the old test skipped
+    // the rebuild and reopened the connection under the wrong identity --
+    // which is how a call came to be refused for someone who was not making
+    // it. init() is idempotent and compares the token itself.
+    init();
     socket?.connect();
   }
 
