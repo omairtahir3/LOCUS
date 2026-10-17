@@ -184,15 +184,21 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     );
   }
 
-  /// Whose day this is. Hidden when there is only one person to look at --
-  /// a dropdown with a single entry is furniture, not a control.
+  /// Whose day this is.
+  ///
+  /// Shown for one person as well as for several. It was hidden below two on
+  /// the reasoning that a single-entry dropdown is furniture -- but the
+  /// question it answers is "whose day am I reading", and that needs answering
+  /// with one person in your care just as much as with five. With one it reads
+  /// as a label; with more it opens.
   Widget _personBar() {
     return AnimatedBuilder(
       animation: SelectedUserService(),
       builder: (context, _) {
         final service = SelectedUserService();
         final people = service.monitoringUsers;
-        if (people.length < 2) return const SizedBox.shrink();
+        if (people.isEmpty) return const SizedBox.shrink();
+        final single = people.length == 1;
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Container(
@@ -210,7 +216,17 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                 // Expanded, so a long name cannot push the arrow off a narrow
                 // screen once the system font size is turned up.
                 Expanded(
-                  child: DropdownButtonHideUnderline(
+                  child: single
+                      // Nothing to choose between, so it states the name
+                      // rather than offering a menu that cannot change.
+                      ? Text(
+                          people.first['name']?.toString() ?? 'Unknown',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 14),
+                        )
+                      : DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       isExpanded: true,
                       value: service.selectedUser?['_id'] as String?,
@@ -241,6 +257,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     );
   }
 
+
   Widget _dateBar() {
     return Row(
       children: [
@@ -265,9 +282,17 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                 children: [
                   const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.textMuted),
                   const SizedBox(width: 8),
-                  Text(
-                    _isToday ? 'Today' : DateFormat('EEEE d MMMM').format(_date),
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  // Flexible, because this is the longest thing on the row and
+                  // the two buttons beside it will not yield. "Wednesday 15
+                  // October" barely fits a 360dp screen at this weight, and
+                  // does not fit at all once the system font size is raised.
+                  Flexible(
+                    child: Text(
+                      _isToday ? 'Today' : DateFormat('EEEE d MMMM').format(_date),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
                   ),
                 ],
               ),
