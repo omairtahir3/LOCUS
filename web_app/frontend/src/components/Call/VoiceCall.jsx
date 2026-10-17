@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, AlertTriangle } from 'lucide-react';
 
 /**
@@ -24,10 +25,28 @@ const LABEL = {
 
 export default function VoiceCall({ call }) {
   const { state, peer, error, muted, answer, decline, hangUp, toggleMute, reset } = call;
-  if (state === 'idle') return null;
+
+  // A call that simply finished needs no announcement. This used to leave a
+  // card reading "Unknown - Call ended" with a Close button: the name is empty
+  // because the peer is cleared when the call ends, and nobody needs telling
+  // that the call they just hung up has ended.
+  //
+  // A FAILURE still speaks, because then something went wrong and the person
+  // is owed the reason.
+  const finished =
+    state === 'ended' || state === 'declined' || state === 'busy' ||
+    (state === 'failed' && !error);
+
+  // In an effect, not during render: setting state while rendering is what
+  // React warns about and does not reliably apply.
+  useEffect(() => {
+    if (finished) reset();
+  }, [finished, reset]);
+
+  if (state === 'idle' || finished) return null;
 
   const live = state === 'calling' || state === 'connecting' || state === 'connected';
-  const over = state === 'ended' || state === 'declined' || state === 'failed' || state === 'busy';
+  const over = state === 'failed' || state === 'busy';
   const sos = !!peer?.sos;
 
   const btn = (bg) => ({

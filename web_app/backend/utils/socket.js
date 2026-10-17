@@ -132,7 +132,38 @@ module.exports = {
             if (!(await canSpeakTo(socket.user, to))) {
               // Not linked. Nothing is relayed and the caller is told, rather
               // than left listening to a ring that will never be answered.
+              //
+              // Logged with both identities, because this message is also what
+              // a STALE socket produces: socket.user is fixed at connect from
+              // the token the socket was opened with, so after a change of
+              // account the server can be judging the previous user's links
+              // while the app asks on behalf of the new one. Printing who the
+              // server thinks is calling is the difference between diagnosing
+              // that in one attempt and guessing at it.
+              const them = await User.findById(to)
+                .select('name role monitoring_users').lean().catch(() => null);
+              console.warn(
+                `[Socket] call refused: server believes the caller is ` +
+                `${socket.user.name} (${socket.user._id}, role=${socket.user.role}); ` +
+                `they asked for ${them ? them.name : 'an unknown account'} (${to}). ` +
+                `caller.caregiver_ids=[${(socket.user.caregiver_ids || []).join(', ')}] ` +
+                `callee.monitoring_users=[${(them?.monitoring_users || []).join(', ')}]`
+              );
               return socket.emit('call:ended', { from: to, reason: 'not_permitted' });
+            }
+            // Who is in the room decides whether this arrives at all. A relay
+            // with nobody listening is silent on both ends -- the caller rings
+            // into nothing and the callee never knows -- so the size of the
+            // room is logged with the offer. 0 means the recipient has no live
+            // connection: signed out, tab closed, or a socket that failed its
+            // handshake and never joined.
+            if (event === 'call:offer') {
+              const room = io.sockets.adapter.rooms.get(to);
+              console.log(
+                `[Socket] call:offer from ${socket.user.name} `
+                + `(${socket.user._id}) -> ${to}; `
+                + `sockets listening in that room: ${room ? room.size : 0}`
+              );
             }
             io.to(to).emit(outEvent, { from: String(socket.user._id), ...build(data, socket) });
           } catch (err) {

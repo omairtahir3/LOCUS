@@ -49,7 +49,12 @@ class VoiceCallService extends ChangeNotifier {
   bool peerIsSos = false;
   bool muted = false;
   String? error;
-  bool _wired = false;
+  /// The socket these listeners are attached to, not merely whether they were
+  /// ever attached. A one-shot flag was enough while the socket lived for the
+  /// life of the app; now that signing in as somebody else rebuilds it, a flag
+  /// would leave the listeners on the dead socket and incoming calls would
+  /// stop arriving with nothing to show for it.
+  dynamic _wiredTo;
 
   bool get inCall =>
       state == CallState.calling ||
@@ -66,10 +71,10 @@ class VoiceCallService extends ChangeNotifier {
 
   /// Starts listening for calls. Safe to call repeatedly.
   void init() {
-    if (_wired) return;
     final socket = SocketService().socket;
     if (socket == null) return;
-    _wired = true;
+    if (identical(_wiredTo, socket)) return;
+    _wiredTo = socket;
 
     socket.on('call:incoming', (data) async {
       final d = Map<String, dynamic>.from(data as Map);
@@ -198,8 +203,33 @@ class VoiceCallService extends ChangeNotifier {
 
   /// Ring someone. [sos] marks a call raised from an active emergency.
   Future<void> call(String otherId, String otherName, {bool sos = false}) async {
-    final socket = SocketService().socket;
-    if (socket == null || inCall) return;
+    if (inCall) {
+      // Not a failure, so the state is left alone -- but saying nothing makes
+      // a second press look like a dead button.
+      error = 'Already in a call with ${peerName ?? 'someone'}.';
+      notifyListeners();
+      return;
+    }
+    // No socket means the signalling channel is down, which is recoverable:
+    // connect() builds and opens one. Giving up here is what made the button
+    // look dead during an emergency.
+    var socket = SocketService().socket;
+    if (socket == null) {
+      SocketService().connect();
+      socket = SocketService().socket;
+    }
+    if (socket == null) {
+      error = 'Not connected to LOCUS, so the call cannot be placed. '
+              'Check the connection and try again.';
+      _set(CallState.failed);
+      return;
+    }
+    if (!socket.connected) {
+      // Created but not yet open. socket.io queues an emit and delivers it on
+      // connect, so the offer is not lost -- but the wearer should know why
+      // the ringing is slow to start rather than watching a silent screen.
+      SocketService().connect();
+    }
     init();
     error = null;
     peerId = otherId;
@@ -308,21 +338,49 @@ class VoiceCallService extends ChangeNotifier {
     return s;
   }
 
+  /// Release the call's native resources. Safe to call twice.
+  ///
+  /// This used to free them without awaiting and null the fields afterwards,
+  /// so a second call -- hang up, then the peer's own 'call:ended', which is
+  /// the ordinary sequence -- could reach objects already being freed. A
+  /// double free in native code is not something Flutter can catch: the
+  /// process dies and Android relaunches, which is what the wearer saw as the
+  /// app restarting when they hung up.
+  ///
+  /// Taking the references and nulling the fields FIRST is what makes a second
+  /// call harmless; there is simply nothing left for it to free.
   void _teardown() {
-    // Order matters: tracks are stopped before the stream is disposed, or the
-    // microphone stays open and Android keeps showing the in-use indicator.
+    final pc = _pc;
     final stream = _localStream;
-    if (stream != null) {
-      for (final t in stream.getTracks()) {
-        t.stop();
-      }
-      stream.dispose();
-      _localStream = null;
-    }
-    _pc?.close();
     _pc = null;
+    _localStream = null;
     _pendingIce.clear();
     muted = false;
+
+    // Deliberately not awaited: callers are UI handlers and socket events, and
+    // nothing they do next depends on the native side being finished. Each
+    // step guards itself so one failure cannot abandon the others -- in
+    // particular, a failed close must never leave the microphone open.
+    () async {
+      try {
+        await pc?.close();
+      } catch (_) {
+        // Already closed, or closing. Either way there is nothing to do.
+      }
+      if (stream != null) {
+        // The peer connection is closed first, because that detaches the
+        // sender holding this track; stopping it before that is what left
+        // Android showing the microphone-in-use indicator after a call.
+        for (final t in stream.getTracks()) {
+          try {
+            await t.stop();
+          } catch (_) {}
+        }
+        try {
+          await stream.dispose();
+        } catch (_) {}
+      }
+    }();
   }
 
   @override
