@@ -13,7 +13,10 @@ Summary, Memory Search, Medication Management, Caregiver Dashboard and User
 Dashboard). Supporting Module B (Routine Learning) builds per-user profiles but
 does not yet assert expectations from them, and is therefore excluded from this
 chapter. Also excluded are the outdoor item-tracking paths, which exist in code
-but have never been exercised against outdoor footage.
+but have never been exercised against outdoor footage, and the egocentric
+activity-recognition plugin, which is present but deliberately disabled
+(`plugins/registry.py`). Where a component exists in the repository without
+running in the deployed system, it is named as such rather than counted.
 
 ---
 
@@ -105,7 +108,91 @@ frames are written to per-user, per-date directories under five separate stores
 (`keyframe_storage`, `items_storage`, `activities_storage`, `social_storage`,
 `medications_storage`), each swept on a 36-hour TTL.
 
-**Step 7 — Deployment as it currently stands.**
+**Step 7 — Belonging and room identification.**
+The same object detections feed two further pipelines. Belongings are identified
+by the two-stage scheme set out in Algorithm 4.3: MobileNetV3-Small shortlists a
+crop against each enrolled item's gallery, and DINOv2 must independently agree
+before an identification is accepted. Rooms are classified from the object
+vocabulary — a defining object (bed, fridge, couch, toilet, dining table) above a
+confidence floor, corroborated by the room's other objects and a margin over the
+runner-up. A belonging's position is recorded so that a later sighting elsewhere
+is reported as a move rather than as a new object.
+
+**Step 8 — Face recognition and relationship matching.**
+Retained frames are also checked for faces, so that somebody the wearer knows is
+recorded as that person rather than as an anonymous detection. InsightFace
+(`buffalo_l`) supplies detection and a 512-dimensional recognition embedding,
+compared by cosine similarity against the galleries of enrolled relationships. A
+match is accepted at **0.65** or above; below it the sighting is written as
+`unknown_face` and surfaced for the wearer to confirm or dismiss, because a
+wrong name attached to a face is a worse failure than no name at all. **No face
+is ever enrolled automatically** — a relationship is created only through the
+explicit confirm route.
+
+Two quality gates run before matching, both to stop a crop that cannot carry an
+identity from becoming one: a Laplacian blur floor of 15.0 and a minimum face
+area of 3000 px². Face crops are written to `social_storage` under the same TTL
+as other evidence, except that a crop serving as a confirmed relationship's
+portrait is exempt.
+
+**Step 9 — Audio capture and transcription.**
+A microphone feeds a 30-second ring buffer held in memory. Audio is never
+written to disk; only text reaches the database. Transcription is performed
+on-device by faster-whisper (`base` model, int8, 10-second windows), and a
+transcript is produced **only once a face has been recognised** — no face, no
+transcript, by construction rather than by policy. The resulting transcript id
+is carried on the event record so a social interaction can be read back with
+what was said. The same Privacy Mode that governs the camera governs the
+microphone, and a blurred frame means a refused transcript.
+
+**Step 10 — Activity and room sessions.**
+Activity entries in the feed are produced by `_observe_scene` in the item
+indexer, which collapses a stream of per-frame room classifications into
+time-bounded sessions ("Time in the bedroom for 1 min"). A session is written
+when the wearer *leaves* a room, not while they are in it, because the sentence
+worth recording is "you were in the kitchen for twelve minutes" and that cannot
+be written until the visit ends. Each closed session files its best surviving
+frame as its own evidence.
+
+An egocentric activity-recognition plugin also exists in the repository but is
+deliberately disabled (`plugins/registry.py`, `enabled=False`): it loaded a
+second, larger detector per batch into two output paths that were already off,
+and its per-frame activity claims were found to hallucinate. It is therefore not
+part of the implemented system and is not evaluated here.
+
+**Step 11 — Location, emergency response and escalation.**
+The mobile app streams position updates from a `Geolocator` position stream to
+`POST /api/location`, which stores them and emits a live update to the caregiver
+over Socket.IO. A location older than thirty minutes is refused rather than
+attached to an event, so a stale fix cannot be presented as a current one.
+
+An emergency can be raised two ways: the panic control, or a spoken phrase. The
+spoken path listens only while the home screen is in front of the wearer and
+only when they have switched it on, and inserts a five-second cancellable pause
+before alerting anyone, since a phrase can be overheard from a conversation or a
+television. Either route posts to `POST /api/users/me/emergency`, which fans the
+alert out to every linked caregiver over Socket.IO before any notification text
+is composed — a caregiver waiting on a language model must never delay the alert
+to the next one. The caregiver is taken to a screen scoped to that one person,
+carrying their live position, a voice call, a message channel, driving
+directions and a resolve action. Voice is peer-to-peer WebRTC; the server only
+introduces the two ends and relays no media. Escalation runs on a timer: an
+unacknowledged item-loss finding is re-sent to caregivers with the GPS fix, the
+keyframe and the timestamp, and failed deliveries are retried by a sweep that
+runs last in each scheduler tick.
+
+**Step 12 — Memory search.**
+The wearer can ask a question in their own words, typed or spoken. `POST
+/api/eventlogs/ask` passes the question and the matching event records to
+`memoryAgent.js`, which answers in a sentence and falls back to a deterministic
+template whenever the model oversteps what the records support — naming a place
+not in the data, writing "you" about a third party, or offering a photograph
+that is past retention. `GET /api/eventlogs/memory-search` serves the filtered
+view, narrowing by type, date, person or item. Speech is handled by the
+browser's own `SpeechRecognition` on the dashboard and by `speech_to_text` in
+the app; no speech SDK is used on either.
+
+**Step 13 — Deployment as it currently stands.**
 The AI backend is FastAPI (Uvicorn) on port 8000, running as a standalone
 service on a desktop machine — it is *not* embedded in the mobile app. The
 application backend is Node.js/Express on port 5000 with MongoDB, and the React
@@ -215,7 +302,29 @@ procedure IdentifyBelonging(box, crop, enrolled_items)
 end procedure
 ```
 
-#### Algorithm 4.4 — Evidence retention with TTL
+#### Algorithm 4.4 — Face detection and relationship matching
+
+```
+procedure MatchFaces(frame, enrolled_relationships)
+    faces <- InsightFace.detect(frame)                  // buffalo_l
+    results <- []
+    for face in faces do
+        if blur_score(face) < 15.0 then continue end if      // too soft to identify
+        if area(face) < 3000 then continue end if            // too small to identify
+        embedding <- InsightFace.embed(face)                 // 512-D
+        best <- argmax over person of cosine(embedding, person.gallery)
+        if best.similarity >= 0.65 then
+            results.append({person: best, confidence: best.similarity})
+        else
+            results.append({status: "unknown_face", confidence: best.similarity})
+            // surfaced for the wearer to confirm or dismiss; never auto-enrolled
+        end if
+    end for
+    return results
+end procedure
+```
+
+#### Algorithm 4.5 — Evidence retention with TTL
 
 ```
 procedure CleanupExpired(store, ttl_hours = 36)      // every 30 minutes, per store
@@ -232,7 +341,7 @@ procedure CleanupExpired(store, ttl_hours = 36)      // every 30 minutes, per st
 end procedure
 ```
 
-#### Algorithm 4.5 — Medication scheduling with missed-dose backfill
+#### Algorithm 4.6 — Medication scheduling with missed-dose backfill
 
 ```
 procedure SchedulerLoop()                              // every 60 seconds
@@ -309,7 +418,22 @@ box — seven thousandths apart. The system claims neither unless box aspect rat
 separates them, on the reasoning that a missed sighting is a gap in the record
 while a confident wrong one sends somebody to the wrong room.
 
-### 4.2.3 Room classification
+### 4.2.3 Face recognition
+
+No precision/recall evaluation against a labelled set has been carried out for
+this module, and none is claimed here. One failure mode was measured and acted
+on, and is reported for that reason.
+
+Frontality was originally advisory: it weighted the ranking and set a flag, and
+nothing was refused for it. A single two-minute conversation consequently
+produced **four separate "unknown" people and one correct match from five crops
+of the same friend** — looking down in poor light, turned to profile, and with a
+hand across the face. Those embeddings agree with one another at only **0.33 to
+0.46**, which is no better than two different people would score. A crop that
+cannot carry an identity is now refused before it can become one, rather than
+ranked low and stored anyway.
+
+### 4.2.4 Room classification
 
 Evaluated over all 86 stored frames:
 
@@ -326,7 +450,7 @@ objects, a score floor and a margin over the runner-up. Rooms the wearer asked t
 be treated as sensitive are held to 0.80 rather than 0.55, because recognising
 them causes frames to be destroyed.
 
-### 4.2.4 Medication detection
+### 4.2.5 Medication detection
 
 Validated by replaying 60 recorded frames of a real dose through the detection
 loop: the sequence resolves to Phase 1 at frame 49, Phase 2 at 51, Phase 3 at 54,
