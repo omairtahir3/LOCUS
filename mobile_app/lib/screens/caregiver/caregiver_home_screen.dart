@@ -3,8 +3,7 @@ import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/voice_call_service.dart';
-import 'location_map_screen.dart';
-import '../chat/chat_screen.dart';
+import 'sos_screen.dart';
 
 class CaregiverHomeScreen extends StatefulWidget {
   const CaregiverHomeScreen({super.key});
@@ -18,6 +17,14 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   Map<String, dynamic> _summaries = {};
   List<dynamic> _notifications = [];
   bool _loading = true;
+
+  /// Unresolved emergencies, keyed by the id of the person who raised one.
+  /// A map rather than a single field because a caregiver may look after more
+  /// than one person, and two at once is precisely when nothing may be lost.
+  final Map<String, Map<String, dynamic>> _activeSos = {};
+  /// Whose SosScreen is already open, so a repeated alert for the same person
+  /// refreshes rather than stacking another copy of the same screen.
+  String? _sosOnScreen;
 
   @override
   void initState() {
@@ -36,49 +43,44 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   }
 
   void _handleSosAlert(Map<String, dynamic> data) {
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.danger,
-          title: const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.white, size: 36),
-              SizedBox(width: 10),
-              Text('EMERGENCY SOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: Text('${data['user_name']} has triggered an SOS! Immediate assistance required.', style: const TextStyle(color: Colors.white)),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                // Push to location map
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
-                // Push to Chat Screen
-                Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(
-                  recipientId: data['user_id'],
-                  recipientName: data['user_name'],
-                  isEmergency: true,
-                )));
-              },
-              child: const Text('VIEW LOCATION & CHAT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-              },
-              child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
-            )
-          ],
-        )
-      );
-    }
+    if (!mounted) return;
+    final id = data['user_id']?.toString();
+    if (id == null) return;
+    setState(() => _activeSos[id] = data);
+    // Straight to that person's screen. A dialog asking whether to look is a
+    // question with one answer, and it costs seconds that belong to them.
+    _openSos(data);
+  }
+
+  Future<void> _openSos(Map<String, dynamic> data) async {
+    final id = data['user_id'].toString();
+    if (_sosOnScreen == id) return;
+    _sosOnScreen = id;
+    DateTime? raised;
+    final ts = data['timestamp'];
+    if (ts is String) raised = DateTime.tryParse(ts)?.toLocal();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SosScreen(
+          userId: id,
+          userName: data['user_name']?.toString() ?? 'Someone you care for',
+          initialLocation: (data['location'] as Map?)?.cast<String, dynamic>(),
+          raisedAt: raised,
+        ),
+      ),
+    );
+    _sosOnScreen = null;
+    // Coming back from the screen does not end the emergency; only a
+    // resolution does. The strip below keeps it in front of them.
+    if (mounted) setState(() {});
   }
 
   void _handleSosResolved(Map<String, dynamic> data) {
+    final id = (data['user_id'] ?? data['userId'])?.toString();
+    if (id != null) _activeSos.remove(id);
     if (mounted) {
+      setState(() {});
       final resolver = data['resolved_by'] == 'user' ? 'the user themselves' : data['resolver_name'] ?? 'a caregiver';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -171,6 +173,48 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     }
   }
 
+  Widget _sosStrip(Map<String, dynamic> data) {
+    final name = data['user_name']?.toString() ?? 'Someone you care for';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openSos(data),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Colors.white, size: 28),
+                const SizedBox(width: 12),
+                // Expanded, so a long name with enlarged system text wraps
+                // instead of pushing the chevron off the screen.
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$name needs help',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16)),
+                      const Text('Tap to open their emergency',
+                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userName = ApiService.user?['name']?.toString().split(' ').first ?? 'Caregiver';
@@ -193,6 +237,10 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Unresolved emergencies first, always. Anything below this can
+            // wait; these cannot, and one raised while the caregiver was
+            // reading another would otherwise be invisible.
+            ..._activeSos.values.map(_sosStrip),
             Text('Hi, $userName! 👋', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
             const SizedBox(height: 4),
             Text('Your care network is active.', style: TextStyle(color: AppColors.textSecondary, fontSize: 15)),
