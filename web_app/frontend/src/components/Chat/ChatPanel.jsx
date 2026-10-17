@@ -38,7 +38,29 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
     const handleNewMessage = (msg) => {
       // Cast both to strings to ensure Mongoose ObjectIds match properly
       if (String(msg.sender_id) === String(activeRecipientId) || String(msg.recipient_id) === String(activeRecipientId)) {
-        setMessages((prev) => [...prev, msg]);
+        setMessages((prev) => {
+          // Already have it? The server echoes a message back to whoever sent
+          // it, so a real row can arrive for a bubble that is already on
+          // screen. Matching on id covers a repeated echo.
+          if (msg._id && prev.some((m) => String(m._id) === String(msg._id))) {
+            return prev;
+          }
+          // The optimistic copy this echo belongs to, if any. It was added on
+          // Send with a timestamp for an _id, which is what distinguishes it
+          // from a row that came back from the database.
+          const placeholder = prev.findIndex(
+            (m) =>
+              m.optimistic &&
+              String(m.sender_id) === String(msg.sender_id) &&
+              m.text === msg.text
+          );
+          if (placeholder === -1) return [...prev, msg];
+          const next = [...prev];
+          // Replaced rather than kept: the real row carries the database id and
+          // the server's timestamp, and the placeholder has neither.
+          next[placeholder] = msg;
+          return next;
+        });
       }
     };
     socket.on('chat_message', handleNewMessage);
@@ -58,6 +80,9 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
     // Optimistic UI update so the sender sees their message instantly
     const optimisticMsg = {
       _id: Date.now().toString(),
+      // Marks this as the local placeholder, so the server's echo can find and
+      // replace it instead of appearing beside it.
+      optimistic: true,
       sender_id: user._id,
       recipient_id: activeRecipientId,
       text: inputText.trim(),
