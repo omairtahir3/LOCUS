@@ -512,7 +512,6 @@ Versions are those installed and running.
 | Flutter / Dart | 3.35.3 / 3.9.2 | Mobile application |
 | MediaMTX | — | RTMP ingest, RTSP republish, per-user stream paths |
 | Google Maps (Android SDK, JS API) | — | Maps in the app and dashboard; navigation home is handed to the Maps app |
-```
 
 ---
 
