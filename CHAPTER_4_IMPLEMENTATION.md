@@ -513,3 +513,45 @@ Versions are those installed and running.
 | MediaMTX | — | RTMP ingest, RTSP republish, per-user stream paths |
 | Google Maps (Android SDK, JS API) | — | Maps in the app and dashboard; navigation home is handed to the Maps app |
 ```
+
+---
+
+## 4.5 Deployment
+
+### 4.5.1 What currently runs
+
+All three services run on one development machine on a local network. Nothing is
+hosted, and the table below is a description of that machine rather than of a
+deployment target.
+
+| Component | Where it runs | Configuration |
+|---|---|---|
+| Python AI backend | Desktop, `localhost:8000` | Python 3.11.0, FastAPI 0.136.1 under Uvicorn with `--reload`; ONNX Runtime 1.24.2 capped at `cpu_count - 1` threads; OpenCV 4.13.0; MediaPipe 0.10.14; PyMongo 4.7.2 |
+| Node.js API backend | Desktop, `localhost:5000` | Node v22.22.3, Express 4.19.2, Mongoose 8.4.0, Socket.IO 4.8.3; started directly, with no process manager or reverse proxy |
+| MongoDB | Desktop, `mongodb://127.0.0.1:27017/locusDB` | Local `mongod`, single instance, no replica set, no encryption at rest, no Change Streams |
+| React dashboard | Desktop, Vite dev server on `localhost:5173` | React 19.2.0, Socket.IO client 4.8.3, `@react-google-maps/api` 2.20.8 |
+| Flutter app | Android handset (Galaxy A06, 720×1600) | Flutter 3.35.3 / Dart SDK ^3.9.2, debug build signed with the debug keystore; discovers the backend's address on the local network rather than using a hardcoded endpoint |
+| Camera ingest | MediaMTX on the desktop | GoPro publishes RTMP; republished as RTSP at `rtsp://<host>:8554/live/<user_id>` |
+| Push notifications | Firebase Cloud Messaging v1 | `firebase-admin` 14.1.0 server-side; per-device token stored on the user record. Verified delivering to a handset |
+| Evidence storage | Desktop file system | Five stores under `ai_backend/keyframe_backend/`, each `<store>/<user_id>/<date>/`. 36-hour TTL, swept every 30 minutes. **The handset holds no evidence** |
+| Version control | GitHub, **public** repository | Feature branch `locus-feature-omair`, fast-forwarded into `main` |
+
+### 4.5.2 What deployment would still require
+
+Stated so that the gap between this build and a deployable one is explicit:
+
+- **A host.** There is no PM2 configuration, Dockerfile, compose file, Nginx
+  configuration or Procfile anywhere in the repository.
+- **TLS.** All traffic is plain HTTP on the LAN; certificates and termination
+  are not configured.
+- **A hosted database.** The schemas are hosting-agnostic and a single
+  `MONGODB_URI` switches every writer at once, but no managed instance exists
+  and no encryption at rest is in force.
+- **A release signing key.** The Android release build is currently signed with
+  the debug keystore, so the Play Store SHA-1 would have to be added to the API
+  key restrictions before a published build could register for push.
+- **Repository visibility.** The repository is public. Nothing secret is
+  committed — `.env` files and the service-account key are excluded — but the
+  client API keys that necessarily ship in the app bundle are readable, which is
+  why they are restricted by package name and signing fingerprint rather than
+  kept hidden.
