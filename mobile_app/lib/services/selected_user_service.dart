@@ -21,6 +21,11 @@ class SelectedUserService extends ChangeNotifier {
 
     try {
       final user = ApiService.user;
+      // Anyone who is not a caregiver has nobody to select, so any selection
+      // in hand belongs to a previous session on this device.
+      if (user == null || user['role'] != 'caregiver') {
+        await clear();
+      }
       if (user != null && user['role'] == 'caregiver') {
         final usersResponse = await ApiService.getMonitoredUsers();
         if (usersResponse.isNotEmpty) {
@@ -58,9 +63,24 @@ class SelectedUserService extends ChangeNotifier {
     }
   }
 
-  void clear() {
+  /// Forget who was being looked at: the selection, the list, and the id on
+  /// disk.
+  ///
+  /// The stored id was the half that mattered and the half this missed. This
+  /// is a singleton and the id outlives the process, so a caregiver's choice
+  /// of person was inherited by whoever signed in next on the same phone --
+  /// which is how a normal user with no caregivers came to be shown another
+  /// person's name on the Keyframe Audit, and to request their frames.
+  Future<void> clear() async {
     _selectedUser = null;
     _monitoringUsers = [];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('locus_selected_user_id');
+    } catch (_) {
+      // Not worth failing a sign-out over. The in-memory selection is already
+      // gone, and initialize() clears again for anyone who is not a caregiver.
+    }
     notifyListeners();
   }
 }

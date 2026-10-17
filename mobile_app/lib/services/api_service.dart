@@ -4,6 +4,9 @@ import 'dart:io' show NetworkInterface, InternetAddressType;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'selected_user_service.dart';
+import 'socket_service.dart';
+
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode, debugPrint;
 
 class ApiService {
@@ -334,6 +337,11 @@ class ApiService {
     _user = null;
     await _prefs.remove('locus_token');
     await _prefs.remove('locus_user');
+    // Whoever this caregiver was looking at is not the next account's
+    // business. See selected_user_service.dart.
+    await SelectedUserService().clear();
+    // And the live socket still carries the old token until it is rebuilt.
+    SocketService().reset();
   }
 
   static Future<void> clearToken() async {
@@ -341,6 +349,11 @@ class ApiService {
     _user = null;
     await _prefs.remove('locus_token');
     await _prefs.remove('locus_user');
+    // Whoever this caregiver was looking at is not the next account's
+    // business. See selected_user_service.dart.
+    await SelectedUserService().clear();
+    // And the live socket still carries the old token until it is rebuilt.
+    SocketService().reset();
   }
 
   static Future<void> updatePreferences(Map<String, dynamic> prefs) async {

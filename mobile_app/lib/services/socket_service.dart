@@ -41,8 +41,26 @@ class SocketService {
     _locationUpdateListeners.remove(listener);
   }
 
+  /// The token the live socket was built with, so a change of account can be
+  /// noticed. Without it the socket keeps whoever it was first opened as.
+  String? _authedAs;
+
   void init() {
+    // A socket built for a different account is worse than no socket: the app
+    // acts as the new user while the server still has the old one attached to
+    // this connection, and anything decided by identity -- who may call whom,
+    // which room an alert lands in -- is decided about the wrong person.
+    if (socket != null && _authedAs != ApiService.token) {
+      final stale = socket;
+      socket = null;
+      try {
+        stale?.dispose();
+      } catch (_) {
+        // Already gone. The replacement below is what matters.
+      }
+    }
     if (socket != null) return;
+    _authedAs = ApiService.token;
 
     // Parse base URL for socket (remove /api path)
     final uri = Uri.parse(ApiService.baseUrl);
@@ -85,6 +103,16 @@ class SocketService {
   void connect() {
     if (socket == null) init();
     socket?.connect();
+  }
+
+  /// Drop the connection AND the socket, so the next sign-in builds a fresh
+  /// one with its own token rather than reconnecting as the previous account.
+  void reset() {
+    try {
+      socket?.dispose();
+    } catch (_) {}
+    socket = null;
+    _authedAs = null;
   }
 
   void disconnect() {
