@@ -145,13 +145,23 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
             _emptyCard(Icons.error_outline, _error!, 'Pull down to try again.')
           else ...[
             // Six figures, two per row.
-            GridView.count(
-              crossAxisCount: 2,
+            // mainAxisExtent, not childAspectRatio. A ratio ties the tile's
+            // HEIGHT to its width, so the room for the text depended on the
+            // screen -- and at 2.0 on a 360dp phone it left 53px for a column
+            // that needs 63. Measured, not guessed: test/stat_tile_overflow_
+            // test.dart reported "overflowed by 10.0 pixels on the bottom",
+            // and 26 once the system font size is raised. 104 clears both and
+            // does not shrink on a narrower phone.
+            GridView(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 2.0,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                mainAxisExtent: 104,
+              ),
               children: [
                 _stat(Icons.medication_outlined, AppColors.success,
                     '${summary['medication'] ?? '—'}', 'Doses Seen'),
