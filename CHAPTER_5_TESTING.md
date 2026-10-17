@@ -58,6 +58,80 @@ run and 604 on another with no code change between them, because the sample of
 real frames available to the data-dependent suites had thinned. The suites are
 not flaky; their inputs are being deleted on schedule.
 
+### 5.1.4 What the suites cover
+
+All 29 suites, grouped by the subsystem they defend. Assertion counts are from
+the run quoted above; the suites marked † measure against the wearer's real
+stored frames and skip when those have expired (§5.1.3).
+
+**Belonging identification — 9 suites, 172 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `verifier_test.py` | 39 | Two-stage verification: the shortlisting bar is only relaxed where a verifier can actually adjudicate, every claim records whether it was checked, and the live score distribution is recorded beside the threshold |
+| `near_miss_retry_test.py` † | 29 | A crop that nearly matched is looked at again under other lightings, and the retry asks for the bar that will really apply rather than the easiest one |
+| `detector_class_test.py` | 26 | The detector's class label moves the bar in both directions but never decides identity on its own |
+| `shape_tiebreak_test.py` | 25 | Box aspect ratio settles a tie only where the two items' shapes genuinely separate |
+| `adopt_sightings_test.py` † | 16 | Gallery adoption is judged against enrolment, never against the grown gallery, and is capped and off by default |
+| `one_spot_test.py` | 15 | One belonging cannot be in two places in one frame |
+| `placement_test.py` | 13 | "In hand" means within reach of a hand, not merely a hand somewhere in the frame |
+| `in_hand_needs_a_hand_test.py` | 11 | Size may doubt a grasp; it may not assert one with no hand in view |
+| `tile_enrolment_only_test.py` † | 8 | A blind tile has no class, so it answers to enrolment and nothing else |
+
+**Privacy, retention and evidence — 6 suites, 146 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `privacy_test.py` | 42 | Privacy Mode and the sensitive-room rule: capture refused before the cooldown slot is claimed, and the microphone governed by the same switch |
+| `washroom_exit_test.py` | 31 | Two faults found the first time the rule ever fired on real footage |
+| `privacy_trigger_test.py` | 27 | The rule must say what it saw, because it destroys the proof |
+| `purge_confirm_test.py` | 16 | One frame may stop the camera; two are required before anything is destroyed |
+| `blur_endtoend_test.py` † | 16 | Pressing "Blurred" produces a blurred frame on disk, not merely a blurred preview |
+| `thumb_retention_test.py` | 14 | An expired frame takes its cached renderings with it |
+
+**Scene, rooms and sessions — 4 suites, 83 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `auto_room_off_test.py` | 28 | The automatic room rule still watches when it is not allowed to act |
+| `destructive_rooms_test.py` | 17 | Every room the wearer marks private is held to the harder bar, not only the washroom |
+| `activity_store_test.py` | 19 | A closed session files its own evidence without removing the moment from the day's memory |
+| `session_frame_test.py` | 15 | A room session never reaches memory search with a frame that no longer exists |
+
+**Conversation and faces — 1 suite, 59 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `conversation_test.py` | 59 | One conversation is one person, one transcript, one summary — the largest single suite in the project |
+
+**Medication — 4 suites, 69 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `medication_logging_test.py` | 27 | A dose from the frames that recorded it through to the log, including a differential check that the old search bound found nothing |
+| `medication_fp_test.py` | 23 | A wall clock is not a pill, and a rejected dose keeps no photograph |
+| `batch_spacing_test.py` | 10 | The medication batch must not starve the item indexer |
+| `medication_phases_test.py` | 9 | Swallowing a pill hides it; the phase logic must not require otherwise |
+
+**Pipeline, cost and recovery — 5 suites, 75 assertions**
+
+| Suite | Assertions | What it holds to account |
+|---|---:|---|
+| `model_weight_test.py` | 27 | Two models' worth of weight removed with nothing that produced output lost |
+| `region_proposer_test.py` † | 23 | Candidate regions are proposed by the frame rather than by a fixed grid, under a bounded verification budget |
+| `moved_item_test.py` | 8 | A belonging is recognisable wherever it is put down, not only on one desk |
+| `moved_item_window_test.py` | 8 | A move is recorded whenever it happens, not only inside the first window |
+| `recover_test.py` † | 3 | Frames lost to an earlier gate are recoverable, measured against what still exists |
+
+**Flutter — 3 files, 11 tests**
+
+| File | What it holds to account |
+|---|---|
+| `widget_test.dart` | The app starts on the splash screen and moves to login with no session |
+| `memory_refresh_test.dart` | The memory screen refreshes only while it is the visible tab |
+| `stat_tile_overflow_test.dart` | The caregiver stat grid fits its text at 360 dp, at text scale 1.0 and 1.3 |
+
+
 ---
 
 ## 5.2 Unit Testing
@@ -105,6 +179,34 @@ this ±180-minute tolerance decides whether a scheduler tick *recognises* a dose
 slot. The **120-minute verification window** in §5.4 is a different quantity —
 how long the system then watches for the dose to be taken.
 
+### 5.2.3 `_class_agrees()` and `_match_threshold()` — identity bars
+
+**Objective:** verify that the detector's opinion of *what* an object is moves
+the similarity bar in both directions without ever deciding identity by itself.
+
+| No. | Test case | Attribute and value | Expected result | Actual result |
+|---|---|---|---|---|
+| 1 | Detector class agrees with the enrolled item | Objects365 class matches the class measured on the item's own enrolment photos | Bar 0.65 | 0.65 |
+| 2 | Detector class plainly disagrees | Class measured on enrolment does not match | Bar 0.85 | 0.85 |
+| 3 | Faint box of an agreeing class | Detection confidence below the candidate floor | Bar raised to 0.75 | 0.75 |
+| 4 | Agreeing class with a verifier available | Verifier gallery present and loadable | Bar relaxed to 0.55 | 0.55 |
+| 5 | Relaxed bar, verifier did not run | Budget exhausted, so no check took place | Falls back to the strict bar; match refused | Refused |
+
+Case 5 is the important one: a relaxed bar is licensed by a check, so if the
+check does not happen the licence is withdrawn.
+
+### 5.2.4 `_shape_usable()` — tie-breaking by outline
+
+**Objective:** verify that shape resolves an ambiguous match only where the two
+items' recorded aspect ranges genuinely separate.
+
+| No. | Test case | Attribute and value | Expected result | Actual result |
+|---|---|---|---|---|
+| 1 | Disjoint aspect ranges | Phone 0.50–1.20, earbuds case 0.82–2.46, gap exceeded | Tie resolved by which range the live box falls in | Resolved |
+| 2 | Overlapping ranges | The two ranges intersect | No resolution; neither item claimed | Neither claimed |
+| 3 | One item has no recorded shape | Shape absent for one candidate | No resolution; neither claimed | Neither claimed |
+
+
 ---
 
 ## 5.3 Functional Testing
@@ -135,6 +237,35 @@ slot that was missed or wrongly logged, without the scheduler overwriting it.
 |---|---|---|---|---|---|
 | 1 | Trigger rewatch for a slot | Medication id supplied | Previous logs cleared, session created with `is_rewatch = True`, pipeline reset | Session initialised | Pass |
 | 2 | Scheduler tick during an active rewatch | Scheduler runs while `is_rewatch` session is open | Scheduler does not override the session | Session preserved | Pass |
+
+### 5.3.3 Privacy Mode and blurring
+
+**Objective:** verify that the wearer's privacy controls take effect on disk,
+not merely in the interface.
+
+| No. | Test case | Attribute and value | Expected result | Actual result | Result |
+|---|---|---|---|---|---|
+| 1 | Privacy Mode on | Capture attempted while paused | No frame written; refusal logged with its reason | No file written | Pass |
+| 2 | Blur mode on | Capture attempted while blurring | A frame is written and is genuinely blurred | Blurred frame on disk, verified by variance | Pass |
+| 3 | Blur reaches derived frames | Item indexing runs on a blurred moment | The crop stored by the indexer is blurred too | Blurred | Pass |
+| 4 | Refusal does not consume the cooldown | Capture refused by privacy | The next permitted frame is not skipped | Captured | Pass |
+
+Case 4 was a real defect: a refused frame used to claim the cooldown slot, so
+the first frame after privacy ended was silently dropped.
+
+### 5.3.4 Belonging tracking
+
+**Objective:** verify that a belonging is recognised wherever it is left, and
+that a move is reported as a move.
+
+| No. | Test case | Attribute and value | Expected result | Actual result | Result |
+|---|---|---|---|---|---|
+| 1 | Item seen in a new place | Same item, different position | Reported as moved, new position recorded | Moved | Pass |
+| 2 | Item seen again in the same place | Position unchanged within tolerance | No duplicate event | Suppressed | Pass |
+| 3 | Move after the first window | The move happens later in the day | Still recorded | Recorded | Pass |
+| 4 | Same item twice in one frame | Two boxes both match one belonging | Only the better one kept | One kept | Pass |
+| 5 | Two belongings claim one box | Scores within the ambiguity margin | Neither claimed unless shape separates them | Neither claimed | Pass |
+
 
 ---
 
@@ -178,6 +309,22 @@ only when the classification is certain, since acting means deleting frames.
 Case 2 is the reason the raised floor exists: at the ordinary 0.55 bar, frames
 recorded in an ordinary room were being destroyed on a marginal classification.
 
+### 5.4.3 Destruction requires corroboration
+
+**Objective:** verify the rule that governs the only action the system takes
+that cannot be undone.
+
+| No. | Test case | Attribute and value | Expected result | Actual result | Result |
+|---|---|---|---|---|---|
+| 1 | One frame suggests a sensitive room | A single confident classification | Capture stops; nothing is deleted | Stopped only | Pass |
+| 2 | Two frames agree | A second confident classification follows | Retroactive purge of that stretch | Purged | Pass |
+| 3 | Automatic rule disabled | `AUTO_ROOM_PRIVACY` off | The rule still records what it would have done, and acts on nothing | Recorded only | Pass |
+
+The asymmetry in cases 1 and 2 is deliberate: stopping the camera on one frame
+costs a few seconds of recording if it is wrong, while deleting on one frame
+costs the wearer a piece of their day that cannot be returned.
+
+
 ---
 
 ## 5.5 Integration Testing
@@ -215,6 +362,19 @@ Case 2 was tested by connecting a separate client to the running server
 authenticated as the caregiver, which removes the dashboard from the question:
 it establishes that the phone emitted and the server relayed, independently of
 whether any browser rendered it.
+
+### 5.5.4 Conversation, face and transcript
+
+**Objective:** verify that a social interaction assembles into one record
+rather than several, and that no transcript exists without a face.
+
+| No. | Test case | Attribute and value | Expected result | Actual result | Result |
+|---|---|---|---|---|---|
+| 1 | One conversation, several frames | The same person recognised across a stretch | One event, one transcript, one summary | One record | Pass |
+| 2 | No face recognised | Audio present, no face in any frame | No transcript written | None written | Pass |
+| 3 | Privacy Mode during a conversation | Blur or pause active | Transcript refused along with the frame | Refused | Pass |
+| 4 | Session frame expired | A room session's chosen frame deleted before the session closed | The session is written with a frame that still exists, or none | Surviving frame used | Pass |
+
 
 ---
 
