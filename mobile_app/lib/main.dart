@@ -74,10 +74,27 @@ class LocusApp extends StatelessWidget {
       title: 'LOCUS',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      // A call can arrive on any screen, which is the whole point of it in an
-      // emergency, so the overlay sits above the navigator rather than on a
-      // page. MaterialApp.builder is the one place that is true of.
-      builder: (context, child) => CallOverlay(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) {
+        // Text scales with the system font setting; icons, switches, buttons
+        // and padding beside it do not. Unbounded, that is what pushes a Row
+        // past the edge of a 360dp screen -- and it does so on every screen at
+        // once, for both roles, which is why it looked like the whole app was
+        // broken rather than one layout.
+        //
+        // Clamped, not ignored. People who need this app often need larger
+        // text, so the setting still works up to 1.3x; beyond that a label and
+        // its control can no longer share a line, and honouring the request
+        // would cost them the control.
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(maxScaleFactor: 1.3),
+          ),
+          // A call can arrive on any screen, which is the whole point of it in
+          // an emergency, so the overlay sits above the navigator.
+          child: CallOverlay(child: child ?? const SizedBox.shrink()),
+        );
+      },
       initialRoute: '/splash',
       routes: {
         '/splash': (_) => const SplashScreen(),

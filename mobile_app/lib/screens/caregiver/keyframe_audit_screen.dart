@@ -549,6 +549,12 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           image: DecorationImage(
                             image: NetworkImage(
                               '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
+                              // The endpoint is authenticated. Every other
+                              // image in this file sends these; this one did
+                              // not, so the thumbnails came back 401 and
+                              // rendered as empty grey boxes while the
+                              // full-size view beside them worked.
+                              headers: ApiService.imageHeaders,
                             ),
                             fit: BoxFit.cover,
                           ),

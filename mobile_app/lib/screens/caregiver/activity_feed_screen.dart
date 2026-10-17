@@ -51,7 +51,20 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
   @override
   void initState() {
     super.initState();
+    // The person can be changed from another screen too, so follow the
+    // service rather than only our own dropdown.
+    SelectedUserService().addListener(_onPersonChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    SelectedUserService().removeListener(_onPersonChanged);
+    super.dispose();
+  }
+
+  void _onPersonChanged() {
+    if (mounted) _load();
   }
 
   Future<void> _load() async {
@@ -121,6 +134,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          _personBar(),
           _dateBar(),
           const SizedBox(height: 16),
 
@@ -167,6 +181,63 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  /// Whose day this is. Hidden when there is only one person to look at --
+  /// a dropdown with a single entry is furniture, not a control.
+  Widget _personBar() {
+    return AnimatedBuilder(
+      animation: SelectedUserService(),
+      builder: (context, _) {
+        final service = SelectedUserService();
+        final people = service.monitoringUsers;
+        if (people.length < 2) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.person_outline,
+                    size: 18, color: AppColors.textSecondary),
+                const SizedBox(width: 10),
+                // Expanded, so a long name cannot push the arrow off a narrow
+                // screen once the system font size is turned up.
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: service.selectedUser?['_id'] as String?,
+                      style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14),
+                      onChanged: (v) {
+                        if (v != null) service.setSelectedUser(v);
+                      },
+                      items: people
+                          .map<DropdownMenuItem<String>>((u) =>
+                              DropdownMenuItem<String>(
+                                value: u['_id'] as String?,
+                                child: Text(u['name']?.toString() ?? 'Unknown',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ))
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -248,7 +319,14 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                   ),
-                  Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  // Bounded, because the tile's height is fixed by
+                  // childAspectRatio and "Social Interactions" is the one
+                  // label long enough to need a second line. Unbounded, it
+                  // asked for a third and the tile had nowhere to put it.
+                  Text(label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
                 ],
               ),
             ),
