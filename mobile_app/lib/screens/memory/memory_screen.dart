@@ -132,6 +132,23 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
     // The parent already calls reload() when this tab is tapped, so becoming
     // visible needs no fetch here, only the timer started or stopped.
     if (old.isVisible != widget.isVisible) _syncRefreshTimer();
+    if (!old.isVisible && widget.isVisible) {
+      // Coming forward is the moment to make sure the microphone is ready, so
+      // the first tap can listen instead of spending itself on start-up.
+      // Permission may have been granted elsewhere since this screen was built
+      // -- the SOS voice toggle asks for the same one -- and without this the
+      // person would tap once for nothing and again to be heard.
+      //
+      // askNow is deliberately not set: being asked for a microphone because
+      // you changed tabs is startling. The tap still asks when it must.
+      if (!_speechReady) _initSpeech();
+      // And the home screen's listener may have been holding the recogniser
+      // until a moment ago, so a stale session here is worth clearing.
+      if (_listening) {
+        _speech.cancel();
+        setState(() => _listening = false);
+      }
+    }
   }
 
   /// Turn an Android recognizer error code into something a person can act on.
@@ -257,7 +274,15 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
   }
 
   Future<void> _listen() async {
-    if (_listening) return;
+    // Press again to stop. This used to return here and do nothing, so the
+    // only way to end a session was to wait for the recogniser to time out.
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      // Whatever was heard before stopping is still an answer worth sending.
+      _sendHeard();
+      return;
+    }
     if (!_speechReady) {
       await _initSpeech(askNow: true);
       if (!_speechReady) {
@@ -887,7 +912,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                     child: IconButton(
                       onPressed: _asking ? null : _listen,
                       tooltip: _listening
-                          ? 'Listening'
+                          ? 'Listening - tap to stop'
                           : (_speechReady ? 'Ask out loud' : 'Allow the microphone'),
                       icon: Icon(_listening ? Icons.mic : Icons.mic_none,
                           color: Colors.white, size: 20),

@@ -219,7 +219,11 @@ class _MainShellState extends State<MainShell> {
           _MoreScreen(),
         ]
       : [
-          HomeScreen(key: _homeScreenKey),
+          // isVisible for the same reason MemoryScreen takes one: an
+          // IndexedStack keeps every tab mounted, and the SOS voice listener
+          // would otherwise hold the microphone while the person is on
+          // another tab trying to use it.
+          HomeScreen(key: _homeScreenKey, isVisible: _currentIndex == 0),
           MedicationScreen(key: _medScreenKey),
           ActivityScreen(key: _activityScreenKey),
           // isVisible gates its 15 s refresh: an IndexedStack keeps every tab

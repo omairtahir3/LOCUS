@@ -16,7 +16,12 @@ import '../../services/voice_call_service.dart';
 import '../caregiver/location_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// Whether this is the tab the person is actually looking at. The shell
+  /// keeps every tab mounted, and the SOS voice listener must not hold the
+  /// microphone while somebody is using it somewhere else.
+  final bool isVisible;
+
+  const HomeScreen({super.key, this.isVisible = true});
 
   @override
   State<HomeScreen> createState() => HomeScreenState();
@@ -141,6 +146,19 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  @override
+  void didUpdateWidget(covariant HomeScreen old) {
+    super.didUpdateWidget(old);
+    if (widget.isVisible == old.isVisible) return;
+    if (widget.isVisible) {
+      if (_voiceArmed) _listenForSos();
+    } else {
+      // Leaving the tab releases the microphone for whoever is in front.
+      _speech.stop();
+      if (_hearing) setState(() => _hearing = false);
+    }
+  }
+
   void _onCallStateChanged() {
     if (!mounted) return;
     if (VoiceCallService().inCall) {
@@ -214,6 +232,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // breaking the call this feature exists to start. Listening resumes when
     // the call ends; see _onCallStateChanged.
     if (VoiceCallService().inCall) return;
+    // Not the tab in front of them: the microphone belongs to whatever is.
+    if (!widget.isVisible) return;
     if (mounted) setState(() => _hearing = true);
     await _speech.listen(
       // Partial results, because the phrase should act while it is being said
