@@ -72,6 +72,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     SocketService().addSosResolvedListener(_handleSosResolved);
 
     WidgetsBinding.instance.addObserver(this);
+    // A call starting has to close the recogniser, not merely stop it being
+    // opened again: the wearer can be listening when the phone rings.
+    VoiceCallService().addListener(_onCallStateChanged);
     _loadData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
     // Only the person being looked after has an SOS button to speak instead of.
@@ -118,6 +121,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     _refreshTimer?.cancel();
     _sosCountdown?.cancel();
+    VoiceCallService().removeListener(_onCallStateChanged);
     _speech.cancel();
     WidgetsBinding.instance.removeObserver(this);
     SocketService().removeSosResolvedListener(_handleSosResolved);
@@ -134,6 +138,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else {
       _speech.stop();
       if (mounted) setState(() => _hearing = false);
+    }
+  }
+
+  void _onCallStateChanged() {
+    if (!mounted) return;
+    if (VoiceCallService().inCall) {
+      // Give the microphone up immediately. Waiting for the recogniser's own
+      // timeout would leave the first seconds of the call without audio.
+      _speech.stop();
+      if (_hearing) setState(() => _hearing = false);
+    } else if (_voiceArmed) {
+      _listenForSos();
     }
   }
 
@@ -193,6 +209,11 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _listenForSos() async {
     if (!_voiceArmed || !_voiceReady) return;
     if (_speech.isListening || _isEmergencyActive || _sosCountdown != null) return;
+    // A call owns the microphone. Android hands it to one consumer at a time,
+    // and opening the recogniser here took audio focus away from WebRTC --
+    // breaking the call this feature exists to start. Listening resumes when
+    // the call ends; see _onCallStateChanged.
+    if (VoiceCallService().inCall) return;
     if (mounted) setState(() => _hearing = true);
     await _speech.listen(
       // Partial results, because the phrase should act while it is being said
