@@ -1,6 +1,7 @@
 # LOCUS — Feature Audit
 
-**Audited:** 17 October 2026 (Module B re-audited against live data the same day) · **Against:** SRS §1.7 (10 modules, 51 features)
+**Audited:** 17 October 2026 (Module B re-audited against live data, and the
+caveats revised the same evening after a session of fixing the mobile app) · **Against:** SRS §1.7 (10 modules, 51 features)
 
 Every row below was checked against code in this repository, not against memory
 or intent. Where a feature is marked partial, the reason is specific and the
@@ -128,7 +129,7 @@ day's type.
 | 1 | Continuously send GPS to the cloud | ✅ | `services/location_service.dart` — `Geolocator.getPositionStream` → `POST /location`. (Cloud is the local Mongo, as in Core FE-9) |
 | 2 | 'I'm Lost' by voice command **or** panic button | ✅ | Panic button → `POST /api/users/me/emergency` with caregiver fan-out, proven in use. Voice added 17 Oct in `home_screen.dart`: a toggle arms `speech_to_text` while the screen is foregrounded, matches a spoken phrase on partial results, and shares `_raiseEmergency()` with the button so the two paths cannot drift. A 5-second cancellable countdown sits between hearing and alerting, because a phrase can be overheard from a conversation or a television. **The spoken half has not yet been exercised on a handset** |
 | 3 | Real-time voice-guided navigation home | ✅ | `home_screen.dart:296` — the active-emergency panel's "Take Me Home" button launches `https://www.google.com/maps/dir/?api=1&destination=<home>&travelmode=walking` externally, so the turn-by-turn and the spoken guidance are Google Maps' own. Requires `home_location` to be set in Settings, and says so when it is not. *(Recorded as not implemented on 17 Oct — that was a bad search on my part, not a missing feature)* |
-| 4 | Live location + two-way voice with caregivers | ✅ | `components/Call/VoiceCall.jsx`, `services/voice_call_service.dart`, `utils/socket.js`; an active emergency is surfaced as an emergency rather than an ordinary call |
+| 4 | Live location + two-way voice with caregivers | ✅ | `components/Call/VoiceCall.jsx`, `services/voice_call_service.dart`, `utils/socket.js`; an active emergency is surfaced as an emergency rather than an ordinary call. **Verified end to end 17 Oct**: a test client connected as the caregiver received `call:incoming` with `sos: true`, and calls connect. The server logs each offer with the number of sockets listening in the recipient's room, which is what located a fault no amount of reading the code would have |
 
 ---
 
@@ -140,7 +141,7 @@ day's type.
 |---|---|---|---|
 | 1 | Daily activity summary | ✅ | `pages/UserDashboard.jsx`, `pages/Dashboard.jsx` |
 | 2 | Medication adherence: completed, missed, upcoming | ✅ | `UserDashboard.jsx` adherence block; `routes/medication.js` |
-| 3 | Search memory by text or voice, filtered | ✅ | `routes/eventLogs.js` accepts `type`, `date`, `person`, `item`; `pages/MemorySearch.jsx` |
+| 3 | Search memory by text or voice, filtered | ✅ | `routes/eventLogs.js` accepts `type`, `date`, `person`, `item`; `pages/MemorySearch.jsx`. The **mobile** voice half was broken until 17 Oct in a way this row hid: the button had no stop path, and the first tap was spent on start-up rather than listening, so it appeared to work only for whoever had already granted the microphone |
 | 4 | Storage usage with cleanup suggestions | ✅ | `routes/storage.js` `GET /usage`, `components/Storage/StorageUsage.jsx`, `GET /api/keyframes/storage` per store |
 
 ---
@@ -151,7 +152,7 @@ day's type.
 
 | FE | Feature | Status | Evidence |
 |---|---|---|---|
-| 1 | Natural-language text or voice search | ✅ | `utils/memoryAgent.js` (LLM answer with template fallbacks when the model overreaches); browser `SpeechRecognition` in `MemorySearch.jsx`, no speech SDK |
+| 1 | Natural-language text or voice search | ✅ | `utils/memoryAgent.js` (LLM answer with template fallbacks when the model overreaches); browser `SpeechRecognition` in `MemorySearch.jsx`, no speech SDK; `speech_to_text` on mobile, fixed 17 Oct -- see Module 6 FE-3 |
 | 2 | Results with keyframe images, timestamps, GPS | ✅ | `MemorySearch.jsx`; images resolved across all five stores by `_resolve_frame` |
 | 3 | Timeline of daily activities from verified records | ✅ | `pages/ActivityFeed.jsx`, `pages/UserHistory.jsx` |
 
@@ -207,9 +208,14 @@ would carry a wrong impression.
    Core FE-9, Module D FE-1 and everything described as cloud storage run
    against one machine. The schemas and upload paths are hosting-agnostic; the
    hosting is the missing step.
-2. **Push notifications are simulated without credentials.** `utils/notifications.js`
-   logs a warning and falls back when `firebase-service-account.json` is absent.
-   Email delivery is unaffected.
+2. **Push notifications are live, and were verified on a handset.**
+   `firebase-service-account.json` is present and correctly gitignored, and on
+   17 Oct a notification sent through the project's own `sendPushNotification`
+   arrived on the device (`[FCM Push] Successfully sent` on the server,
+   `NotificationManager: notify(...)` on the phone). This row previously said
+   they were simulated, which was true only of a deployment without those
+   credentials; it is not true of this one. The fallback still exists for a
+   machine that lacks the file.
 3. **Nothing outdoors has ever been tested** (Core FE-12/13/14). The code paths
    exist and are internally consistent; no outdoor footage has been recorded,
    and the thresholds are labelled UNVALIDATED where they are defined.
@@ -234,7 +240,27 @@ would carry a wrong impression.
 8. **GPS is only as fresh as the phone app.** A location older than 30 minutes
    is refused rather than attached, so events logged while the app is closed
    carry no GPS at all.
-9. **Routine learning has learned nothing actionable yet** (Module B). The
+9. **Every notification lands on the same channel** (Module 8 FE-3,
+   Module 9 FE-5). No `default_notification_channel_id` is declared in the
+   Android manifest and nothing creates a channel, so `emergency`,
+   `routine_item_lost_escalated`, a medication reminder and the friendly
+   `idle_checkin` all arrive on `fcm_fallback_notification_channel` -- one
+   importance, one sound, one vibration. A caregiver cannot let emergencies
+   through Do Not Disturb without letting the check-in through too, and on
+   Android 8+ a channel's importance cannot be changed after it is created, so
+   this is not something the person can correct in settings later. The alert
+   hierarchy exists in the backend and is invisible to the phone.
+10. **The microphone is a single-consumer resource, and three features want
+   it.** The SOS voice trigger (D FE-2), voice calls (D FE-4) and memory
+   search (7 FE-1) all open it, and Android grants it to one at a time. Both
+   collisions were observed rather than predicted: the SOS listener took audio
+   focus off a live call (`onAudioFocusChange(-2)` to WebRTC's own audio
+   manager), and it held the recogniser while somebody was on the Memory tab,
+   because an `IndexedStack` keeps every tab mounted. It is arbitrated now -- a
+   call wins, and the listener yields when its tab is not in front -- but
+   anything new that opens the microphone has to join that arrangement rather
+   than assume it is free.
+11. **Routine learning has learned nothing actionable yet** (Module B). The
    profiles are built and supported; no signal clears the 60% same-hour bar, so
    the two profile-driven deviation checks have never fired. The 210 findings
    on record all come from rules that do not consult the profile.
