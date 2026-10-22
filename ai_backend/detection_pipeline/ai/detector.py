@@ -74,15 +74,34 @@ class PillDetector:
         # frames where a pill was found with no hand recognised. A hand-based
         # filter would remove exactly the evidence that fallback depends on.
         # So every frame is still examined; the batch just stops being greedy.
+        # Two threads, not cpu_count()-1.
+        #
+        # os.cpu_count() reports LOGICAL processors. This machine answers 8 and
+        # has 4 physical cores, so "cpu_count() - 1" asked for 7 and the pill
+        # detector alone wanted nearly twice the real machine. Alongside torch
+        # (MobileNetV3, DINOv2 and ultralytics at 4 apiece) and InsightFace,
+        # demand reached about 23 threads on 4 cores, and everything slowed
+        # down together: one frame through the item indexer costs 1.2 s on an
+        # idle machine and was measured at 29 s and 69 s during a medication
+        # window, which is where the three-minute lag in the item feed came
+        # from -- eight queued frames at 25 s each.
+        #
+        # Two costs nothing here. Measured 23 Oct 2026 over 60 frames:
+        # 2 threads 30.9 s, 3 threads 39.9 s, 4 threads 40.3 s, 6 threads
+        # 37.2 s, 7 threads 31.7 s. The model is flat in thread count and
+        # slowest in the middle, so the extra five threads bought nothing and
+        # starved every other model in the process.
+        _threads = int(os.environ.get("PILL_DETECTOR_THREADS", 2))
         _opts = ort.SessionOptions()
-        _opts.intra_op_num_threads = max(1, (os.cpu_count() or 2) - 1)
+        _opts.intra_op_num_threads = max(1, _threads)
+        _opts.inter_op_num_threads = 1
         self.session = ort.InferenceSession(
             model_path,
             sess_options=_opts,
             providers=["CPUExecutionProvider"]
         )
-        print(f"Pill detector using {_opts.intra_op_num_threads} of "
-              f"{os.cpu_count()} cores, leaving room for the item indexer")
+        print(f"Pill detector using {_opts.intra_op_num_threads} thread(s); "
+              f"{os.cpu_count()} logical processors reported")
         self.input_name  = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
         self.img_size    = self.input_shape[2] if isinstance(self.input_shape[2], int) else 640
@@ -250,3 +269,102 @@ class PillDetector:
         cv2.putText(annotated, f"Pills: {len(detections)}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 212, 184), 2)
         return annotated
+
+# ── A pill in the palm, found by shape rather than by the model ────────────
+#
+# best_model.onnx does not detect this wearer's tablets. Measured 23 Oct 2026
+# on the frames the pipeline itself stored at 02:58: a white tablet plainly in
+# the palm, and the model returned nothing for it at full resolution, nothing
+# on a crop of the hand, and nothing on that crop upscaled three times. What it
+# DID return, at 0.39, was the toes of a teddy bear on the bed 180 px away.
+#
+# That is not a threshold to tune. The model was trained on pills photographed
+# close up against plain backgrounds, and a 45-pixel disc on skin under one
+# lamp is outside it. Every gate downstream -- pill-in-hand, the three phases,
+# the confidence policy -- was starved of a true candidate for weeks.
+#
+# This finds the other kind: bright, barely saturated, roughly circular, pill
+# sized, and ONLY inside the hand box MediaPipe has already drawn. Searching
+# the palm instead of the frame is what makes so blunt a rule safe -- the
+# teddy bear, the mouse and the phone are all outside it by construction.
+#
+# It identifies nothing. It says "something small, pale and round is in this
+# hand", and the three-phase sequence supplies the corroboration, exactly as
+# it does for the model's own detections.
+#
+# Measured on this wearer's stored frames: found the tablet at (540, 596) and
+# (550, 531) in the two 02:58 frames where it is visible, and produced a blob
+# inside a hand in 2 of 62 ordinary keyframes.
+PALM_PILL_MIN_AREA = float(os.environ.get("PALM_PILL_MIN_AREA", 150))
+PALM_PILL_MAX_HAND_FRAC = float(os.environ.get("PALM_PILL_MAX_HAND_FRAC", 0.08))
+PALM_PILL_MIN_CIRCULARITY = float(os.environ.get("PALM_PILL_MIN_CIRCULARITY", 0.55))
+PALM_PILL_VALUE_PCT = float(os.environ.get("PALM_PILL_VALUE_PCT", 97))
+PALM_PILL_MAX_SAT = float(os.environ.get("PALM_PILL_MAX_SAT", 70))
+PALM_PILL_CONFIDENCE = float(os.environ.get("PALM_PILL_CONFIDENCE", 0.55))
+
+
+def find_pills_in_palm(frame, hand_bboxes):
+    """Pill-shaped bright blobs inside the given hand boxes.
+
+    Returns detections in the same shape the ONNX detector produces, so the
+    rest of the pipeline cannot tell which found them.
+    """
+    if frame is None or not hand_bboxes:
+        return []
+
+    h, w = frame.shape[:2]
+    out = []
+    for hb in hand_bboxes:
+        try:
+            x1 = max(0, int(hb["x1"])); y1 = max(0, int(hb["y1"]))
+            x2 = min(w, int(hb["x2"])); y2 = min(h, int(hb["y2"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if x2 - x1 < 20 or y2 - y1 < 20:
+            continue
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        value, sat = hsv[:, :, 2], hsv[:, :, 1]
+        # Brighter than almost all of the hand around it, and close to white.
+        # A percentile rather than a fixed level, because a palm in lamplight
+        # and a palm in daylight share no absolute brightness.
+        cutoff = np.percentile(value, PALM_PILL_VALUE_PCT)
+        mask = ((value >= cutoff) & (sat < PALM_PILL_MAX_SAT)).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        hand_area = max(1, (x2 - x1) * (y2 - y1))
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < PALM_PILL_MIN_AREA:
+                continue
+            if area / hand_area > PALM_PILL_MAX_HAND_FRAC:
+                continue          # a sleeve cuff or a lit background, not a pill
+            (cx, cy), radius = cv2.minEnclosingCircle(contour)
+            if radius <= 0:
+                continue
+            circularity = area / (np.pi * radius * radius)
+            if circularity < PALM_PILL_MIN_CIRCULARITY:
+                continue
+
+            bx1, by1 = int(cx - radius) + x1, int(cy - radius) + y1
+            bx2, by2 = int(cx + radius) + x1, int(cy + radius) + y1
+            out.append({
+                "class": "pill",
+                "class_id": 0,
+                # Fixed, and deliberately in the band that asks a person rather
+                # than one that records a dose by itself: shape is evidence,
+                # not identification.
+                "confidence": round(PALM_PILL_CONFIDENCE, 3),
+                "source": "palm_shape",
+                "circularity": round(float(circularity), 2),
+                "bbox": {"x1": max(0, bx1), "y1": max(0, by1),
+                         "x2": min(w, bx2), "y2": min(h, by2)},
+                "center": {"x": int(cx) + x1, "y": int(cy) + y1},
+            })
+    return out

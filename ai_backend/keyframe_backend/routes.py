@@ -207,7 +207,8 @@ def _parse_timestamp(ts):
 
 @router.delete("/medication_frames")
 async def delete_medication_frames(user_id: str = "", medication_id: str = "",
-                                   since: str = "", until: str = ""):
+                                   since: str = "", until: str = "",
+                                   medication_log_id: str = ""):
     """Destroy the evidence frames for one medication, for one wearer.
 
     The per-id delete cannot do this. An intake event does not always carry a
@@ -233,6 +234,13 @@ async def delete_medication_frames(user_id: str = "", medication_id: str = "",
         raise HTTPException(status_code=400,
                             detail="user_id and medication_id are required")
 
+    # `medication_log_id` is the durable form this docstring asks for above.
+    # A sidecar written since 23 Oct 2026 names the dose rows it is evidence
+    # of, so rejecting one dose clears exactly its own pictures and cannot
+    # reach an adjacent dose of the same medicine. Frames written before that
+    # carry no such field and still fall back to medication_id plus the time
+    # window, which is the best that can be done for them.
+
     removed, kept = [], 0
     for meta_path in glob.glob(os.path.join(
             MEDICATION_EVIDENCE_STORAGE_DIR, "*", "*", "*.json")):
@@ -246,6 +254,30 @@ async def delete_medication_frames(user_id: str = "", medication_id: str = "",
         if str(meta.get("medication_id", "")) != str(medication_id):
             kept += 1
             continue
+
+        sidecar_logs = [str(x) for x in (meta.get("medication_log_ids") or [])]
+        if medication_log_id and sidecar_logs:
+            if str(medication_log_id) not in sidecar_logs:
+                kept += 1
+                continue
+            # Named the dose exactly; the time window has nothing to add.
+            stem = meta_path[:-len(".json")]
+            for path in (stem + ".json", stem + ".jpg", stem + ".jpeg", stem + ".png"):
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                        removed.append(os.path.basename(path))
+                    except OSError:
+                        pass
+            base = os.path.basename(stem)
+            for t in glob.glob(os.path.join(THUMB_CACHE_DIR, base + "*")):
+                try:
+                    os.remove(t)
+                    removed.append(os.path.basename(t))
+                except OSError:
+                    pass
+            continue
+
         when = str(meta.get("detected_at", ""))
         if since and when and when < since:
             kept += 1

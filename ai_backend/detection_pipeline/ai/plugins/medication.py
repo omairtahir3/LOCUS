@@ -12,6 +12,11 @@ from ..core.contracts import ActionType, DetectionResult, EventContext, ModelRef
 from ..core.plugins import DetectorPlugin
 
 
+# How much further the second nearest fingertip must be before a detection
+# counts as a lone fingertip rather than something pinched between two.
+LONE_TIP_RATIO = float(os.environ.get("PILL_LONE_TIP_RATIO", 3.0))
+
+
 class MedicationIntakePlugin(DetectorPlugin):
     """Detects medication intake sequence using YOLO object detection and MediaPipe hand tracking."""
 
@@ -338,18 +343,25 @@ class MedicationIntakePlugin(DetectorPlugin):
                     if dist > ((hand_w**2 + hand_h**2)**0.5) * 0.8:
                         continue
 
+                # Kept in step with is_pill_in_hand in pipeline.py, which is
+                # the path that runs live. A lone fingertip has one tip almost
+                # touching the detection and the next one far away; a pill
+                # pinched between two fingers has two tips at about the same
+                # distance. The old test here -- any tip within 45px and
+                # nearer than the palm -- was true of both, and a fingertip is
+                # always nearer than a palm, so it refused every pinched pill.
                 is_at_fingertip = False
                 if hand_idx < len(all_fingertips) and hand_idx < len(all_palm_centers):
                     tips = all_fingertips[hand_idx]
-                    palm = all_palm_centers[hand_idx]
-                    palm_dist = ((pill_cx - palm["x"])**2 + (pill_cy - palm["y"])**2)**0.5
-                    
-                    for tip in tips:
-                        tip_dist = ((pill_cx - tip["x"])**2 + (pill_cy - tip["y"])**2)**0.5
-                        if tip_dist < 45 and tip_dist < palm_dist:
+                    ranked = sorted(
+                        ((pill_cx - tip["x"])**2 + (pill_cy - tip["y"])**2)**0.5
+                        for tip in tips)
+                    if ranked:
+                        nearest = ranked[0]
+                        second = ranked[1] if len(ranked) > 1 else float("inf")
+                        if nearest < 45 and second > nearest * LONE_TIP_RATIO:
                             is_at_fingertip = True
-                            break
-                            
+
                 if is_at_fingertip:
                     continue
 

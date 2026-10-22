@@ -822,6 +822,8 @@ class MedicationDetectionPipeline:
         Remaining unlogged meds stay pending for another detection or get
         marked missed/skipped when the scheduler's 2-hour window expires.
         """
+        # Reset per call; _tag_detection_keyframes reads it straight after.
+        self._last_log_ids = []
         if not self.medication_ids or not self.scheduled_time:
             print(f"[Pipeline] [DB-Log-Batch] No medication_ids or scheduled_time set — skipping")
             return
@@ -855,6 +857,18 @@ class MedicationDetectionPipeline:
                     resp = httpx.post(f"{get_locus_api_url()}/api/medications/logs", json=payload, headers=headers, timeout=10.0)
                     if resp.status_code in (200, 201):
                         logged_count += 1
+                        # Keep the id of the row we just created. The evidence
+                        # sidecar then names the exact dose it is evidence of,
+                        # which is the only way a rejection can clear the right
+                        # pictures: this wearer's Panadol is due at 03:00,
+                        # 03:15, 03:55, 05:10 and 05:15, and no time window can
+                        # separate doses fifteen minutes apart.
+                        try:
+                            _lid = (resp.json() or {}).get("_id")
+                            if _lid:
+                                self._last_log_ids.append(str(_lid))
+                        except Exception:
+                            pass
                         print(f"[Pipeline] [DB-Log-Batch] OK API Logged {med_id} as {status.upper()} ({logged_count}/{pills_to_log})")
                     else:
                         print(f"[Pipeline] [DB-Log-Batch] API error for {med_id}: {resp.status_code} {resp.text}")
@@ -1037,6 +1051,7 @@ class MedicationDetectionPipeline:
                         "detection_status": status,
                         "medication_name": med_name,
                         "medication_id": med_id,
+                        "medication_log_ids": list(getattr(self, "_last_log_ids", [])),
                         "medicine_taken": True,
                         "user_id": getattr(self, "user_id", ""),
                         "detected_at": datetime.now(timezone.utc).isoformat(),
@@ -1106,6 +1121,9 @@ class MedicationDetectionPipeline:
         best_overlap = 0.0
         in_hand_count = 0
         FINGERTIP_RADIUS = 45  # pixels
+        # How much further the SECOND nearest tip must be before the detection
+        # is called a lone fingertip rather than something pinched between two.
+        LONE_TIP_RATIO = float(os.environ.get("PILL_LONE_TIP_RATIO", 3.0))
 
         for det in detections:
             # Skip weak YOLO detections — these are often false positives
@@ -1119,9 +1137,25 @@ class MedicationDetectionPipeline:
             pill_cy = (pill_bbox["y1"] + pill_bbox["y2"]) / 2
 
             for hand_idx, hand_bbox in enumerate(hand_bboxes):
-                # Must have real bbox overlap
+                # Must have real bbox overlap.
+                #
+                # This used to be the one rejection that said nothing. Size,
+                # aspect, palm distance and the fingertip test all print why
+                # they refused; a pill that simply was not on the hand failed
+                # here in silence, so a log could show a confident pill, a
+                # detected hand and in_hand=False with no reason anywhere --
+                # which is exactly what the 05:10 session of 23 Oct 2026
+                # showed, and it cost a night of looking in the wrong place.
+                #
+                # Overlap is intersection over the SMALLER box, so a pill
+                # wholly inside a hand scores ~1.0. A low number here means
+                # the pill is somewhere else in the frame, not that the hand
+                # is holding it badly.
                 overlap = self._bbox_overlap(pill_bbox, hand_bbox)
                 if overlap < overlap_threshold:
+                    print(f"  [OverlapCheck] Pill is not on hand {hand_idx} "
+                          f"(overlap={overlap:.2f}, need {overlap_threshold:.2f}, "
+                          f"conf={det['confidence']:.2f}) — rejected")
                     continue
 
                 # Size check: pill must be small relative to hand
@@ -1156,27 +1190,51 @@ class MedicationDetectionPipeline:
                               f"(dist={palm_dist:.0f}px, max={max_palm_dist:.0f}px) — rejected")
                         continue
 
-                # Fingertip false-positive rejection using MediaPipe landmarks
+                # Fingertip false-positive rejection using MediaPipe landmarks.
+                #
+                # A fingertip mistaken for a pill sits ON one tip and nothing
+                # else is near it. A pill actually being taken is PINCHED
+                # BETWEEN two tips, which is where a tablet is held on its way
+                # to the mouth -- so this test has to tell those apart, and the
+                # old one could not.
+                #
+                # The old second clause, palm_dist > min_tip_dist * 2, read as
+                # "much nearer the tip than the palm" but scaled off a quantity
+                # that is almost zero: at tip=9px it asks only that the palm be
+                # more than 18px away, and a palm is never that close to a
+                # fingertip. It was true on every detection, so the rule
+                # collapsed to "within 45px of any tip" and refused every
+                # pinched pill it ever saw. Measured on the 01:30 session of
+                # 23 Oct 2026: 37 detections, up to 0.79 confidence, two hands
+                # in frame and the hand at the top of it, every one vetoed --
+                # and because the veto multiplies overlap by 0.1 it can never
+                # clear the 0.15 bar again, so it is a kill, not a penalty.
+                #
+                # Comparing the two nearest tips instead is scale-free: a lone
+                # fingertip has one tip almost touching it and the next far
+                # away; a pinch has two tips at about the same distance.
                 is_at_fingertip = False
                 if hand_idx < len(all_fingertips) and hand_idx < len(all_palm_centers):
                     tips = all_fingertips[hand_idx]
                     palm = all_palm_centers[hand_idx]
                     palm_dist = ((pill_cx - palm["x"])**2 + (pill_cy - palm["y"])**2)**0.5
 
-                    min_tip_dist = float("inf")
-                    nearest_tip = -1
-                    for ti, tip in enumerate(tips):
-                        d = ((pill_cx - tip["x"])**2 + (pill_cy - tip["y"])**2)**0.5
-                        if d < min_tip_dist:
-                            min_tip_dist = d
-                            nearest_tip = ti
+                    ranked = sorted(
+                        (((pill_cx - tip["x"])**2 + (pill_cy - tip["y"])**2)**0.5, ti)
+                        for ti, tip in enumerate(tips))
+                    min_tip_dist, nearest_tip = ranked[0] if ranked else (float("inf"), -1)
+                    second_dist = ranked[1][0] if len(ranked) > 1 else float("inf")
 
-                    # Near fingertip AND far from palm = finger false positive
-                    if min_tip_dist < FINGERTIP_RADIUS and palm_dist > min_tip_dist * 2:
+                    if min_tip_dist < FINGERTIP_RADIUS and second_dist > min_tip_dist * LONE_TIP_RATIO:
                         is_at_fingertip = True
                         names = ["thumb", "index", "middle", "ring", "pinky"]
-                        print(f"  [FingertipCheck] Near {names[nearest_tip]} tip "
-                              f"(tip={min_tip_dist:.0f}px, palm={palm_dist:.0f}px) — false positive")
+                        print(f"  [FingertipCheck] On the {names[nearest_tip]} tip alone "
+                              f"(tip={min_tip_dist:.0f}px, next tip={second_dist:.0f}px, "
+                              f"palm={palm_dist:.0f}px) — false positive")
+                    elif min_tip_dist < FINGERTIP_RADIUS:
+                        print(f"  [FingertipCheck] Between two tips "
+                              f"(tip={min_tip_dist:.0f}px, next tip={second_dist:.0f}px) "
+                              f"— a grasp, not a fingertip")
 
                 effective = overlap * 0.1 if is_at_fingertip else overlap
 
@@ -1733,22 +1791,81 @@ class MedicationDetectionPipeline:
             print(f"[BatchAnalysis] Not enough valid frames ({len(valid_frames)} < 3)")
             return []
 
-        # Single ONNX batch call for all frames (~5s instead of ~38s)
+        # ── Hands first. The pill detector only where a hand is. ─────────
+        #
+        # A pass has to finish inside the rolling buffer or the frames captured
+        # while it runs age out without anybody looking at them. Measured 23 Oct
+        # 2026 on this machine: the pill model costs 500 ms a frame and does not
+        # get faster with fewer or more threads (2 threads 30.9 s, 7 threads
+        # 31.7 s for 60 frames, the middle worse than both), MediaPipe costs
+        # 101 ms. Sixty frames through both is 36 s against a 30 s buffer, so
+        # roughly one window in six was ever examined and a dose taken in the
+        # gaps left no trace at all.
+        #
+        # Running the cheap model first and the expensive one only where it can
+        # change the answer brings that to about 23 s. Nothing is lost: every
+        # phase already requires a hand -- Phase 1 is pill_in_hand AND hands>0,
+        # Phase 2 needs hands>0, Phase 3 needs hands>0 and not pill_in_hand --
+        # so a frame with no hand in it cannot contribute to a sequence however
+        # confident the pill detector is about it. On this session's frames 33
+        # of 57 had a hand, so about four frames in ten skip the 500 ms step.
+        #
+        # MediaPipe still runs on EVERY frame, in order: upward motion is
+        # computed from a rolling history of hand positions, and feeding it a
+        # subset would corrupt the motion score for the frames that remain.
         t0 = _time.time()
-        batch_results = self.detector.detect_batch(valid_frames)
-        t1 = _time.time()
-        print(f"[BatchAnalysis] YOLO batch: {len(valid_frames)} frames in {t1-t0:.1f}s")
-
-        # Now run MediaPipe on each frame + combine with YOLO results
-        analyzed = []
-        for fi, (vf, det_result) in enumerate(zip(valid_frames, batch_results)):
-            raw = vf["frame"]
-            detections = det_result["detections"]
+        gestures = []
+        for vf in valid_frames:
             try:
-                t_mp0 = _time.time()
-                gesture = self.gesture.analyze_frame(raw)
-                t_mp1 = _time.time()
-                hands = gesture["hands_detected"]
+                gestures.append(self.gesture.analyze_frame(vf["frame"]))
+            except Exception as e:
+                print(f"[BatchAnalysis] gesture failed on a frame: {e}")
+                gestures.append({"hands_detected": 0})
+        t_mp = _time.time() - t0
+        hand_frames = [i for i, g in enumerate(gestures)
+                       if (g.get("hands_detected") or 0) > 0]
+        print(f"[BatchAnalysis] Hands: {len(hand_frames)}/{len(valid_frames)} frames "
+              f"in {t_mp:.1f}s")
+
+        t0 = _time.time()
+        batch_results = [None] * len(valid_frames)
+        if hand_frames:
+            sub_results = self.detector.detect_batch(
+                [valid_frames[i] for i in hand_frames])
+            for i, r in zip(hand_frames, sub_results):
+                batch_results[i] = r
+        t1 = _time.time()
+        print(f"[BatchAnalysis] YOLO batch: {len(hand_frames)} of {len(valid_frames)} "
+              f"frames (the ones with a hand) in {t1-t0:.1f}s")
+
+        # Combine the two
+        analyzed = []
+        for fi, vf in enumerate(valid_frames):
+            raw = vf["frame"]
+            det_result = batch_results[fi]
+            detections = det_result["detections"] if det_result else []
+            try:
+                gesture = gestures[fi]
+                hands = gesture.get("hands_detected", 0) or 0
+
+                # The model misses this wearer's tablets entirely -- see
+                # find_pills_in_palm for the measurement. Shape-based
+                # candidates are added inside the hand boxes, and only there,
+                # so the rest of this function cannot tell which detector
+                # found what. Anything the model already boxed in the same
+                # place wins, because its confidence is a real score and this
+                # one is a constant.
+                if hands > 0:
+                    from .detector import find_pills_in_palm
+                    palm_hits = find_pills_in_palm(
+                        raw, gesture.get("all_hand_bboxes") or [])
+                    for cand in palm_hits:
+                        if not any(self._bbox_overlap(cand["bbox"], d["bbox"]) > 0.3
+                                   for d in detections):
+                            detections.append(cand)
+                    if palm_hits:
+                        print(f"  [PalmShape] {len(palm_hits)} pill-shaped blob(s) "
+                              f"in hand on frame {fi}")
                 best_pill = max((d["confidence"] for d in detections), default=0.0)
                 pih = False
                 overlap = 0.0
@@ -1767,7 +1884,7 @@ class MedicationDetectionPipeline:
 
                 print(f"  [F{fi}] pill={best_pill:.2f} dets={len(detections)} in_hand={pih} "
                       f"hands={hands} hand_y={hand_y:.2f} motion={motion:.2f} "
-                      f"near_top={near_top} mp={t_mp1-t_mp0:.2f}s")
+                      f"near_top={near_top}" + ("" if hands else " (no hand — pill model skipped)"))
 
                 analyzed.append({
                     "kf": vf["kf"], "frame": raw, "detections": detections,
@@ -2192,9 +2309,20 @@ class MedicationDetectionPipeline:
             # f1/f2/f3 and answer "is that hand putting a pill in a mouth".
             # Until it does, a pill on its own is not evidence of a dose.
             if any_pill and len(analyzed) >= 3:
-                print("[BatchAnalysis] A pill was detected but no hand was ever "
-                      "recognised, so no intake is claimed; keeping the 3 "
-                      "clearest pill frames for review")
+                # Say which of the two it was. "No hand was ever recognised"
+                # was printed in both cases, including sessions with two hands
+                # in nearly every frame, and it sent the reader looking at
+                # MediaPipe when the pill-in-hand geometry was what refused.
+                _with_hands = sum(1 for a in analyzed if a["hands"] > 0)
+                if _with_hands == 0:
+                    _why = "no hand was ever recognised"
+                else:
+                    _why = (f"a hand was recognised in {_with_hands} of "
+                            f"{len(analyzed)} frames, but no pill was ever "
+                            f"judged to be in one")
+                print(f"[BatchAnalysis] A pill was detected but {_why}, so no "
+                      "intake is claimed; keeping the 3 clearest pill frames "
+                      "for review")
                 import uuid as _uuid
                 sorted_by_pill = sorted(analyzed, key=lambda x: x["best_pill"], reverse=True)
                 top_3 = sorted(sorted_by_pill[:3], key=lambda x: analyzed.index(x))

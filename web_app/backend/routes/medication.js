@@ -116,6 +116,11 @@ async function rejectIntakeEventLog(userId, logId) {
     const qs = new URLSearchParams({ user_id: String(userId), medication_id: medicationId });
     if (lo) qs.set('since', lo.toISOString());
     if (hi) qs.set('until', hi.toISOString());
+    // Name the dose. Evidence written since 23 Oct 2026 records which log rows
+    // it belongs to, so this clears exactly the rejected dose's pictures and
+    // leaves the 03:15 dose alone when the 03:00 one is rejected. Older frames
+    // have no such field and fall back to the window above.
+    if (logId) qs.set('medication_log_id', String(logId));
     try {
       const r = await fetch(
         `${process.env.AI_BACKEND_URL || 'http://127.0.0.1:8000'}`
