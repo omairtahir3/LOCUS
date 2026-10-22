@@ -478,8 +478,7 @@ than code are marked as such.
 
 **Not implemented, and stated as such.** Transport is plain HTTP on the local
 network; TLS is a hosting step. The database is a local `mongod` without
-encryption at rest. `express-validator` is listed as a dependency but is not
-used by any route. CORS is currently open (`app.use(cors())`) rather than
+encryption at rest. CORS is currently open (`app.use(cors())`) rather than
 restricted to known origins.
 
 ---
