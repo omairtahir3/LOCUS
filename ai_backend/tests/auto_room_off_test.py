@@ -44,7 +44,12 @@ from pymongo import MongoClient
 
 from ai import privacy
 
-UID = '6a6e439595ff22c2e2f91416'
+# The suite's own user, not the wearer's. These tests create frames and
+# purge them; pointed at the real account they deleted whatever the camera
+# had just captured and marked the rows "the bathroom is private", which
+# read exactly like the washroom rule misfiring. See _test_user.py.
+from _test_user import TEST_UID, ensure_test_user
+UID = ensure_test_user()
 PASS = FAIL = 0
 
 
