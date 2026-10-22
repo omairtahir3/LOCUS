@@ -147,6 +147,15 @@ class FaceRecognitionPlugin(DetectorPlugin):
         # kps is the 5-point set that comes WITH detection, which is what
         # _calculate_frontality uses -- it does not need the 106- or 68-point
         # models.
+        # Cap InsightFace's threads too. onnxruntime defaults to every logical
+        # processor per session, and buffalo_l runs two of them, so unbudgeted
+        # this alone asked for 16 threads on 4 physical cores. The environment
+        # variables are read by onnxruntime when it builds its thread pools,
+        # which is the only hook FaceAnalysis leaves open -- it constructs its
+        # own InferenceSessions and takes no SessionOptions.
+        _ft = os.environ.get("FACE_THREADS", "2")
+        os.environ.setdefault("OMP_NUM_THREADS", _ft)
+        os.environ.setdefault("OMP_THREAD_LIMIT", _ft)
         self.app = FaceAnalysis(name='buffalo_l',
                                 allowed_modules=['detection', 'recognition'],
                                 providers=['CPUExecutionProvider'])

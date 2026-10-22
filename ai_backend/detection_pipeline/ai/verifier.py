@@ -116,7 +116,17 @@ def _load():
         try:
             import timm
             import torch
-            torch.set_num_threads(os.cpu_count() or 4)
+            # Process-wide, so this one line governs MobileNetV3 and
+            # ultralytics as well as DINOv2.
+            #
+            # It used to read os.cpu_count(), which is the LOGICAL count: 8 on
+            # a machine with 4 physical cores. Together with the pill
+            # detector's 7 that put roughly 23 threads on 4 cores, and
+            # everything slowed down at once -- one frame through the item
+            # indexer costs 1.2 s idle and was measured at 29 s and 69 s
+            # during a medication window, which is where the three-minute lag
+            # in the item feed came from.
+            torch.set_num_threads(int(os.environ.get("TORCH_THREADS", 2)))
             m = timm.create_model(VERIFY_MODEL, pretrained=True, num_classes=0).eval()
             cfg = timm.data.resolve_data_config({}, model=m)
             _transform = timm.data.create_transform(**cfg)
