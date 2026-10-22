@@ -15,7 +15,6 @@ import axios from 'axios';
 const HOST = ['localhost', '::1', ''].includes(window.location.hostname)
   ? '127.0.0.1' : window.location.hostname;
 const API_BASE = `http://${HOST}:5000/api`;
-const PYTHON_API_BASE = `http://${HOST}:8000/api`;
 
 const api = axios.create({
   baseURL: API_BASE,
