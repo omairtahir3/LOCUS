@@ -18,7 +18,9 @@ class ApiService {
   /// the first time the router hands out a different lease. It said
   /// 192.168.1.5 while the machine was on 192.168.1.14, so the phone was
   /// talking to nothing and EVERY screen looked broken rather than one.
-  /// It has since moved again, to .16, which is the whole point.
+  /// It has since moved again, to .16, and then onto a different subnet
+  /// entirely -- 10.113.72.194 on 23 Oct 2026 -- which is the whole point:
+  /// the built-in value is a starting guess, not an address to rely on.
   ///
   /// The stored value wins, so correcting it is a few seconds in Settings
   /// instead of a rebuild. Nothing else in the app needs to know.
@@ -47,7 +49,7 @@ class ApiService {
     const customUrl = String.fromEnvironment('API_URL');
     if (customUrl.isNotEmpty) return customUrl;
     
-    return 'http://192.168.1.10:5000/api';
+    return 'http://10.113.72.194:5000/api';
   }
 
   /// The address the user has set, or null when the built-in one is in use.
