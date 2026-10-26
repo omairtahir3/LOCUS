@@ -13,7 +13,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
 
 :root {
-  /* Accent: amber, the only warm highlight. Light theme only. */
+  /* Primary: teal, for actions (buttons, links, focus). White on it 5.5:1. */
+  --lc-primary: #0F766E;
+  --lc-primary-hover: #115E59;
+  --lc-on-primary: #FFFFFF;
+
+  /* Accent: amber, the one warm highlight. Light theme only. */
   --lc-accent: #E9A23B;
   --lc-on-accent: #1C1A17;
 
@@ -26,7 +31,7 @@
   --lc-text-2: #544E46;
   --lc-text-muted: #6B645A;
   --lc-accent-text: #8A5508;
-  --lc-focus: #8A5508;
+  --lc-focus: #0F766E;
 
   /* Status: colour + tint. Always with an icon and a word. */
   --lc-taken: #23704A;        --lc-taken-bg: #E3F1E8;

@@ -142,8 +142,8 @@ class AppTheme {
       brightness: p.brightness,
       colorScheme: ColorScheme(
         brightness: p.brightness,
-        primary: p.accent,
-        onPrimary: p.onAccent,
+        primary: p.primary,
+        onPrimary: p.onPrimary,
         secondary: p.accentText,
         onSecondary: p.surface,
         error: p.status.danger,
@@ -172,8 +172,8 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: p.accent,
-          foregroundColor: p.onAccent,
+          backgroundColor: p.primary,
+          foregroundColor: p.onPrimary,
           elevation: 0,
           minimumSize: tap,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -191,7 +191,7 @@ class AppTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: p.accentText, minimumSize: tap),
+        style: TextButton.styleFrom(foregroundColor: p.primary, minimumSize: tap),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -206,7 +206,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(LocusTokens.radiusMd),
-          borderSide: BorderSide(color: p.accentText, width: 2),
+          borderSide: BorderSide(color: p.primary, width: 2),
         ),
         hintStyle: TextStyle(color: p.textMuted),
         labelStyle: TextStyle(color: p.text2),
@@ -257,17 +257,19 @@ class LocusStatus {
 }
 
 /// The palette (light theme only); values match src/tokens.css, each text pair
-/// checked at >= 4.5:1. Amber [accent] is a fill only; text uses [accentText].
+/// checked at >= 4.5:1. Teal [primary] is for actions; amber [accent] is a
+/// fill only, and text in that hue uses [accentText].
 class LocusPalette {
   final Brightness brightness;
   final Color bg, surface, surface2, border, text, text2, textMuted;
-  final Color accent, onAccent, accentText, shadow;
+  final Color primary, onPrimary, accent, onAccent, accentText, shadow;
   final LocusStatus status;
   const LocusPalette({
     required this.brightness,
     required this.bg, required this.surface, required this.surface2,
     required this.border, required this.text, required this.text2,
-    required this.textMuted, required this.accent, required this.onAccent,
+    required this.textMuted, required this.primary, required this.onPrimary,
+    required this.accent, required this.onAccent,
     required this.accentText, required this.shadow, required this.status,
   });
 
@@ -276,7 +278,9 @@ class LocusPalette {
     brightness: Brightness.light,
     bg: Color(0xFFF7F3EC), surface: Color(0xFFFFFDF9), surface2: Color(0xFFEFE8DC),
     border: Color(0xFFE1D8C9), text: Color(0xFF1C1A17), text2: Color(0xFF544E46),
-    textMuted: Color(0xFF6B645A), accent: Color(0xFFE9A23B),
+    textMuted: Color(0xFF6B645A),
+    primary: Color(0xFF0F766E), onPrimary: Color(0xFFFFFFFF),
+    accent: Color(0xFFE9A23B),
     onAccent: Color(0xFF1C1A17), accentText: Color(0xFF8A5508),
     shadow: Color(0x1F3C280F),
     status: LocusStatus(

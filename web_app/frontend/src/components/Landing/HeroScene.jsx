@@ -19,7 +19,7 @@ const ease = (a, b, x) => {
 const lerp = (a, b, t) => a + (b - a) * t;
 
 const FOV = 26;
-const FRONT_YAW = 0.35;        // three-quarter front view
+const FRONT_YAW = -0.7;        // three-quarter front, lens side, as in reference 2
 const SIDE_YAW = 1.0;          // left side towards the viewer, door seen at an angle
 // Where each card settles, in card order (degrees on an ellipse round the
 // model): the tall dose card takes the top, later cards spread to the sides.
@@ -95,10 +95,10 @@ function Scene({ state, cards, cardEls, lite }) {
     rig.current.spill = ease(...BEATS.spill, p) * (1 - ease(...BEATS.close, p));
 
     const g = rigGroup.current;
-    g.rotation.y = lerp(lerp(-0.9, FRONT_YAW, intro), SIDE_YAW, turn);
-    g.rotation.x = 0.1;
+    g.rotation.y = lerp(lerp(-1.3, FRONT_YAW, intro), SIDE_YAW, turn);
+    g.rotation.x = lerp(0.2, 0.1, turn);  // seen from a little above, as in the photos
     // Larger on its own; steps back while the cards are out.
-    g.scale.setScalar(lerp(1.35, 1, ease(BEATS.turn[0], BEATS.cardStart, p) * (1 - ease(...BEATS.front, p))));
+    g.scale.setScalar(lerp(1.6, 1, ease(BEATS.turn[0], BEATS.cardStart, p) * (1 - ease(...BEATS.front, p))));
     g.position.y = lerp(-0.12, 0, intro);
     g.updateMatrixWorld();
 

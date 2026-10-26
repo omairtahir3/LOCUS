@@ -215,7 +215,7 @@ export default function Landing() {
           </p>
         </section>
 
-        <section id="how" className="lp-section lp-grid lp-band how" aria-labelledby="how-title">
+        <section id="how" className="lp-section lp-grid lp-band lp-band--mint how" aria-labelledby="how-title">
           <h2 id="how-title">How it works</h2>
           <ol className="how-steps">
             <li>
