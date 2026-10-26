@@ -114,49 +114,67 @@ export default function CameraModel({ rig }) {
       {/* Body */}
       <RoundedBox args={[W, H, D]} radius={0.16} smoothness={6}>{rubber}</RoundedBox>
 
-      {/* Lens, left half of the front: squared housing, thick bezel, coated glass */}
-      <group position={[-0.33, 0.04, FRONT]}>
-        <RoundedBox args={[0.58, 0.58, 0.1]} radius={0.11} smoothness={4} position={[0, 0, 0.02]}>
-          <meshPhysicalMaterial color="#0E0E10" roughness={0.55} />
+      {/* Front screen on the left half, nearly full height, LED above it and
+          the wordmark low on the glass where the logo would be */}
+      <RoundedBox args={[0.6, 0.8, 0.02]} radius={0.05} smoothness={3} position={[-0.33, -0.01, FRONT + 0.002]}>
+        <meshPhysicalMaterial color="#060709" roughness={0.12} clearcoat={1} envMapIntensity={0.35} emissive="#1E2C3B" emissiveIntensity={0.15} />
+      </RoundedBox>
+      <mesh position={[-0.33, -0.29, FRONT + 0.014]}>
+        <planeGeometry args={[0.3, 0.3]} />
+        <meshBasicMaterial map={tex.mark} transparent />
+      </mesh>
+      <mesh position={[-0.33, 0.3, FRONT + 0.014]}>
+        <boxGeometry args={[0.07, 0.022, 0.004]} />
+        <meshBasicMaterial color={AMBER} />
+      </mesh>
+
+      {/* Lens on the right half: a large raised square housing, thick bezel,
+          blue-violet coated glass with a small inner ring */}
+      <group position={[0.38, 0.13, FRONT]}>
+        <RoundedBox args={[0.6, 0.6, 0.16]} radius={0.12} smoothness={5} position={[0, 0, 0.04]}>
+          <meshPhysicalMaterial color="#0E0E10" roughness={0.55} envMapIntensity={0.5} />
         </RoundedBox>
-        <mesh rotation-x={Math.PI / 2} position={[0, 0, 0.09]}>
-          <cylinderGeometry args={[0.215, 0.225, 0.05, 64]} />
+        <RoundedBox args={[0.46, 0.46, 0.02]} radius={0.07} smoothness={3} position={[0, 0, 0.12]}>
+          <meshPhysicalMaterial color="#08080A" roughness={0.15} clearcoat={1} />
+        </RoundedBox>
+        <mesh rotation-x={Math.PI / 2} position={[0, 0, 0.14]}>
+          <cylinderGeometry args={[0.19, 0.2, 0.04, 64]} />
           <meshPhysicalMaterial color="#1E1E22" roughness={0.35} metalness={0.3} />
         </mesh>
-        <mesh position={[0, 0, 0.116]}>
-          <circleGeometry args={[0.175, 64]} />
+        <mesh position={[0, 0, 0.162]}>
+          <circleGeometry args={[0.15, 64]} />
           {glass}
         </mesh>
-        <mesh position={[0, 0, 0.118]}>
-          <torusGeometry args={[0.095, 0.009, 12, 64]} />
+        <mesh position={[0, 0, 0.164]}>
+          <torusGeometry args={[0.08, 0.008, 12, 64]} />
           <meshStandardMaterial color="#4A4A55" metalness={1} roughness={0.25} />
         </mesh>
-        <mesh position={[0, 0, 0.119]}>
-          <circleGeometry args={[0.045, 32]} />
+        <mesh position={[0, 0, 0.165]}>
+          <circleGeometry args={[0.038, 32]} />
           <meshBasicMaterial color="#030305" />
         </mesh>
       </group>
 
-      {/* Front status screen, right of the lens, and the wordmark under it */}
-      <RoundedBox args={[0.4, 0.4, 0.02]} radius={0.008} smoothness={2} position={[0.36, 0.08, FRONT + 0.002]}>
-        <meshPhysicalMaterial color="#0A0C10" roughness={0.08} clearcoat={1} emissive="#20303F" emissiveIntensity={0.35} />
-      </RoundedBox>
-      <mesh position={[0.36, -0.3, FRONT + 0.004]}>
-        <planeGeometry args={[0.32, 0.32]} />
-        <meshBasicMaterial map={tex.mark} transparent />
-      </mesh>
-      <mesh position={[0.6, 0.38, FRONT + 0.002]}>
-        <sphereGeometry args={[0.016, 16, 16]} />
-        <meshBasicMaterial color={AMBER} />
-      </mesh>
+      {/* Ribbed vent under the lens housing */}
+      <group position={[0.38, -0.33, FRONT]}>
+        <RoundedBox args={[0.54, 0.26, 0.04]} radius={0.03} smoothness={3} position={[0, 0, 0.01]}>
+          {rubber}
+        </RoundedBox>
+        {[-0.2, -0.133, -0.067, 0, 0.067, 0.133, 0.2].map(x => (
+          <mesh key={x} position={[x, 0, 0.032]}>
+            <boxGeometry args={[0.022, 0.2, 0.012]} />
+            <meshPhysicalMaterial color="#0B0B0D" roughness={0.7} />
+          </mesh>
+        ))}
+      </group>
 
       {/* Rear touchscreen */}
       <RoundedBox args={[1.12, 0.8, 0.02]} radius={0.008} smoothness={2} position={[0, 0, -FRONT - 0.002]}>
         <meshPhysicalMaterial color="#090B0F" roughness={0.06} clearcoat={1} emissive="#1A2633" emissiveIntensity={0.3} />
       </RoundedBox>
 
-      {/* Shutter on top, mode button on the right side */}
-      <mesh position={[0.4, H / 2 + 0.015, 0]}>
+      {/* Shutter on top, mode button on the right (lens) side */}
+      <mesh position={[-0.25, H / 2 + 0.015, 0]}>
         <cylinderGeometry args={[0.11, 0.11, 0.04, 40]} />
         <meshPhysicalMaterial color="#26262B" roughness={0.5} />
       </mesh>

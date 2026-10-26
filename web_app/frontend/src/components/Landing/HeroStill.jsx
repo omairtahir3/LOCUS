@@ -26,8 +26,9 @@ export function HeroCard({ card }) {
   );
 }
 
-// The camera drawn flat, front view: the loading placeholder (no cards) and
-// the fallback when WebGL is unavailable (with the cards laid out below).
+// The camera drawn flat, front view (screen left, lens right): the loading
+// placeholder (no cards) and the fallback when WebGL is unavailable (with
+// the cards laid out below).
 export default function HeroStill({ cards = [] }) {
   return (
     <div className={`hero-still ${cards.length ? 'hero-still--cards' : ''}`}>
@@ -42,18 +43,23 @@ export default function HeroStill({ cards = [] }) {
         <ellipse cx="150" cy="238" rx="110" ry="8" fill="#2B2219" opacity="0.12" />
         <rect x="128" y="196" width="13" height="34" rx="4" fill="#18181B" />
         <rect x="159" y="196" width="13" height="34" rx="4" fill="#18181B" />
-        <rect x="190" y="18" width="40" height="8" rx="4" fill="#26262B" />
-        <rect x="30" y="24" width="240" height="172" rx="30" fill="#18181B" />
-        <rect x="50" y="44" width="100" height="100" rx="20" fill="#0E0E10" />
-        <circle cx="100" cy="94" r="39" fill="#1E1E22" />
-        <circle cx="100" cy="94" r="31" fill="url(#still-glass)" />
-        <circle cx="100" cy="94" r="17" fill="none" stroke="#4A4A55" strokeWidth="2" />
-        <circle cx="100" cy="94" r="8" fill="#030305" />
-        <ellipse cx="90" cy="82" rx="8" ry="5" fill="#FFFFFF" opacity="0.25" />
-        <rect x="168" y="55" width="70" height="70" rx="4" fill="#0A0C10" stroke="#2A2D33" />
-        <text x="203" y="162" textAnchor="middle" fontSize="15" fontWeight="700" fill="#9C968F"
+        <rect x="80" y="18" width="40" height="8" rx="4" fill="#26262B" />
+        <rect x="30" y="24" width="240" height="172" rx="30" fill="#101012" />
+        {/* front screen, left; LED above; wordmark low on the glass */}
+        <rect x="46" y="42" width="104" height="136" rx="10" fill="#0A0C10" stroke="#2A2D33" />
+        <rect x="92" y="50" width="12" height="4" rx="2" fill="#E9A23B" />
+        <text x="98" y="164" textAnchor="middle" fontSize="14" fontWeight="700" fill="#9C968F"
           fontFamily="'Bricolage Grotesque', system-ui, sans-serif">LOCUS</text>
-        <circle cx="246" cy="42" r="3" fill="#E9A23B" />
+        {/* lens housing, right, with the ribbed vent below */}
+        <rect x="160" y="30" width="104" height="104" rx="22" fill="#0E0E10" stroke="#26262B" strokeWidth="2" />
+        <rect x="170" y="40" width="84" height="84" rx="14" fill="#08080A" />
+        <circle cx="212" cy="82" r="34" fill="#1E1E22" />
+        <circle cx="212" cy="82" r="27" fill="url(#still-glass)" />
+        <circle cx="212" cy="82" r="14" fill="none" stroke="#4A4A55" strokeWidth="2" />
+        <circle cx="212" cy="82" r="6" fill="#030305" />
+        <ellipse cx="203" cy="72" rx="7" ry="4" fill="#FFFFFF" opacity="0.25" />
+        <rect x="166" y="140" width="92" height="44" rx="6" fill="#141417" />
+        {[176, 189, 202, 215, 228, 241].map(x => <rect key={x} x={x} y="146" width="5" height="32" rx="2" fill="#0A0A0C" />)}
       </svg>
       {cards.length > 0 && (
         <div className="hero-still-cards">
