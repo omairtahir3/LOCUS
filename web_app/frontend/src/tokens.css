@@ -6,19 +6,14 @@
    replacing them; pages move over one phase at a time.
 
    Every text/background pair below was checked at >= 4.5:1. The amber
-   --lc-accent is a fill and a dark-background colour only: on light surfaces
-   text uses --lc-accent-text. Status colours are never meant to stand alone;
-   pair each with its icon and label. */
+   --lc-accent is a fill colour only: text on light surfaces uses
+   --lc-accent-text. Light theme only; there is no dark set. Status
+   colours are never meant to stand alone; pair each with its icon and
+   label. */
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
 
 :root {
-  /* Ink: the landing page, always dark */
-  --lc-ink: #0E0D0B;
-  --lc-ink-2: #1A1814;
-  --lc-ink-text: #F3EEE6;
-  --lc-ink-muted: #A39A8D;
-
-  /* Accent: amber, the only warm highlight */
+  /* Accent: amber, the only warm highlight. Light theme only. */
   --lc-accent: #E9A23B;
   --lc-on-accent: #1C1A17;
 
@@ -39,6 +34,13 @@
   --lc-missed: #8A3874;       --lc-missed-bg: #F4E4EF;
   --lc-camera-off: #535C68;   --lc-camera-off-bg: #E8EAEE;
   --lc-danger: #B42318;       --lc-danger-bg: #FBE5E1;
+
+  /* Capabilities: one hue each, for icons and accents on the landing page */
+  --lc-cap-dose: #1E6B57;     --lc-cap-dose-bg: #E2F0EA;
+  --lc-cap-face: #8A5508;     --lc-cap-face-bg: #F8EBD5;
+  --lc-cap-item: #2B5C9E;     --lc-cap-item-bg: #E3EBF6;
+  --lc-cap-talk: #7A3A8C;     --lc-cap-talk-bg: #F1E5F4;
+  --lc-cap-place: #A3431C;    --lc-cap-place-bg: #F8E6DD;
 
   /* Type */
   --lc-font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
@@ -82,28 +84,6 @@
   --lc-dur-base: 220ms;
   --lc-dur-slow: 420ms;
   --lc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-[data-theme='dark'] {
-  --lc-bg: #14120F;
-  --lc-surface: #1D1A16;
-  --lc-surface-2: #28241E;
-  --lc-border: #3A342C;
-  --lc-text: #F3EEE6;
-  --lc-text-2: #CAC2B6;
-  --lc-text-muted: #A1988B;
-  --lc-accent-text: #F0B65C;
-  --lc-focus: #F0B65C;
-
-  --lc-taken: #71C694;        --lc-taken-bg: #1C2E23;
-  --lc-verify: #85B5E6;       --lc-verify-bg: #1B2836;
-  --lc-missed: #DA92C6;       --lc-missed-bg: #33202D;
-  --lc-camera-off: #A9B1BC;   --lc-camera-off-bg: #262A30;
-  --lc-danger: #FF8B7B;       --lc-danger-bg: #3A1D19;
-
-  --lc-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-  --lc-shadow-2: 0 4px 12px rgb(0 0 0 / 0.45);
-  --lc-shadow-3: 0 16px 40px rgb(0 0 0 / 0.55);
 }
 
 /* Reduced motion: durations collapse, so anything built on these tokens

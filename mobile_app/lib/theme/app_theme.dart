@@ -117,7 +117,6 @@ class AppTheme {
   }
 
   static ThemeData get locusLight => _locus(LocusPalette.light);
-  static ThemeData get locusDark => _locus(LocusPalette.dark);
 
   static ThemeData _locus(LocusPalette p) {
     final body = GoogleFonts.plusJakartaSansTextTheme();
@@ -253,13 +252,11 @@ class LocusStatus {
     required this.danger, required this.dangerBg,
   });
 
-  static LocusStatus of(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? LocusPalette.dark.status
-          : LocusPalette.light.status;
+  // Light theme only, so there is one set.
+  static LocusStatus of(BuildContext context) => LocusPalette.light.status;
 }
 
-/// One palette per brightness; values match src/tokens.css, each text pair
+/// The palette (light theme only); values match src/tokens.css, each text pair
 /// checked at >= 4.5:1. Amber [accent] is a fill only; text uses [accentText].
 class LocusPalette {
   final Brightness brightness;
@@ -274,11 +271,6 @@ class LocusPalette {
     required this.accentText, required this.shadow, required this.status,
   });
 
-  // Landing ink, for any always-dark surface.
-  static const ink = Color(0xFF0E0D0B);
-  static const ink2 = Color(0xFF1A1814);
-  static const inkText = Color(0xFFF3EEE6);
-  static const inkMuted = Color(0xFFA39A8D);
 
   static const light = LocusPalette(
     brightness: Brightness.light,
@@ -296,19 +288,4 @@ class LocusPalette {
     ),
   );
 
-  static const dark = LocusPalette(
-    brightness: Brightness.dark,
-    bg: Color(0xFF14120F), surface: Color(0xFF1D1A16), surface2: Color(0xFF28241E),
-    border: Color(0xFF3A342C), text: Color(0xFFF3EEE6), text2: Color(0xFFCAC2B6),
-    textMuted: Color(0xFFA1988B), accent: Color(0xFFE9A23B),
-    onAccent: Color(0xFF1C1A17), accentText: Color(0xFFF0B65C),
-    shadow: Color(0x8C000000),
-    status: LocusStatus(
-      taken: Color(0xFF71C694), takenBg: Color(0xFF1C2E23),
-      verify: Color(0xFF85B5E6), verifyBg: Color(0xFF1B2836),
-      missed: Color(0xFFDA92C6), missedBg: Color(0xFF33202D),
-      cameraOff: Color(0xFFA9B1BC), cameraOffBg: Color(0xFF262A30),
-      danger: Color(0xFFFF8B7B), dangerBg: Color(0xFF3A1D19),
-    ),
-  );
 }
