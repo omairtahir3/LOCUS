@@ -18,7 +18,6 @@ const ease = (a, b, x) => {
 };
 const lerp = (a, b, t) => a + (b - a) * t;
 
-const BG = '#F7F3EC';          // --lc-bg, matched exactly (no tone mapping)
 const FOV = 26;
 const FRONT_YAW = 0.35;        // three-quarter front view
 const SIDE_YAW = 1.0;          // left side towards the viewer, door seen at an angle
@@ -141,8 +140,6 @@ function Scene({ state, cards, cardEls, lite }) {
 
   return (
     <>
-      <color attach="background" args={[BG]} />
-
       {/* Bright, neutral studio: soft boxes for reflections on the black body */}
       <Environment resolution={lite ? 64 : 256} frames={1}>
         <color attach="background" args={['#E8E3DA']} />
@@ -169,6 +166,7 @@ function Scene({ state, cards, cardEls, lite }) {
 // The lazy-loaded 3D hero. `state` is a plain object ({ p, intro }) shared
 // with the page: the scroll driver writes it, the scene reads it per frame.
 // The cards are DOM, positioned by the scene each frame, so text stays crisp.
+// The canvas has no background: the page ground and its light pool show through.
 export default function HeroScene({ state, cards, lite, scroll, trackRef, copyRef, stageRef }) {
   const cardEls = useRef([]);
   return (

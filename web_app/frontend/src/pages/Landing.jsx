@@ -215,7 +215,7 @@ export default function Landing() {
           </p>
         </section>
 
-        <section id="how" className="lp-section lp-grid how" aria-labelledby="how-title">
+        <section id="how" className="lp-section lp-grid lp-band how" aria-labelledby="how-title">
           <h2 id="how-title">How it works</h2>
           <ol className="how-steps">
             <li>
@@ -243,7 +243,7 @@ export default function Landing() {
           ))}
         </section>
 
-        <section id="privacy" className="lp-section lp-grid privacy" aria-labelledby="privacy-title">
+        <section id="privacy" className="lp-section lp-grid lp-band privacy" aria-labelledby="privacy-title">
           <h2 id="privacy-title">What it keeps, and what it doesn’t</h2>
           <dl className="privacy-list">
             {PRIVACY.map(([t, d]) => (
@@ -275,7 +275,7 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="lp-footer lp-grid">
+      <footer className="lp-footer lp-grid lp-band">
         <img src="/logo.png" alt="LOCUS" />
         <p>A final-year project and research prototype. LOCUS is not a medical device.</p>
         <p>© 2026 LOCUS</p>
