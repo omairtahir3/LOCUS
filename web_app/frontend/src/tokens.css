@@ -1,0 +1,117 @@
+/* LOCUS design tokens. The one source for colour, type, spacing, radii,
+   shadows and motion; mobile_app/lib/theme/app_theme.dart (LocusTokens)
+   carries the same values.
+
+   Prefixed --lc- so they sit beside the older variables in index.css without
+   replacing them; pages move over one phase at a time.
+
+   Every text/background pair below was checked at >= 4.5:1. The amber
+   --lc-accent is a fill and a dark-background colour only: on light surfaces
+   text uses --lc-accent-text. Status colours are never meant to stand alone;
+   pair each with its icon and label. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
+
+:root {
+  /* Ink: the landing page, always dark */
+  --lc-ink: #0E0D0B;
+  --lc-ink-2: #1A1814;
+  --lc-ink-text: #F3EEE6;
+  --lc-ink-muted: #A39A8D;
+
+  /* Accent: amber, the only warm highlight */
+  --lc-accent: #E9A23B;
+  --lc-on-accent: #1C1A17;
+
+  /* App surfaces, light */
+  --lc-bg: #F7F3EC;
+  --lc-surface: #FFFDF9;
+  --lc-surface-2: #EFE8DC;
+  --lc-border: #E1D8C9;
+  --lc-text: #1C1A17;
+  --lc-text-2: #544E46;
+  --lc-text-muted: #6B645A;
+  --lc-accent-text: #8A5508;
+  --lc-focus: #8A5508;
+
+  /* Status: colour + tint. Always with an icon and a word. */
+  --lc-taken: #23704A;        --lc-taken-bg: #E3F1E8;
+  --lc-verify: #2A5F94;       --lc-verify-bg: #E3ECF6;
+  --lc-missed: #8A3874;       --lc-missed-bg: #F4E4EF;
+  --lc-camera-off: #535C68;   --lc-camera-off-bg: #E8EAEE;
+  --lc-danger: #B42318;       --lc-danger-bg: #FBE5E1;
+
+  /* Type */
+  --lc-font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --lc-font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --lc-text-xs: 0.8125rem;   /* 13 */
+  --lc-text-sm: 0.9375rem;   /* 15 */
+  --lc-text-base: 1.0625rem; /* 17 */
+  --lc-text-lg: 1.25rem;     /* 20 */
+  --lc-text-xl: 1.5rem;      /* 24 */
+  --lc-text-2xl: 2rem;       /* 32 */
+  --lc-text-3xl: 2.75rem;    /* 44 */
+  --lc-text-display: clamp(3rem, 2rem + 5vw, 6.5rem);
+  --lc-leading-tight: 1.1;
+  --lc-leading-body: 1.55;
+
+  /* Spacing: 4px base */
+  --lc-space-1: 4px;
+  --lc-space-2: 8px;
+  --lc-space-3: 12px;
+  --lc-space-4: 16px;
+  --lc-space-5: 24px;
+  --lc-space-6: 32px;
+  --lc-space-7: 48px;
+  --lc-space-8: 72px;
+  --lc-space-9: 120px;
+  --lc-tap: 48px; /* minimum touch target */
+
+  /* Radii */
+  --lc-radius-sm: 10px;
+  --lc-radius-md: 16px;
+  --lc-radius-lg: 24px;
+  --lc-radius-pill: 999px;
+
+  /* Shadows: warm-tinted, soft */
+  --lc-shadow-1: 0 1px 2px rgb(60 40 15 / 0.06), 0 1px 1px rgb(60 40 15 / 0.04);
+  --lc-shadow-2: 0 4px 12px rgb(60 40 15 / 0.08), 0 1px 3px rgb(60 40 15 / 0.05);
+  --lc-shadow-3: 0 16px 40px rgb(60 40 15 / 0.12), 0 4px 10px rgb(60 40 15 / 0.06);
+
+  /* Motion: short, ease-out */
+  --lc-dur-fast: 140ms;
+  --lc-dur-base: 220ms;
+  --lc-dur-slow: 420ms;
+  --lc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-theme='dark'] {
+  --lc-bg: #14120F;
+  --lc-surface: #1D1A16;
+  --lc-surface-2: #28241E;
+  --lc-border: #3A342C;
+  --lc-text: #F3EEE6;
+  --lc-text-2: #CAC2B6;
+  --lc-text-muted: #A1988B;
+  --lc-accent-text: #F0B65C;
+  --lc-focus: #F0B65C;
+
+  --lc-taken: #71C694;        --lc-taken-bg: #1C2E23;
+  --lc-verify: #85B5E6;       --lc-verify-bg: #1B2836;
+  --lc-missed: #DA92C6;       --lc-missed-bg: #33202D;
+  --lc-camera-off: #A9B1BC;   --lc-camera-off-bg: #262A30;
+  --lc-danger: #FF8B7B;       --lc-danger-bg: #3A1D19;
+
+  --lc-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --lc-shadow-2: 0 4px 12px rgb(0 0 0 / 0.45);
+  --lc-shadow-3: 0 16px 40px rgb(0 0 0 / 0.55);
+}
+
+/* Reduced motion: durations collapse, so anything built on these tokens
+   obeys without its own media query. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lc-dur-fast: 1ms;
+    --lc-dur-base: 1ms;
+    --lc-dur-slow: 1ms;
+  }
+}

@@ -115,4 +115,200 @@ class AppTheme {
       ),
     );
   }
+
+  static ThemeData get locusLight => _locus(LocusPalette.light);
+  static ThemeData get locusDark => _locus(LocusPalette.dark);
+
+  static ThemeData _locus(LocusPalette p) {
+    final body = GoogleFonts.plusJakartaSansTextTheme();
+    TextStyle? display(TextStyle? s) =>
+        GoogleFonts.bricolageGrotesque(textStyle: s, fontWeight: FontWeight.w700);
+    final text = body
+        .copyWith(
+          displayLarge: display(body.displayLarge),
+          displayMedium: display(body.displayMedium),
+          displaySmall: display(body.displaySmall),
+          headlineLarge: display(body.headlineLarge),
+          headlineMedium: display(body.headlineMedium),
+          headlineSmall: display(body.headlineSmall),
+          titleLarge: display(body.titleLarge),
+        )
+        .apply(bodyColor: p.text, displayColor: p.text);
+    final shape = RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(LocusTokens.radiusMd));
+    const tap = Size(LocusTokens.tap, LocusTokens.tap);
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: p.brightness,
+      colorScheme: ColorScheme(
+        brightness: p.brightness,
+        primary: p.accent,
+        onPrimary: p.onAccent,
+        secondary: p.accentText,
+        onSecondary: p.surface,
+        error: p.status.danger,
+        onError: p.surface,
+        surface: p.surface,
+        onSurface: p.text,
+        onSurfaceVariant: p.text2,
+        surfaceContainerHighest: p.surface2,
+        outline: p.border,
+      ),
+      scaffoldBackgroundColor: p.bg,
+      textTheme: text,
+      appBarTheme: AppBarTheme(
+        backgroundColor: p.bg,
+        foregroundColor: p.text,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        titleTextStyle: text.titleLarge,
+      ),
+      cardTheme: CardThemeData(
+        color: p.surface,
+        elevation: 1,
+        shadowColor: p.shadow,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(LocusTokens.radiusLg)),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: p.accent,
+          foregroundColor: p.onAccent,
+          elevation: 0,
+          minimumSize: tap,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          shape: shape,
+          textStyle: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: p.text,
+          side: BorderSide(color: p.border),
+          minimumSize: tap,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          shape: shape,
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(foregroundColor: p.accentText, minimumSize: tap),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: p.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(LocusTokens.radiusMd),
+          borderSide: BorderSide(color: p.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(LocusTokens.radiusMd),
+          borderSide: BorderSide(color: p.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(LocusTokens.radiusMd),
+          borderSide: BorderSide(color: p.accentText, width: 2),
+        ),
+        hintStyle: TextStyle(color: p.textMuted),
+        labelStyle: TextStyle(color: p.text2),
+      ),
+      dividerTheme: DividerThemeData(color: p.border, thickness: 1),
+      chipTheme: ChipThemeData(
+        showCheckmark: false,
+        backgroundColor: p.surface2,
+        labelStyle: text.labelMedium,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(LocusTokens.radiusPill)),
+        side: BorderSide.none,
+      ),
+    );
+  }
+}
+
+/// Spacing, radii, touch target and motion; same numbers as src/tokens.css.
+class LocusTokens {
+  static const space1 = 4.0, space2 = 8.0, space3 = 12.0, space4 = 16.0;
+  static const space5 = 24.0, space6 = 32.0, space7 = 48.0, space8 = 72.0;
+  static const radiusSm = 10.0, radiusMd = 16.0, radiusLg = 24.0, radiusPill = 999.0;
+  static const tap = 48.0;
+  static const durFast = Duration(milliseconds: 140);
+  static const durBase = Duration(milliseconds: 220);
+  static const durSlow = Duration(milliseconds: 420);
+  static const easeOut = Cubic(0.22, 1, 0.36, 1);
+
+  /// [d], or zero when the system asks for reduced animations.
+  static Duration motion(BuildContext context, Duration d) =>
+      MediaQuery.of(context).disableAnimations ? Duration.zero : d;
+}
+
+/// Status colours: always shown with an icon and a word, never alone.
+class LocusStatus {
+  final Color taken, takenBg, verify, verifyBg, missed, missedBg;
+  final Color cameraOff, cameraOffBg, danger, dangerBg;
+  const LocusStatus({
+    required this.taken, required this.takenBg,
+    required this.verify, required this.verifyBg,
+    required this.missed, required this.missedBg,
+    required this.cameraOff, required this.cameraOffBg,
+    required this.danger, required this.dangerBg,
+  });
+
+  static LocusStatus of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? LocusPalette.dark.status
+          : LocusPalette.light.status;
+}
+
+/// One palette per brightness; values match src/tokens.css, each text pair
+/// checked at >= 4.5:1. Amber [accent] is a fill only; text uses [accentText].
+class LocusPalette {
+  final Brightness brightness;
+  final Color bg, surface, surface2, border, text, text2, textMuted;
+  final Color accent, onAccent, accentText, shadow;
+  final LocusStatus status;
+  const LocusPalette({
+    required this.brightness,
+    required this.bg, required this.surface, required this.surface2,
+    required this.border, required this.text, required this.text2,
+    required this.textMuted, required this.accent, required this.onAccent,
+    required this.accentText, required this.shadow, required this.status,
+  });
+
+  // Landing ink, for any always-dark surface.
+  static const ink = Color(0xFF0E0D0B);
+  static const ink2 = Color(0xFF1A1814);
+  static const inkText = Color(0xFFF3EEE6);
+  static const inkMuted = Color(0xFFA39A8D);
+
+  static const light = LocusPalette(
+    brightness: Brightness.light,
+    bg: Color(0xFFF7F3EC), surface: Color(0xFFFFFDF9), surface2: Color(0xFFEFE8DC),
+    border: Color(0xFFE1D8C9), text: Color(0xFF1C1A17), text2: Color(0xFF544E46),
+    textMuted: Color(0xFF6B645A), accent: Color(0xFFE9A23B),
+    onAccent: Color(0xFF1C1A17), accentText: Color(0xFF8A5508),
+    shadow: Color(0x1F3C280F),
+    status: LocusStatus(
+      taken: Color(0xFF23704A), takenBg: Color(0xFFE3F1E8),
+      verify: Color(0xFF2A5F94), verifyBg: Color(0xFFE3ECF6),
+      missed: Color(0xFF8A3874), missedBg: Color(0xFFF4E4EF),
+      cameraOff: Color(0xFF535C68), cameraOffBg: Color(0xFFE8EAEE),
+      danger: Color(0xFFB42318), dangerBg: Color(0xFFFBE5E1),
+    ),
+  );
+
+  static const dark = LocusPalette(
+    brightness: Brightness.dark,
+    bg: Color(0xFF14120F), surface: Color(0xFF1D1A16), surface2: Color(0xFF28241E),
+    border: Color(0xFF3A342C), text: Color(0xFFF3EEE6), text2: Color(0xFFCAC2B6),
+    textMuted: Color(0xFFA1988B), accent: Color(0xFFE9A23B),
+    onAccent: Color(0xFF1C1A17), accentText: Color(0xFFF0B65C),
+    shadow: Color(0x8C000000),
+    status: LocusStatus(
+      taken: Color(0xFF71C694), takenBg: Color(0xFF1C2E23),
+      verify: Color(0xFF85B5E6), verifyBg: Color(0xFF1B2836),
+      missed: Color(0xFFDA92C6), missedBg: Color(0xFF33202D),
+      cameraOff: Color(0xFFA9B1BC), cameraOffBg: Color(0xFF262A30),
+      danger: Color(0xFFFF8B7B), dangerBg: Color(0xFF3A1D19),
+    ),
+  );
 }
