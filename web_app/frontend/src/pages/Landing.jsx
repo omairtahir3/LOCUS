@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import HeroStill from '../components/Landing/HeroStill';
+import Background from '../components/Landing/Background';
 import { HERO_CARDS, BEATS, cardWindow, OPEN_STILL } from '../components/Landing/heroCards';
 import './Landing.css';
 
@@ -142,6 +143,7 @@ export default function Landing() {
 
   return (
     <div className="lp">
+      <Background />
       <nav className="lp-nav" aria-label="Main">
         <div className="lp-nav-inner">
           <Link to="/" className="lp-logo"><img src="/logo.png" alt="LOCUS" /></Link>
@@ -188,6 +190,7 @@ export default function Landing() {
             )}
 
             <div className="hero-visual" aria-hidden="true">
+              <div className="bg-spotlight" />
               {env.webgl ? (
                 <SceneBoundary fallback={still}>
                   <Suspense fallback={scroll ? <HeroStill /> : still}>
@@ -202,7 +205,7 @@ export default function Landing() {
       </header>
 
       <main>
-        <section className="lp-section lp-grid problem" aria-labelledby="problem-title">
+        <section className="lp-section lp-grid tone-tint problem" aria-labelledby="problem-title">
           <h2 id="problem-title" className="lp-kicker">Four questions, asked again and again</h2>
           <ul className="problem-list">
             {QUESTIONS.map(q => <li key={q}>{q}</li>)}
@@ -214,7 +217,7 @@ export default function Landing() {
           </p>
         </section>
 
-        <section id="how" className="lp-section lp-grid lp-band how" aria-labelledby="how-title">
+        <section id="how" className="lp-section lp-grid tone-plain how" aria-labelledby="how-title">
           <h2 id="how-title">How it works</h2>
           <ol className="how-steps">
             <li>
@@ -232,7 +235,7 @@ export default function Landing() {
           </ol>
         </section>
 
-        <section className="lp-section caps" aria-label="What LOCUS answers">
+        <section className="lp-section tone-tint caps" aria-label="What LOCUS answers">
           {CAPABILITIES.map(c => (
             <article key={c.q} className="cap lp-grid">
               <h2 className="cap-q">{c.q}</h2>
@@ -242,7 +245,7 @@ export default function Landing() {
           ))}
         </section>
 
-        <section id="privacy" className="lp-section lp-grid lp-band privacy" aria-labelledby="privacy-title">
+        <section id="privacy" className="lp-section lp-grid tone-plain privacy" aria-labelledby="privacy-title">
           <h2 id="privacy-title">What it keeps, and what it doesn’t</h2>
           <dl className="privacy-list">
             {PRIVACY.map(([t, d]) => (
@@ -251,7 +254,7 @@ export default function Landing() {
           </dl>
         </section>
 
-        <section className="lp-section lp-grid who" aria-labelledby="who-title">
+        <section className="lp-section lp-grid tone-tint who" aria-labelledby="who-title">
           <h2 id="who-title">Made for two people</h2>
           <div className="who-col">
             <h3>The person wearing it</h3>
@@ -274,7 +277,7 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="lp-footer lp-grid lp-band">
+      <footer className="lp-footer lp-grid tone-plain">
         <img src="/logo.png" alt="LOCUS" />
         <p>A final-year project and research prototype. LOCUS is not a medical device.</p>
         <p>© 2026 LOCUS</p>

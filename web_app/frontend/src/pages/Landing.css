@@ -6,29 +6,22 @@
    paragraph in a section starts on column 1, so each section has one left
    edge. Vertical spacing uses only the --lc-space-* scale. */
 
-/* The website ground is soft mint (--lc-ground) with a faint grain, so the
-   light page does not read as flat white. Full-width deeper-mint bands
-   (.lp-band, --lc-band) give the sections a rhythm. Text on either stays
-   --lc-text or --lc-text-2 (>= 6.2:1); --lc-text-muted is not used on them. */
-body:has(.lp) {
-  background-color: var(--lc-ground);
-  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .24 0 0 0 0 .18 0 0 0 0 .1 0 0 0 .08 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  background-image: var(--grain);
-}
+/* Background, section tones and the hero spotlight live in
+   components/Landing/Background.css. */
 
 .lp {
   --gutter: 32px;            /* page edge */
   --col-gap: 24px;           /* between columns */
   --max: 1280px;
   --nav-h: 72px;
-  --ground: var(--lc-ground);
-  --band: var(--lc-band);
-  --band-line: #B9D1C4;
   color: var(--lc-text);
   font-family: var(--lc-font-body);
   font-size: 1.15rem;        /* ~17px */
   line-height: var(--lc-leading-body);
+  overflow-x: clip;          /* full-bleed tones and waves never scroll sideways */
 }
+/* Page content sits above the fixed background layers. */
+.lp > header, .lp > main, .lp > footer { position: relative; z-index: 1; }
 @media (max-width: 899px) {
   .lp { --gutter: 20px; --col-gap: 16px; }
 }
@@ -94,7 +87,7 @@ body:has(.lp) {
   inset: 0 0 auto;
   z-index: 50;
   height: var(--nav-h);
-  background: rgb(226 236 231 / 0.86);
+  background: color-mix(in srgb, var(--lc-bg) 80%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgb(28 26 23 / 0.06);
 }
@@ -130,18 +123,6 @@ body:has(.lp) {
    Desktop: copy and captions on the left half, the scene on the right
    half; the whole stage sticks while the track scrolls past.
    Mobile: copy first; then captions and scene stick, one above the other. */
-/* Soft colour fields behind the hero, pinned to the viewport while the
-   tall track scrolls: teal from the top right, warm amber from the bottom
-   left, faint enough that body text stays above 7:1. */
-.lp {
-  --hero-fields:
-    radial-gradient(50% 60% at 100% 0%, rgb(15 118 110 / 0.14), rgb(15 118 110 / 0) 70%),
-    radial-gradient(45% 60% at 0% 100%, rgb(233 162 59 / 0.16), rgb(233 162 59 / 0) 70%);
-}
-.hero {
-  background-image: var(--hero-fields);
-  background-attachment: fixed;
-}
 .hero-stage {
   position: relative;
   height: 100vh;
@@ -192,8 +173,6 @@ body:has(.lp) {
   grid-row: 1 / -1;
   position: relative;
   min-height: 0;
-  /* Soft studio light behind the camera; the canvas is transparent. */
-  background: radial-gradient(closest-side at 50% 56%, rgb(255 253 248 / 0.95), rgb(255 253 248 / 0.55) 45%, rgb(255 253 248 / 0) 100%);
 }
 .hero-canvas { position: absolute !important; inset: 0; }
 .hero-canvas canvas { cursor: grab; touch-action: pan-y; }  /* horizontal drags turn the camera */
@@ -209,11 +188,10 @@ body:has(.lp) {
     height: 8.6em;
     margin: 0;
     padding: var(--lc-space-4) var(--gutter) 0;
-    /* Opaque, but painted with the same viewport-pinned fields as the hero
-       behind it, so the strip has no visible edge. */
-    background-color: var(--ground);
-    background-image: var(--hero-fields), var(--grain);
-    background-attachment: fixed, fixed, scroll;
+    /* Frosted, so the copy scrolling under it fades and the aurora behind
+       shows through without an edge. */
+    background: color-mix(in srgb, var(--lc-bg) 72%, transparent);
+    backdrop-filter: blur(16px);
     font-size: 1.2rem;
   }
   .hero-captions p { inset: var(--lc-space-4) var(--gutter) auto; }
@@ -316,13 +294,6 @@ body:has(.lp) {
 .hero--still .hero-still--cards { position: relative; padding: var(--lc-space-6) 0; }
 
 /* ── Sections ────────────────────────────────────────────────────────── */
-/* Full-bleed band behind a contained grid section. */
-.lp-band {
-  background: var(--band);
-  box-shadow: 0 0 0 100vmax var(--band);
-  clip-path: inset(0 -100vmax);
-}
-.lp-band .how-steps li { border-color: var(--band-line); }
 .lp-section { padding-block: var(--lc-space-9); }
 @media (max-width: 899px) {
   .lp-section { padding-block: var(--lc-space-8); }
