@@ -117,7 +117,6 @@ const CAPABILITIES = [
 ];
 
 const PRIVACY = [
-  ['Video is analysed at home.', 'Every frame is looked at by a computer on your own network, and that is where the frames are kept. Video is not sent to the cloud.'],
   ['Saved frames are gone after 36 hours.', 'Evidence is deleted 36 hours after it was captured, unless a caregiver flags a frame to keep.'],
   ['No audio is stored.', 'Speech is transcribed in memory and the recording is thrown away. To write a short summary of a conversation, only the text is sent to a language model service.'],
   ['The wearer can stop it.', 'Privacy mode stops capture with one tap. Blurred capture blurs the whole frame before anything is saved, and rooms marked as sensitive have what was recorded there deleted.'],
@@ -161,8 +160,8 @@ export default function Landing() {
             <div ref={copyRef} className="hero-copy">
               <h1>The day, remembered.</h1>
               <p>
-                LOCUS is a small camera worn on the chest. A computer at home watches for the
-                small moments that are easiest to lose, and answers when someone asks.
+                LOCUS is a small camera worn on the chest. It notices the small moments that
+                matter, and answers when someone asks.
               </p>
               <div className="lp-actions">
                 <Link to="/register" className="lp-btn lp-btn--lg">Create account</Link>
@@ -176,7 +175,7 @@ export default function Landing() {
                   Scroll to look inside. Move across the camera to turn it round.
                 </p>
                 <p className="beat" style={{ '--a': BEATS.turn[0], '--b': BEATS.cardStart }}>
-                  The camera only sees. Everything it notices is worked out on a computer at home.
+                  The camera only sees. LOCUS turns what it sees into answers.
                 </p>
                 {cards.map((c, i) => {
                   const [a, b] = cardWindow(i, cards.length);
@@ -220,10 +219,10 @@ export default function Landing() {
           <ol className="how-steps">
             <li>
               <h3>The camera</h3>
-              <p>Clipped to the chest, it streams over the home Wi‑Fi. It has no intelligence of its own.</p>
+              <p>Clipped to the chest, it captures the day as it happens. It has no intelligence of its own.</p>
             </li>
             <li>
-              <h3>A computer at home</h3>
+              <h3>LOCUS makes sense of it</h3>
               <p>Looks at each frame for tablets in a hand, faces the wearer knows, belongings and which room they are in.</p>
             </li>
             <li>

@@ -495,14 +495,14 @@ body:has(.lp) {
   line-height: 1.5;
 }
 
-/* Privacy: a 2 x 2 definition list on the grid. */
+/* Privacy: three commitments side by side on the grid. */
 .privacy-list {
   display: grid;
   grid-template-columns: subgrid;
   row-gap: var(--lc-space-7);
   margin-top: var(--lc-space-7);
 }
-.privacy-list > div { grid-column: span 6; }
+.privacy-list > div { grid-column: span 4; }
 .privacy-list dt {
   font-family: var(--lc-font-display);
   font-size: 1.6rem;
