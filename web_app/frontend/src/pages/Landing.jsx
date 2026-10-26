@@ -6,6 +6,10 @@ import {
 import { useAuth } from '../context/AuthContext';
 import HeroStill from '../components/Landing/HeroStill';
 import Background from '../components/Landing/Background';
+import LandingEffects, { Words } from '../components/Landing/Effects';
+import DayTimeline from '../components/Landing/DayTimeline';
+import Devices from '../components/Landing/Devices';
+import Marquee from '../components/Landing/Marquee';
 import { HERO_CARDS, BEATS, cardWindow, OPEN_STILL } from '../components/Landing/heroCards';
 import './Landing.css';
 
@@ -118,15 +122,47 @@ const CAPABILITIES = [
 ];
 
 const PRIVACY = [
-  ['Saved frames are gone after 36 hours.', 'Evidence is deleted 36 hours after it was captured, unless a caregiver flags a frame to keep.'],
+  [<>Saved frames are gone after <span className="num" data-count="36">36</span> hours.</>, 'Evidence is deleted 36 hours after it was captured, unless a caregiver flags a frame to keep.'],
   ['No audio is stored.', 'Speech is transcribed in memory and the recording is thrown away. To write a short summary of a conversation, only the text is sent to a language model service.'],
   ['The wearer can stop it.', 'Privacy mode stops capture with one tap. Blurred capture blurs the whole frame before anything is saved, and rooms marked as sensitive have what was recorded there deleted.'],
 ];
+
+// Section dots on the right edge (desktop), in page order.
+const SECTIONS = [
+  { id: 'top', label: 'Top' },
+  { id: 'questions', label: 'The questions' },
+  { id: 'day', label: 'A day with LOCUS' },
+  { id: 'apps', label: 'The apps' },
+  { id: 'how', label: 'How it works' },
+  { id: 'answers', label: 'What it answers' },
+  { id: 'privacy', label: 'Privacy' },
+  { id: 'start', label: 'Get started' },
+];
+
+// The connection line. `d` is written in % of its section; it is redrawn in
+// real pixels whenever the section resizes, so the stroke keeps its width and
+// pathLength stays exact for the draw-on-scroll effect.
+function Thread({ d }) {
+  const ref = useRef(null);
+  const [size, setSize] = useState([100, 100]);
+  useEffect(() => {
+    const ro = new ResizeObserver(([e]) => setSize([e.contentRect.width, e.contentRect.height]));
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const px = d.replace(/(-?[\d.]+),(-?[\d.]+)/g,(_, x, y) => `${(x * size[0]) / 100},${(y * size[1]) / 100}`);
+  return (
+    <svg ref={ref} className="thread" viewBox={`0 0 ${size[0]} ${size[1]}`} aria-hidden="true">
+      <path d={px} pathLength="1" />
+    </svg>
+  );
+}
 
 export default function Landing() {
   const navigate = useNavigate();
   const { token, user } = useAuth();
   const [env] = useState(detect);
+  const rootRef = useRef(null);
   const trackRef = useRef(null);
   const stageRef = useRef(null);
   const copyRef = useRef(null);
@@ -139,11 +175,24 @@ export default function Landing() {
       navigate(user.role === 'caregiver' || user.role === 'admin' ? '/dashboard' : '/my-dashboard');
   }, [token, user, navigate]);
 
+  // Pinned and parallax sections: desktop with motion allowed only, loaded
+  // lazily. Everywhere else the same sections are a plain stacked layout.
+  useEffect(() => {
+    if (env.still || !window.matchMedia('(min-width: 900px)').matches) return;
+    let undo;
+    let dead = false;
+    import('../components/Landing/landingMotion').then(m => {
+      if (!dead) undo = m.default(rootRef.current);
+    });
+    return () => { dead = true; undo?.(); };
+  }, [env.still]);
+
   const still = <HeroStill cards={cards} />;
 
   return (
-    <div className="lp">
+    <div className="lp" ref={rootRef}>
       <Background />
+      <LandingEffects root={rootRef} sections={SECTIONS} />
       <nav className="lp-nav" aria-label="Main">
         <div className="lp-nav-inner">
           <Link to="/" className="lp-logo"><img src="/logo.png" alt="LOCUS" /></Link>
@@ -156,7 +205,7 @@ export default function Landing() {
         </div>
       </nav>
 
-      <header className={`hero ${scroll ? 'hero--scroll' : 'hero--still'}`}>
+      <header id="top" className={`hero ${scroll ? 'hero--scroll' : 'hero--still'}`}>
         <div ref={trackRef} className="hero-track">
           <div ref={stageRef} className="hero-stage lp-grid" style={{ '--p': state.p }}>
             <div ref={copyRef} className="hero-copy">
@@ -205,21 +254,28 @@ export default function Landing() {
       </header>
 
       <main>
-        <section className="lp-section lp-grid tone-tint problem" aria-labelledby="problem-title">
-          <h2 id="problem-title" className="lp-kicker">Four questions, asked again and again</h2>
-          <ul className="problem-list">
-            {QUESTIONS.map(q => <li key={q}>{q}</li>)}
+        <div className="tone-tint marquee-band"><Marquee /></div>
+
+        <section id="questions" className="lp-section lp-grid tone-plain problem" aria-labelledby="problem-title">
+          <Thread d="M72,0 C72,18 86,24 86,42 L86,76 C86,92 60,90 58,100" />
+          <h2 id="problem-title" className="lp-kicker" data-reveal>Four questions, asked again and again</h2>
+          <ul className="problem-list" data-reveal>
+            {QUESTIONS.map((q, i) => <li key={q} style={{ '--i': i }}>{q}</li>)}
           </ul>
-          <p className="lp-lede">
+          <p className="lp-lede" data-reveal>
             For someone living with dementia, the day fills up with small gaps. These are the ones
             that come back most, for them and for the family answering. LOCUS is built to answer
             these four, from what the camera actually saw.
           </p>
         </section>
 
-        <section id="how" className="lp-section lp-grid tone-plain how" aria-labelledby="how-title">
-          <h2 id="how-title">How it works</h2>
-          <ol className="how-steps">
+        <DayTimeline />
+
+        <Devices thread={<Thread d="M58,0 C58,8 70,8 70,16" />} />
+
+        <section id="how" className="lp-section lp-grid tone-tint how" aria-labelledby="how-title">
+          <h2 id="how-title" data-reveal><Words>How it works</Words></h2>
+          <ol className="how-steps" data-reveal>
             <li>
               <h3>The camera</h3>
               <p>Clipped to the chest, it captures the day as it happens. It has no intelligence of its own.</p>
@@ -235,44 +291,59 @@ export default function Landing() {
           </ol>
         </section>
 
-        <section className="lp-section tone-tint caps" aria-label="What LOCUS answers">
-          {CAPABILITIES.map(c => (
-            <article key={c.q} className="cap lp-grid">
-              <h2 className="cap-q">{c.q}</h2>
-              <p className="cap-body">{c.body}</p>
-              <div className="cap-mock">{c.mock}</div>
-            </article>
-          ))}
+        <section id="answers" className="lp-section tone-plain caps" aria-labelledby="answers-title">
+          <div className="lp-grid caps-head">
+            <h2 id="answers-title" data-reveal><Words>What it answers</Words></h2>
+          </div>
+          <div className="caps-track">
+            {[0, 2, 1, 3].map(i => CAPABILITIES[i]).map(c => (
+              <article key={c.q} className="cap spot">
+                <h3 className="cap-q">{c.q}</h3>
+                <p className="cap-body">{c.body}</p>
+                <div className="cap-mock">{c.mock}</div>
+              </article>
+            ))}
+          </div>
         </section>
 
-        <section id="privacy" className="lp-section lp-grid tone-plain privacy" aria-labelledby="privacy-title">
-          <h2 id="privacy-title">What it keeps, and what it doesn’t</h2>
-          <dl className="privacy-list">
-            {PRIVACY.map(([t, d]) => (
-              <div key={t}><dt>{t}</dt><dd>{d}</dd></div>
+        <section id="privacy" className="lp-section lp-grid tone-tint privacy" aria-labelledby="privacy-title">
+          <h2 id="privacy-title" data-reveal><Words>What it keeps, and what it doesn’t</Words></h2>
+          <dl className="privacy-list" data-reveal>
+            {PRIVACY.map(([t, d], i) => (
+              <div key={i}><dt>{t}</dt><dd>{d}</dd></div>
             ))}
           </dl>
         </section>
 
-        <section className="lp-section lp-grid tone-tint who" aria-labelledby="who-title">
-          <h2 id="who-title">Made for two people</h2>
-          <div className="who-col">
+        <section className="lp-section lp-grid tone-plain who" aria-labelledby="who-title">
+          <h2 id="who-title" data-reveal><Words>Made for two people</Words></h2>
+          <div className="who-col" data-reveal>
             <h3>The person wearing it</h3>
             <p>
               A calm phone app with today’s reminders, a place to ask what happened, and help
               that is one press away, or a spoken phrase away when the phone is out of reach.
             </p>
           </div>
-          <div className="who-col">
+          <div className="who-col" data-reveal>
             <h3>The people who care for them</h3>
             <p>
               A dashboard that shows how the day is going: doses, anything waiting to be
               confirmed, where they are. Messages and voice calls go straight to them.
             </p>
           </div>
-          <div className="lp-actions">
-            <Link to="/register" className="lp-btn lp-btn--lg">Create account</Link>
-            <Link to="/login" className="lp-btn lp-btn--ghost lp-btn--lg">Sign in</Link>
+        </section>
+
+        <section id="start" className="lp-section lp-grid tone-tint cta" aria-labelledby="cta-title">
+          <div className="cta-panel" data-loop>
+            <div className="cta-shapes" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+            <h2 id="cta-title" data-reveal><Words>Bring LOCUS into the day</Words></h2>
+            <p data-reveal>
+              Create an account to set up the camera, the phone app and the people who care.
+            </p>
+            <div className="lp-actions">
+              <Link to="/register" className="lp-btn lp-btn--light lp-btn--lg">Create account</Link>
+              <Link to="/login" className="lp-btn lp-btn--onteal lp-btn--lg">Sign in</Link>
+            </div>
           </div>
         </section>
       </main>

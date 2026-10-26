@@ -60,7 +60,7 @@ const SCENES = {
   ),
 };
 
-function Thumb({ id }) {
+export function Thumb({ id }) {
   return (
     <svg className="hcard-thumb" viewBox="0 0 72 60" aria-hidden="true">
       {SCENES[id]}
