@@ -24,6 +24,8 @@
 
   /* App surfaces, light */
   --lc-bg: #F7F3EC;
+  --lc-ground: #E2ECE7;      /* website ground: soft mint (text-2 on it 6.8:1) */
+  --lc-band: #D3E4DB;        /* deeper mint for bands (text-2 on it 6.2:1) */
   --lc-surface: #FFFDF9;
   --lc-surface-2: #EFE8DC;
   --lc-border: #E1D8C9;

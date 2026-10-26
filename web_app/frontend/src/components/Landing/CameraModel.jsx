@@ -25,7 +25,7 @@ const DOOR = { h: 0.66, d: 0.36, t: 0.018 };  // near flush with the side
 const OPENING = [LEFT - 0.06, 0, 0];
 
 const AMBER = '#E9A23B';
-const RUBBER = '#0F0F11';
+const RUBBER = '#0A0A0B';  // matte black: little env and specular so it stays black in a bright studio
 
 function canvasTexture(w, h, draw) {
   const c = document.createElement('canvas');
@@ -178,7 +178,7 @@ export default function CameraModel({ rig }) {
     spillSprite.current.visible = spill > 0.01;
   });
 
-  const rubber = <meshPhysicalMaterial color={RUBBER} roughness={0.8} envMapIntensity={0.4} bumpMap={tex.grip} bumpScale={0.5} />;
+  const rubber = <meshPhysicalMaterial color={RUBBER} roughness={0.62} envMapIntensity={0.16} specularIntensity={0.45} bumpMap={tex.grip} bumpScale={0.4} />;
   const gloss = <meshPhysicalMaterial color="#050506" roughness={0.06} clearcoat={1} envMapIntensity={0.9} />;
   const screen = map => (
     <meshPhysicalMaterial color="#000" emissive="#FFF" emissiveMap={map} emissiveIntensity={0.92}

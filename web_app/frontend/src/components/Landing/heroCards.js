@@ -1,6 +1,7 @@
 import { Pill, KeyRound, MessageCircle, MapPin } from 'lucide-react';
 
-// The cards that fly out of the camera's battery door, one per capability.
+// The cards that fly out of the camera's battery door, one per capability,
+// each with a framed thumbnail (see Thumb in HeroStill.jsx, keyed by id).
 // `cap` picks the capability colour (--lc-cap-*). `caption` is the line shown
 // beside the scene while that card arrives.
 export const HERO_CARDS = [
@@ -10,7 +11,7 @@ export const HERO_CARDS = [
     icon: Pill,
     title: 'Dose verified',
     meta: 'Morning tablets, 8:02 am',
-    evidence: true,
+    status: 'Taken',
     caption: 'It sees the tablet reach the hand and keeps that frame as proof. When it is not sure, a caregiver is asked instead.',
   },
   {

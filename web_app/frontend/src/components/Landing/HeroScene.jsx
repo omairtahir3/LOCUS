@@ -22,8 +22,9 @@ const FOV = 26;
 const FRONT_YAW = -0.7;        // three-quarter front, lens side, as in reference 2
 const SIDE_YAW = 1.0;          // left side towards the viewer, door seen at an angle
 // Where each card settles, in card order (degrees on an ellipse round the
-// model): the tall dose card takes the top, later cards spread to the sides.
-const ARC = { 5: [90, 152, 28, 190, -10], 3: [90, 160, 20] };
+// model): dose at the top, two at the upper sides, two below the camera so
+// none of them covers it or the open door.
+const ARC = { 5: [90, 150, 30, 218, -38], 3: [90, 158, 22] };
 
 // Scroll position -> state.p, smoothed by Lenis. Mounted only when motion is
 // allowed. Rendering is on demand, so an idle or off-screen hero costs nothing.
@@ -69,6 +70,29 @@ function Scene({ state, cards, cardEls, lite }) {
   const size = useThree(s => s.size);
   const invalidate = useThree(s => s.invalidate);
 
+  // Pointer over the camera turns it: across the full width is half a turn
+  // either way, so the edges show the rear screen. Eases back on leave.
+  const gl = useThree(s => s.gl);
+  const look = useRef({ x: 0, y: 0, yaw: 0, tilt: 0 });
+  useEffect(() => {
+    const el = gl.domElement;
+    const move = e => {
+      const r = el.getBoundingClientRect();
+      look.current.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+      look.current.y = ((e.clientY - r.top) / r.height) * 2 - 1;
+      invalidate();
+    };
+    const leave = () => { look.current.x = look.current.y = 0; invalidate(); };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerleave', leave);
+    el.addEventListener('pointercancel', leave);
+    return () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerleave', leave);
+      el.removeEventListener('pointercancel', leave);
+    };
+  }, [gl, invalidate]);
+
   // Card sizes change once the web fonts arrive; place them again then.
   useEffect(() => { document.fonts?.ready.then(() => invalidate()); }, [invalidate]);
   const rigGroup = useRef();
@@ -81,24 +105,29 @@ function Scene({ state, cards, cardEls, lite }) {
     const [w, h] = CameraModel.size;
     const aspect = size.width / size.height;
     const tan = Math.tan((FOV * Math.PI) / 360);
-    const dist = Math.max((w / 0.3) / 2 / (tan * aspect), (h / 0.26) / 2 / tan);
+    const dist = Math.max((w / 0.36) / 2 / (tan * aspect), (h / 0.3) / 2 / tan);
     const lookY = 0.08 * dist * tan;
     camera.position.set(0, lookY + dist * 0.14, dist);
     camera.lookAt(0, lookY, 0);
     camera.updateProjectionMatrix();
   }, [camera, size]);
 
-  useFrame(({ size: s }) => {
+  useFrame(({ size: s }, delta) => {
     const { p, intro } = state;
+    const L = look.current;
+    const k = 1 - Math.exp(-Math.min(delta, 1 / 30) * 7);
+    L.yaw += (L.x * Math.PI - L.yaw) * k;
+    L.tilt += (L.y * 0.35 - L.tilt) * k;
+    if (Math.abs(L.x * Math.PI - L.yaw) + Math.abs(L.y * 0.35 - L.tilt) > 0.002) invalidate();
     const turn = ease(...BEATS.turn, p) * (1 - ease(...BEATS.front, p));
     rig.current.door = ease(...BEATS.open, p) * (1 - ease(...BEATS.close, p));
     rig.current.spill = ease(...BEATS.spill, p) * (1 - ease(...BEATS.close, p));
 
     const g = rigGroup.current;
-    g.rotation.y = lerp(lerp(-1.3, FRONT_YAW, intro), SIDE_YAW, turn);
-    g.rotation.x = lerp(0.2, 0.1, turn);  // seen from a little above, as in the photos
+    g.rotation.y = lerp(lerp(-1.3, FRONT_YAW, intro), SIDE_YAW, turn) + L.yaw;
+    g.rotation.x = lerp(0.2, 0.1, turn) + L.tilt;  // seen from a little above, as in the photos
     // Larger on its own; steps back while the cards are out.
-    g.scale.setScalar(lerp(1.6, 1, ease(BEATS.turn[0], BEATS.cardStart, p) * (1 - ease(...BEATS.front, p))));
+    g.scale.setScalar(lerp(1.55, 1.2, ease(BEATS.turn[0], BEATS.cardStart, p) * (1 - ease(...BEATS.front, p))));
     g.position.y = lerp(-0.12, 0, intro);
     g.updateMatrixWorld();
 
@@ -112,6 +141,32 @@ function Scene({ state, cards, cardEls, lite }) {
     const angles = ARC[cards.length] || ARC[5];
     const out = 1 - ease(...BEATS.cardsOut, p);
 
+    // Where each card settles: on an ellipse round the model, inside the
+    // panel. Then pull apart any two that overlap (narrow panels), sideways
+    // first, then down, so no card covers another.
+    const T = cards.map((card, i) => {
+      const el = cardEls.current[i];
+      const cw = el?.offsetWidth || 0, ch = el?.offsetHeight || 0;
+      const rx = Math.max(0, Math.min(cx, s.width - cx) - cw / 2 - 12);
+      const ry = Math.max(0, cy - ch / 2 - 16);
+      const ang = (angles[i] * Math.PI) / 180;
+      return { x: cx + Math.cos(ang) * rx, y: cy - Math.sin(ang) * ry, w: cw, h: ch };
+    });
+    const clampX = t => Math.min(Math.max(t.x, t.w / 2 + 8), s.width - t.w / 2 - 8);
+    for (let i = 0; i < T.length; i++) {
+      for (let j = i + 1; j < T.length; j++) {
+        const A = T[i], B = T[j];
+        const dx = (A.w + B.w) / 2 + 8 - Math.abs(A.x - B.x);
+        const dy = (A.h + B.h) / 2 + 8 - Math.abs(A.y - B.y);
+        if (dx <= 0 || dy <= 0) continue;
+        const dir = B.x >= A.x ? 1 : -1;
+        A.x = clampX({ ...A, x: A.x - (dir * dx) / 2 });
+        B.x = clampX({ ...B, x: B.x + (dir * dx) / 2 });
+        const left = (A.w + B.w) / 2 + 8 - Math.abs(A.x - B.x);
+        if (left > 0) B.y += (B.y >= A.y ? 1 : -1) * dy;
+      }
+    }
+
     cards.forEach((card, i) => {
       const el = cardEls.current[i];
       if (!el) return;
@@ -121,13 +176,8 @@ function Scene({ state, cards, cardEls, lite }) {
       el.style.visibility = opacity < 0.01 ? 'hidden' : 'visible';
       if (opacity < 0.01) return;
 
-      // Settle on an ellipse around the model, kept inside the panel.
-      const cw = el.offsetWidth, ch = el.offsetHeight;
-      const rx = Math.max(0, Math.min(cx, s.width - cx) - cw / 2 - 12);
-      const ry = Math.max(0, cy - ch / 2 - 16);
-      const ang = (angles[i] * Math.PI) / 180;
-      const tx = cx + Math.cos(ang) * rx;
-      const ty = Math.min(cy - Math.sin(ang) * ry, s.height - ch / 2 - 12);
+      const t = T[i];
+      const tx = t.x, ty = Math.min(Math.max(t.y, t.h / 2 + 8), s.height - t.h / 2 - 8);
       // Curved path: a quadratic bend lifted above the straight line.
       const kx = (ox + tx) / 2, ky = Math.min(oy, ty) - s.height * 0.12;
       const x = (1 - q) ** 2 * ox + 2 * (1 - q) * q * kx + q * q * tx;

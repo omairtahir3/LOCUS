@@ -173,7 +173,7 @@ export default function Landing() {
             {scroll && (
               <div className="hero-captions">
                 <p className="beat" style={{ '--a': -1, '--b': BEATS.turn[0] }}>
-                  Scroll to look inside.
+                  Scroll to look inside. Move across the camera to turn it round.
                 </p>
                 <p className="beat" style={{ '--a': BEATS.turn[0], '--b': BEATS.cardStart }}>
                   The camera only sees. Everything it notices is worked out on a computer at home.
@@ -215,7 +215,7 @@ export default function Landing() {
           </p>
         </section>
 
-        <section id="how" className="lp-section lp-grid lp-band lp-band--mint how" aria-labelledby="how-title">
+        <section id="how" className="lp-section lp-grid lp-band how" aria-labelledby="how-title">
           <h2 id="how-title">How it works</h2>
           <ol className="how-steps">
             <li>
