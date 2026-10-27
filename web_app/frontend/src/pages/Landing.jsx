@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, CircleHelp, XCircle, CameraOff, Search, Mic, UserRound,
 } from 'lucide-react';
+import { LazyMotion, MotionConfig, m as Motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import HeroStill from '../components/Landing/HeroStill';
 import Background from '../components/Landing/Background';
@@ -12,6 +13,16 @@ import Devices from '../components/Landing/Devices';
 import Marquee from '../components/Landing/Marquee';
 import { HERO_CARDS, BEATS, cardWindow, OPEN_STILL } from '../components/Landing/heroCards';
 import './Landing.css';
+
+// framer-motion's animation features load after first paint (LazyMotion).
+const loadMotion = () => import('../components/Landing/motionFeatures').then(r => r.default);
+
+// The hero copy's entrance on load: one staggered moment (framer-motion).
+const INTRO = { hidden: {}, show: { transition: { staggerChildren: 0.12, delayChildren: 0.1 } } };
+const RISE = {
+  hidden: { opacity: 0, y: 24 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] } },
+};
 
 // three, drei, gsap and lenis load only with the hero, never with the app.
 const HeroScene = lazy(() => import('../components/Landing/HeroScene'));
@@ -189,7 +200,11 @@ export default function Landing() {
 
   const still = <HeroStill cards={cards} />;
 
+  // framer-motion: the light feature set only, and it follows the OS reduced
+  // motion setting for every animation it runs.
   return (
+    <LazyMotion features={loadMotion} strict>
+    <MotionConfig reducedMotion="user">
     <div className="lp" ref={rootRef}>
       <Background />
       <LandingEffects root={rootRef} sections={SECTIONS} />
@@ -208,17 +223,17 @@ export default function Landing() {
       <header id="top" className={`hero ${scroll ? 'hero--scroll' : 'hero--still'}`}>
         <div ref={trackRef} className="hero-track">
           <div ref={stageRef} className="hero-stage lp-grid" style={{ '--p': state.p }}>
-            <div ref={copyRef} className="hero-copy">
-              <h1>The day, remembered.</h1>
-              <p>
+            <Motion.div ref={copyRef} className="hero-copy" variants={INTRO} initial="hidden" animate="show">
+              <Motion.h1 variants={RISE}>The day, remembered.</Motion.h1>
+              <Motion.p variants={RISE}>
                 LOCUS is a small camera worn on the chest. It notices the small moments that
                 matter, and answers when someone asks.
-              </p>
-              <div className="lp-actions">
+              </Motion.p>
+              <Motion.div className="lp-actions" variants={RISE}>
                 <Link to="/register" className="lp-btn lp-btn--lg">Create account</Link>
                 <Link to="/login" className="lp-btn lp-btn--ghost lp-btn--lg">Sign in</Link>
-              </div>
-            </div>
+              </Motion.div>
+            </Motion.div>
 
             {scroll && (
               <div className="hero-captions">
@@ -354,5 +369,7 @@ export default function Landing() {
         <p>© 2026 LOCUS</p>
       </footer>
     </div>
+    </MotionConfig>
+    </LazyMotion>
   );
 }

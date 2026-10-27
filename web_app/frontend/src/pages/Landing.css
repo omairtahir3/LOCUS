@@ -562,7 +562,6 @@
   display: block;
   height: 100%;
   background: var(--lc-primary);
-  transform: scaleX(0);
   transform-origin: 0 50%;
 }
 .lp-dots {

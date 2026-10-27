@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { m as Motion, useReducedMotion, useScroll, useSpring } from 'framer-motion';
 
 // Splits a heading into words for the masked, staggered reveal. The text
 // stays one real heading: words are inline spans, readable and selectable.
@@ -21,9 +22,12 @@ const motionOk = () =>
 //  - .spot: a soft spotlight follows the cursor, with a slight lift;
 //  - .lp-btn: a small magnetic pull on fine pointers;
 //  - [data-loop]: CSS loops (marquee, CTA shapes) pause while off-screen.
-// ponytail: IntersectionObserver and pointer events, no animation library.
+// The progress line is framer-motion (useScroll, smoothed by a spring); the
+// rest is IntersectionObserver and pointer events.
 export default function LandingEffects({ root, sections }) {
-  const bar = useRef(null);
+  const { scrollYProgress } = useScroll();
+  const spring = useSpring(scrollYProgress, { stiffness: 200, damping: 40, restDelta: 0.001 });
+  const progress = useReducedMotion() ? scrollYProgress : spring;
   const [active, setActive] = useState(sections[0]?.id);
 
   useEffect(() => {
@@ -32,23 +36,6 @@ export default function LandingEffects({ root, sections }) {
     const ok = motionOk();
     el.classList.toggle('motion-ok', ok);
     const cleanups = [];
-
-    // Progress line.
-    let raf = 0;
-    const paint = () => {
-      raf = 0;
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      bar.current?.style.setProperty('transform', `scaleX(${max > 0 ? window.scrollY / max : 0})`);
-    };
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(paint); };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    paint();
-    cleanups.push(() => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-      cancelAnimationFrame(raf);
-    });
 
     // Reveals and count-ups, once each.
     const once = new IntersectionObserver(entries => entries.forEach(e => {
@@ -119,7 +106,7 @@ export default function LandingEffects({ root, sections }) {
 
   return (
     <>
-      <div className="lp-progress" aria-hidden="true"><span ref={bar} /></div>
+      <div className="lp-progress" aria-hidden="true"><Motion.span style={{ scaleX: progress }} /></div>
       <nav className="lp-dots" aria-label="Sections">
         {sections.map(s => (
           <a key={s.id} href={`#${s.id}`} aria-label={s.label}
