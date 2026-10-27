@@ -3,16 +3,16 @@ import Background from '../Landing/Background';
 import './Auth.css';
 
 // Shared frame for the sign-in, sign-up and reset pages: the landing page's
-// background and logo, and one frosted card. Presentation only; each page
+// background with tiles on both sides, and one card with the logo at its top. Presentation only; each page
 // keeps its own state, handlers and copy.
 export default function AuthShell({ children, wide = false }) {
   return (
     <div className="auth">
-      <Background />
-      <header className="auth-top">
+      <Background variant="auth" />
+      <main className={`auth-card ${wide ? 'auth-card--wide' : ''}`}>
         <Link to="/" className="auth-logo"><img src="/logo.png" alt="LOCUS home" /></Link>
-      </header>
-      <main className={`auth-card ${wide ? 'auth-card--wide' : ''}`}>{children}</main>
+        {children}
+      </main>
     </div>
   );
 }

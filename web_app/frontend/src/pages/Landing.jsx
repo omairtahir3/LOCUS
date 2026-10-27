@@ -206,7 +206,7 @@ export default function Landing() {
     <LazyMotion features={loadMotion} strict>
     <MotionConfig reducedMotion="user">
     <div className="lp" ref={rootRef}>
-      <Background />
+      <Background tilesAfter=".hero" />
       <LandingEffects root={rootRef} sections={SECTIONS} />
       <nav className="lp-nav" aria-label="Main">
         <div className="lp-nav-inner">

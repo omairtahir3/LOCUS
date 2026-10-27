@@ -9,24 +9,23 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 16px 48px;
+  justify-content: center;
+  padding: 48px 16px;
   color: var(--lc-text);
   font-family: var(--lc-font-body);
   font-size: 1.07rem;
   line-height: 1.5;
 }
-.auth > header, .auth > main { position: relative; z-index: 1; }
+.auth > main { position: relative; z-index: 1; }
 .auth :focus-visible { outline: 3px solid var(--lc-focus); outline-offset: 3px; }
 
-.auth-top { width: 100%; max-width: 1280px; padding: 18px 16px; }
-.auth-logo { display: inline-flex; min-height: var(--lc-tap); align-items: center; border-radius: 8px; }
-.auth-logo img { height: 28px; }
+.auth-logo { display: inline-flex; min-height: var(--lc-tap); align-items: center; margin-bottom: 20px; border-radius: 8px; }
+.auth-logo img { height: 30px; }
 
 /* ── Card ──────────────────────────────────────────────────────────────── */
 .auth-card {
   width: 100%;
   max-width: 460px;
-  margin-top: clamp(8px, 4vh, 48px);
   padding: clamp(24px, 5vw, 44px);
   border-radius: 28px;
   text-align: left;

@@ -75,6 +75,10 @@ body:has(.bg) { background: var(--lc-bg); }
   animation: bg-bob 7s ease-in-out var(--d, 0s) infinite alternate;
 }
 
+/* Tiles fade out while the landing hero is on screen (data-tiles). */
+.bg-tile { transition: opacity 0.5s var(--lc-ease-out); }
+.bg[data-tiles="off"] .bg-tile { opacity: 0; }
+
 /* Hero notification chips: small frosted pills with a capability-coloured
    icon around the camera, like moments arriving in a live feed. Hero only,
    behind the canvas; they fade out (.beat) as the real cards fly out. */

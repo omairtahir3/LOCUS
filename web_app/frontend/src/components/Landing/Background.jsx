@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { CheckCircle2, UserRound, Package, Home, MessageCircle, MapPin } from 'lucide-react';
+import { CheckCircle2, UserRound, Package, Home, MessageCircle, MapPin, Pill, ScanFace } from 'lucide-react';
 import './Background.css';
 
 // The page's background system, all from tokens (Background.css):
@@ -30,21 +30,33 @@ const BLOBS = [
   { cls: 'bg-blob--deep', f: 0.0005, amp: 220 },
 ];
 
-// Decorative elements. Tiles stay on the right; the left side only gets
-// low-contrast line work, so nothing busy sits under the text column.
-// Hero chips: moments LOCUS really reports, like a live feed, placed in %
-// of the hero scene panel around the camera.
+// Hero chips: moments LOCUS really reports, like a live feed. Placed in % of
+// the hero scene panel, two above the camera and two below it (the camera
+// fills roughly 32-72% of the panel's height), never beside it.
 const CHIPS = [
-  { Icon: CheckCircle2, cap: 'dose', text: 'Dose taken', meta: '8:02', pos: { top: '3%', right: '10%' } },
-  { Icon: UserRound, cap: 'face', text: 'Sara arrived', meta: '10:40', pos: { top: '26%', right: '0%' } },
-  { Icon: Package, cap: 'item', text: 'Glasses: bedroom', meta: '12:15', pos: { top: '80%', right: '2%' } },
-  { Icon: Home, cap: 'place', text: 'Back home', meta: '18:05', pos: { top: '90%', right: '40%' } },
+  { Icon: CheckCircle2, cap: 'dose', text: 'Dose taken', meta: '8:02', pos: { top: '11%', left: '4%' } },
+  { Icon: UserRound, cap: 'face', text: 'Sara arrived', meta: '10:40', pos: { top: '20%', right: '1%' } },
+  { Icon: Package, cap: 'item', text: 'Glasses: bedroom', meta: '12:15', pos: { top: '79%', right: '2%' } },
+  { Icon: Home, cap: 'place', text: 'Back home', meta: '18:05', pos: { top: '89%', left: '8%' } },
 ];
-const TILES = [
-  { Icon: Package, cap: 'item', pos: { top: '14vh', right: '28vw' }, f: 0.0016, amp: 70 },
-  { Icon: MapPin, cap: 'place', pos: { top: '50vh', right: '8vw' }, f: 0.0007, amp: 160 },
-  { Icon: MessageCircle, cap: 'talk', pos: { top: '64vh', right: '22vw' }, f: 0.0011, amp: 110 },
-];
+// Frosted capability tiles. 'landing': right side only, so nothing busy sits
+// under the text column, and hidden while the hero is on screen (the chips
+// and camera own that space). 'auth': both sides of the centred card.
+const TILES = {
+  landing: [
+    { Icon: Package, cap: 'item', pos: { top: '14vh', right: '28vw' }, f: 0.0016, amp: 70 },
+    { Icon: MapPin, cap: 'place', pos: { top: '50vh', right: '8vw' }, f: 0.0007, amp: 160 },
+    { Icon: MessageCircle, cap: 'talk', pos: { top: '64vh', right: '22vw' }, f: 0.0011, amp: 110 },
+  ],
+  auth: [
+    { Icon: Pill, cap: 'dose', pos: { top: '20vh', left: '9vw' } },
+    { Icon: ScanFace, cap: 'face', pos: { top: '54vh', left: '4vw' } },
+    { Icon: Home, cap: 'place', pos: { top: '78vh', left: '15vw' } },
+    { Icon: Package, cap: 'item', pos: { top: '16vh', right: '11vw' } },
+    { Icon: MapPin, cap: 'place', pos: { top: '50vh', right: '5vw' } },
+    { Icon: MessageCircle, cap: 'talk', pos: { top: '76vh', right: '16vw' } },
+  ],
+};
 // Topographic-style contours: concentric, slightly irregular ellipses.
 const CONTOURS = [0, 1, 2, 3, 4, 5, 6].map(i => ({
   rx: 270 - i * 36 + (i % 2) * 10,
@@ -75,7 +87,7 @@ export function HeroChips({ until }) {
   );
 }
 
-export default function Background() {
+export default function Background({ variant = 'landing', tilesAfter }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -84,6 +96,11 @@ export default function Background() {
     const tick = () => {
       raf = 0;
       ref.current?.style.setProperty('--sy', String(Math.round(window.scrollY)));
+      // Tiles stay hidden until the element they wait for has mostly scrolled by.
+      const gate = tilesAfter && document.querySelector(tilesAfter);
+      if (gate && ref.current) {
+        ref.current.dataset.tiles = gate.getBoundingClientRect().bottom < window.innerHeight * 0.5 ? 'on' : 'off';
+      }
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(tick); };
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -92,10 +109,10 @@ export default function Background() {
       window.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [tilesAfter]);
 
   return (
-    <div ref={ref} className="bg" aria-hidden="true">
+    <div ref={ref} className="bg" data-tiles={tilesAfter ? 'off' : 'on'} aria-hidden="true">
       {BLOBS.map(b => (
         <div key={b.cls} className={`bg-blob ${b.cls}`} style={float(b.f, b.amp)}><i /></div>
       ))}
@@ -106,11 +123,11 @@ export default function Background() {
       </svg>
       <div className="bg-float bg-ring bg-ring--a" style={float(0.0008, 120)}><i /></div>
       <div className="bg-float bg-ring bg-ring--b" style={float(0.0013, 80)}><i /></div>
-      {TILES.map((t, i) => {
+      {TILES[variant].map((t, i) => {
         const { Icon } = t;
         return (
-          <div key={t.cap} className={`bg-float bg-tile hcard--${t.cap}`}
-            style={{ ...t.pos, ...float(t.f, t.amp), '--d': `${-i * 1.7}s` }}>
+          <div key={i} className={`bg-float bg-tile hcard--${t.cap}`}
+            style={{ ...t.pos, ...float(t.f ?? 0.0006 + i * 0.0002, t.amp ?? 40), '--d': `${-i * 1.7}s` }}>
             <i><Icon size={26} strokeWidth={2} /></i>
           </div>
         );
