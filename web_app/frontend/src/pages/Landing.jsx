@@ -290,7 +290,7 @@ export default function Landing() {
 
         <section id="how" className="lp-section lp-grid tone-tint how" aria-labelledby="how-title">
           <h2 id="how-title" data-reveal><Words>How it works</Words></h2>
-          <ol className="how-steps" data-reveal>
+          <ol className="how-steps" data-reveal data-stagger>
             <li>
               <h3>The camera</h3>
               <p>Clipped to the chest, it captures the day as it happens. It has no intelligence of its own.</p>
@@ -323,7 +323,7 @@ export default function Landing() {
 
         <section id="privacy" className="lp-section lp-grid tone-tint privacy" aria-labelledby="privacy-title">
           <h2 id="privacy-title" data-reveal><Words>What it keeps, and what it doesn’t</Words></h2>
-          <dl className="privacy-list" data-reveal>
+          <dl className="privacy-list" data-reveal data-stagger>
             {PRIVACY.map(([t, d], i) => (
               <div key={i}><dt>{t}</dt><dd>{d}</dd></div>
             ))}

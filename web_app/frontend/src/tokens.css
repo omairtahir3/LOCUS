@@ -10,13 +10,22 @@
    --lc-accent-text. Light theme only; there is no dark set. Status
    colours are never meant to stand alone; pair each with its icon and
    label. */
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
+/* Type (from the ui-ux-pro-max typography data): Lora, a warm readable serif,
+   for display; Nunito Sans, a clear humanist sans, for body text. (Atkinson
+   Hyperlegible was tried: its slashed zero made times read as "Ø8:Ø2".) */
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Nunito+Sans:ital,opsz,wght@0,6..12,400..800;1,6..12,400..800&display=swap');
 
 :root {
   /* Primary: teal, for actions (buttons, links, focus). White on it 5.5:1. */
   --lc-primary: #0F766E;
   --lc-primary-hover: #115E59;
   --lc-on-primary: #FFFFFF;
+
+  /* Aurora: the light background's colour fields (teal family plus one warm). */
+  --lc-aurora-teal: #5EEAD4;
+  --lc-aurora-mint: #A7F3D0;
+  --lc-aurora-sky: #7DD3FC;
+  --lc-aurora-peach: #FDBA74;
 
   /* Accent: amber, the one warm highlight. Light theme only. */
   --lc-accent: #E9A23B;
@@ -50,8 +59,8 @@
   --lc-cap-place: #A3431C;    --lc-cap-place-bg: #F8E6DD;
 
   /* Type */
-  --lc-font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
-  --lc-font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --lc-font-display: 'Lora', Georgia, 'Times New Roman', serif;
+  --lc-font-body: 'Nunito Sans', ui-sans-serif, system-ui, sans-serif;
   --lc-text-xs: 0.8125rem;   /* 13 */
   --lc-text-sm: 0.9375rem;   /* 15 */
   --lc-text-base: 1.0625rem; /* 17 */

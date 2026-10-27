@@ -112,7 +112,7 @@ export default function HeroStill({ cards = [] }) {
         <rect x="54" y="60" width="88" height="84" rx="4" fill="url(#still-screen)" />
         <rect x="92" y="50" width="12" height="4" rx="2" fill="#E5332A" />
         <text x="98" y="164" textAnchor="middle" fontSize="14" fontWeight="700" fill="#D5DADF"
-          fontFamily="'Bricolage Grotesque', system-ui, sans-serif">LOCUS</text>
+          fontFamily="'Nunito Sans', system-ui, sans-serif">LOCUS</text>
         {/* lens housing, right, with the ribbed vent below */}
         <rect x="160" y="30" width="104" height="104" rx="22" fill="#0B0B0C" stroke="#1E1E21" strokeWidth="2" />
         <rect x="170" y="40" width="84" height="84" rx="14" fill="#050506" />

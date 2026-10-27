@@ -1,7 +1,8 @@
 /* Background system for the landing page. Colours come from tokens:
    --lc-bg (warm off-white), --lc-ground (pale teal), --lc-band (deeper pale
-   teal), --lc-primary (teal) and --lc-accent (amber). Text on any of these
-   layers stays --lc-text or --lc-text-2 (>= 5.5:1 in the worst overlap). */
+   teal), --lc-primary (teal) and the --lc-aurora-* fields. Text on any of
+   these layers stays --lc-text or --lc-text-2, checked against the darkest
+   composite in screenshots (see the step 4 notes in the commit). */
 
 body:has(.bg) { background: var(--lc-bg); }
 
@@ -14,32 +15,36 @@ body:has(.bg) { background: var(--lc-bg); }
   overflow: hidden;
 }
 
+/* Aurora (ui-ux-pro-max "Aurora UI", light mode): large soft colour fields,
+   multiplied onto the cream so they read as colour rather than haze, drifting
+   on 14-22s loops. Text never sits on them directly: sections and cards lie
+   on top with their own translucent fills. */
 .bg-blob {
   position: absolute;
-  width: 62vmax;
-  height: 62vmax;
-  transform: translate3d(0, calc(var(--sy, 0) * var(--speed) * 1px), 0);
+  transform: translate3d(0, calc(sin(calc(var(--sy, 0) * var(--f) * 1rad)) * var(--amp)), 0);
   will-change: transform;
+  mix-blend-mode: multiply;
 }
 .bg-blob > i {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
+  border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
   background: radial-gradient(closest-side, var(--blob), transparent);
-  animation: bg-drift 38s ease-in-out infinite alternate;
+  animation: bg-drift 18s ease-in-out infinite alternate;
 }
-.bg-blob--a { --blob: color-mix(in srgb, var(--lc-primary) 20%, transparent); top: -24vmax; right: -18vmax; }
-.bg-blob--b { --blob: color-mix(in srgb, var(--lc-primary) 13%, transparent); top: 50vh; left: -28vmax; }
-.bg-blob--c { --blob: color-mix(in srgb, var(--lc-ground) 90%, transparent); top: 120vh; right: -20vmax; }
-.bg-blob--d { --blob: color-mix(in srgb, var(--lc-primary) 11%, transparent); top: 190vh; left: 10vw; }
-.bg-blob--warm { --blob: color-mix(in srgb, var(--lc-accent) 13%, transparent); top: 70vh; right: 5vw; width: 44vmax; height: 44vmax; }
-.bg-blob--b > i { animation-duration: 46s; animation-delay: -12s; }
-.bg-blob--c > i { animation-duration: 52s; animation-delay: -20s; }
-.bg-blob--d > i { animation-duration: 42s; animation-delay: -6s; }
-.bg-blob--warm > i { animation-duration: 58s; animation-delay: -30s; }
+.bg-blob--teal  { --blob: color-mix(in srgb, var(--lc-aurora-teal) 55%, transparent);  width: 64vmax; height: 56vmax; top: -22vmax; right: -14vmax; }
+.bg-blob--sky   { --blob: color-mix(in srgb, var(--lc-aurora-sky) 42%, transparent);   width: 60vmax; height: 60vmax; bottom: -26vmax; left: -18vmax; }
+.bg-blob--peach { --blob: color-mix(in srgb, var(--lc-aurora-peach) 40%, transparent); width: 42vmax; height: 38vmax; top: 34vh; right: 16vw; }
+.bg-blob--mint  { --blob: color-mix(in srgb, var(--lc-aurora-mint) 60%, transparent);  width: 48vmax; height: 44vmax; top: 6vh; left: 8vw; }
+.bg-blob--deep  { --blob: color-mix(in srgb, var(--lc-primary) 16%, transparent);      width: 54vmax; height: 50vmax; bottom: -18vmax; right: -12vmax; }
+.bg-blob--sky > i   { animation-duration: 22s; animation-delay: -7s; }
+.bg-blob--peach > i { animation-duration: 15s; animation-delay: -3s; }
+.bg-blob--mint > i  { animation-duration: 20s; animation-delay: -11s; }
+.bg-blob--deep > i  { animation-duration: 14s; animation-delay: -5s; }
 @keyframes bg-drift {
-  from { transform: translate3d(-4%, -3%, 0) scale(1); }
-  to   { transform: translate3d(5%, 4%, 0) scale(1.08); }
+  0%   { transform: translate3d(-8%, -6%, 0) rotate(0deg) scale(1); }
+  50%  { transform: translate3d(6%, 4%, 0) rotate(14deg) scale(1.12); }
+  100% { transform: translate3d(10%, -4%, 0) rotate(-8deg) scale(1.04); }
 }
 
 /* Dot grid in teal at about 7%, fading out towards the edges. */
@@ -73,12 +78,12 @@ body:has(.bg) { background: var(--lc-bg); }
    aurora shows through. */
 .tone-plain, .tone-tint { position: relative; }
 .tone-plain {
-  --tone-top: color-mix(in srgb, var(--lc-bg) 80%, transparent);
-  --tone-bottom: color-mix(in srgb, var(--lc-ground) 72%, transparent);
+  --tone-top: color-mix(in srgb, var(--lc-bg) 58%, transparent);
+  --tone-bottom: color-mix(in srgb, var(--lc-ground) 50%, transparent);
 }
 .tone-tint {
-  --tone-top: color-mix(in srgb, var(--lc-ground) 84%, transparent);
-  --tone-bottom: color-mix(in srgb, var(--lc-band) 84%, transparent);
+  --tone-top: color-mix(in srgb, var(--lc-ground) 62%, transparent);
+  --tone-bottom: color-mix(in srgb, var(--lc-band) 62%, transparent);
 }
 .tone-plain, .tone-tint {
   border-image: linear-gradient(var(--tone-top), var(--tone-bottom)) fill 0 / / 0 100vmax;

@@ -43,7 +43,7 @@
 .lp h1, .lp h2, .lp h3 {
   font-family: var(--lc-font-display);
   font-optical-sizing: auto;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.01em;
   line-height: var(--lc-leading-tight);
   text-wrap: balance;
 }
@@ -137,9 +137,9 @@
 .hero-copy { grid-column: 1 / span 5; grid-row: 2; }
 .hero-copy h1 {
   font-size: clamp(2.9rem, 1.5rem + 3.6vw, 5.4rem);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 0.98;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.015em;
 }
 .hero-copy p {
   margin-top: var(--lc-space-5);
@@ -190,8 +190,11 @@
     padding: var(--lc-space-4) var(--gutter) 0;
     /* Frosted, so the copy scrolling under it fades and the aurora behind
        shows through without an edge. */
-    background: color-mix(in srgb, var(--lc-bg) 72%, transparent);
-    backdrop-filter: blur(16px);
+    background: color-mix(in srgb, var(--lc-bg) 30%, transparent);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    -webkit-mask-image: linear-gradient(#000 80%, transparent);
+    mask-image: linear-gradient(#000 80%, transparent);
     font-size: 1.2rem;
   }
   .hero-captions p { inset: var(--lc-space-4) var(--gutter) auto; }
@@ -323,7 +326,7 @@
   font-size: clamp(2.4rem, 1.2rem + 4.6vw, 5.6rem);
   font-weight: 700;
   line-height: 1.06;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.015em;
   text-wrap: balance;
 }
 
@@ -391,7 +394,7 @@
   font-size: clamp(2rem, 1.3rem + 2.6vw, 3.8rem);
   font-weight: 700;
   line-height: var(--lc-leading-tight);
-  letter-spacing: -0.035em;
+  letter-spacing: -0.015em;
   max-width: 18ch;
   text-wrap: balance;
 }
@@ -514,7 +517,7 @@
   font-size: 1.6rem;
   font-weight: 650;
   line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 .privacy-list dd { margin-top: var(--lc-space-3); color: var(--lc-text-2); }
@@ -906,3 +909,61 @@
 .cta-panel.is-off .cta-shapes i { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .cta-shapes i { animation: none; } }
 @media (max-width: 899px) { .cta-shapes i:nth-child(n+3) { display: none; } }
+
+/* ══ Round 4 (ui-ux-pro-max): frosted cards, staggered entrances ═════════
+   Cards become frosted glass over the aurora: a white fill strong enough
+   that text on it stays near-white-backed (>= 4.5:1), a blur that lets the
+   colour fields read through, and a light inner border. */
+.cap, .day-card, .mock, .how-steps li, .privacy-list > div {
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+.cap, .day-card {
+  background: rgb(255 255 255 / 0.66);
+  border: 1px solid rgb(255 255 255 / 0.75);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 24px 48px -28px color-mix(in srgb, var(--lc-primary) 45%, transparent),
+    var(--lc-shadow-1);
+}
+.mock { background: rgb(255 255 255 / 0.9); border-color: rgb(255 255 255 / 0.8); }
+
+/* How it works and privacy items sit on small frosted panels. */
+.how-steps li, .privacy-list > div {
+  padding: var(--lc-space-5);
+  border-radius: var(--lc-radius-lg);
+  background: rgb(255 255 255 / 0.55);
+  border: 1px solid rgb(255 255 255 / 0.7);
+}
+.how-steps li { padding-top: var(--lc-space-6); }
+.how-steps li::before { top: -16px; left: var(--lc-space-5); }
+.how-steps { row-gap: var(--lc-space-6); }
+
+/* Staggered entrance for groups (skill motion preset "Stagger List"): each
+   child rises with a slight overshoot, 80ms apart, once. */
+.motion-ok [data-stagger][data-reveal] { opacity: 1; transform: none; }
+.motion-ok [data-stagger] > * {
+  opacity: 0;
+  transform: translateY(16px) scale(0.94);
+  transition:
+    opacity 0.45s var(--lc-ease-out) calc(var(--n, 0) * 80ms),
+    transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--n, 0) * 80ms);
+}
+.motion-ok [data-stagger].in > * { opacity: 1; transform: none; }
+[data-stagger] > :nth-child(2) { --n: 1; }
+[data-stagger] > :nth-child(3) { --n: 2; }
+[data-stagger] > :nth-child(4) { --n: 3; }
+[data-stagger] > :nth-child(5) { --n: 4; }
+
+/* Hover: a short, spring-like lift on the frosted panels (150-300ms). */
+.motion-ok .how-steps li, .motion-ok .privacy-list > div {
+  transition-property: opacity, transform, translate, box-shadow;
+}
+.motion-ok .how-steps li:hover, .motion-ok .privacy-list > div:hover {
+  translate: 0 -3px;
+  box-shadow: var(--lc-shadow-2);
+}
+
+/* Lora is a serif: give the large display lines a touch more air. */
+.hero-copy h1 { line-height: 1.02; }
+.problem-list li { line-height: 1.1; }
