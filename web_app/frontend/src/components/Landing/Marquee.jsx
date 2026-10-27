@@ -1,4 +1,4 @@
-import { Pill, ScanFace, KeyRound, MessageCircle, Search, MapPin, ShieldCheck, Siren, PhoneCall, Footprints } from 'lucide-react';
+import { Pill, ScanFace, Package, MessageCircle, Search, MapPin, ShieldCheck, Siren, PhoneCall, Footprints } from 'lucide-react';
 
 // What LOCUS does, as a calm looping strip of chips. The list is shown twice
 // so the loop is seamless; the copy is hidden from assistive tech. CSS pauses
@@ -6,7 +6,7 @@ import { Pill, ScanFace, KeyRound, MessageCircle, Search, MapPin, ShieldCheck, S
 const CHIPS = [
   [Pill, 'Dose verification'],
   [ScanFace, 'Face recognition'],
-  [KeyRound, 'Belonging tracking'],
+  [Package, 'Belonging tracking'],
   [MessageCircle, 'Conversation summaries'],
   [Search, 'Memory search'],
   [MapPin, 'Location safety'],

@@ -6,7 +6,7 @@ import {
 import { LazyMotion, MotionConfig, m as Motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import HeroStill from '../components/Landing/HeroStill';
-import Background from '../components/Landing/Background';
+import Background, { HeroChips } from '../components/Landing/Background';
 import LandingEffects, { Words } from '../components/Landing/Effects';
 import DayTimeline from '../components/Landing/DayTimeline';
 import Devices from '../components/Landing/Devices';
@@ -258,6 +258,7 @@ export default function Landing() {
 
             <div className="hero-visual" aria-hidden="true">
               <div className="bg-spotlight" />
+              {scroll && <HeroChips until={BEATS.cardStart} />}
               {env.webgl ? (
                 <SceneBoundary fallback={still}>
                   <Suspense fallback={scroll ? <HeroStill /> : still}>

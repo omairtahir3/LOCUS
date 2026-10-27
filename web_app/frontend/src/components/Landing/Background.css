@@ -49,7 +49,7 @@ body:has(.bg) { background: var(--lc-bg); }
 
 /* ── Decorative elements ───────────────────────────────────────────────────
    Parallax wrapper (same scroll-linked oscillation as the aurora) around an
-   inner element that floats on its own loop. Tiles and frames live on the
+   inner element that floats on its own loop. Chips and tiles live on the
    right; the left only gets faint line work. */
 .bg-float {
   position: absolute;
@@ -75,42 +75,46 @@ body:has(.bg) { background: var(--lc-bg); }
   animation: bg-bob 7s ease-in-out var(--d, 0s) infinite alternate;
 }
 
-/* Viewfinder frames: four corner brackets and a centre focus point, drawn
-   with gradients in teal (one small one in warm peach). */
-.bg-frame > i {
-  --c: color-mix(in srgb, var(--lc-primary) 55%, transparent);
-  --l: calc(var(--w) * 0.22);
-  position: relative;
-  display: block;
-  width: var(--w);
-  height: calc(var(--w) * 0.75);
-  background:
-    linear-gradient(var(--c), var(--c)) top left / var(--l) 2px no-repeat,
-    linear-gradient(var(--c), var(--c)) top left / 2px var(--l) no-repeat,
-    linear-gradient(var(--c), var(--c)) top right / var(--l) 2px no-repeat,
-    linear-gradient(var(--c), var(--c)) top right / 2px var(--l) no-repeat,
-    linear-gradient(var(--c), var(--c)) bottom left / var(--l) 2px no-repeat,
-    linear-gradient(var(--c), var(--c)) bottom left / 2px var(--l) no-repeat,
-    linear-gradient(var(--c), var(--c)) bottom right / var(--l) 2px no-repeat,
-    linear-gradient(var(--c), var(--c)) bottom right / 2px var(--l) no-repeat;
-  animation: bg-bob 9s ease-in-out infinite alternate;
+/* Hero notification chips: small frosted pills with a capability-coloured
+   icon around the camera, like moments arriving in a live feed. Hero only,
+   behind the canvas; they fade out (.beat) as the real cards fly out. */
+.hero-chips { position: absolute; inset: 0; pointer-events: none; }
+.bg-chip { position: absolute; }
+.bg-chip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 8px;
+  border-radius: var(--lc-radius-pill);
+  background: rgb(255 255 255 / 0.8);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  backdrop-filter: blur(12px) saturate(1.3);
+  border: 1px solid rgb(255 255 255 / 0.9);
+  box-shadow:
+    inset 0 1px 0 #FFF,
+    0 18px 36px -18px color-mix(in srgb, var(--cap) 50%, transparent),
+    0 2px 6px rgb(28 26 23 / 0.06);
+  color: var(--lc-text);
+  font-family: var(--lc-font-body);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  animation: bg-bob-soft 8s ease-in-out var(--d, 0s) infinite alternate;
 }
-.bg-frame > i::after {
-  content: '';
-  position: absolute;
-  inset: 50% auto auto 50%;
-  width: 10px;
-  height: 10px;
+.bg-chip b {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  border: 2px solid var(--c);
-  transform: translate(-50%, -50%);
+  background: var(--cap-bg);
+  color: var(--cap);
 }
-.bg-frame--lg { --w: 132px; top: 70vh; right: 4vw; }
-.bg-frame--md { --w: 76px; top: 15vh; right: 16vw; }
-.bg-frame--sm { --w: 44px; top: 52vh; right: 22vw; }
-.bg-frame--md > i { animation-duration: 7s; animation-delay: -3s; }
-.bg-frame--sm > i { --c: color-mix(in srgb, #E07B39 70%, transparent); animation-duration: 6s; }
-.bg-frame--sm > i::after { width: 6px; height: 6px; }
+.bg-chip small { color: var(--lc-text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+@keyframes bg-bob-soft {
+  from { transform: translateY(-6px); }
+  to   { transform: translateY(8px); }
+}
 
 /* Left side: dashed rings and contour lines, both faint. */
 .bg-ring > i {
@@ -147,14 +151,13 @@ body:has(.bg) { background: var(--lc-bg); }
 @keyframes bg-spin { to { transform: rotate(360deg); } }
 
 /* Narrow screens: the text column is the whole width, so keep only the
-   aurora and one small frame; no line work or tiles behind the copy. */
+   aurora; no chips, tiles or line work behind the copy. */
 @media (max-width: 899px) {
-  .bg-tile, .bg-ring, .bg-contours, .bg-frame--md, .bg-frame--sm { display: none; }
-  .bg-frame--lg { --w: 72px; top: auto; bottom: 4vh; right: 5vw; }
+  .bg-tile, .bg-ring, .bg-contours, .hero-chips { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bg-float { transform: none; }
-  .bg-tile > i, .bg-frame > i, .bg-ring > i { animation: none; }
+  .bg-tile > i, .bg-chip > span, .bg-ring > i { animation: none; }
 }
 
 /* Dot grid in teal at about 7%, fading out towards the edges. */
