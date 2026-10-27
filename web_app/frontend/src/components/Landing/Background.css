@@ -47,6 +47,99 @@ body:has(.bg) { background: var(--lc-bg); }
   100% { transform: translate3d(10%, -4%, 0) rotate(-8deg) scale(1.04); }
 }
 
+/* ── Decorative elements ───────────────────────────────────────────────────
+   Parallax wrapper (same scroll-linked oscillation as the aurora) around an
+   inner element that floats on its own loop. Tiles and orbs live on the
+   right; the left only gets faint line work. */
+.bg-float {
+  position: absolute;
+  transform: translate3d(0, calc(sin(calc(var(--sy, 0) * var(--f) * 1rad)) * var(--amp)), 0);
+  will-change: transform;
+}
+
+/* Frosted capability tiles, each in its capability colour. */
+.bg-tile > i {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  color: var(--cap);
+  background: rgb(255 255 255 / 0.72);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgb(255 255 255 / 0.85);
+  box-shadow:
+    inset 0 1px 0 #FFF,
+    0 20px 36px -18px color-mix(in srgb, var(--cap) 55%, transparent);
+  animation: bg-bob 7s ease-in-out var(--d, 0s) infinite alternate;
+}
+
+/* Glossy orbs. */
+.bg-orb > i {
+  display: block;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #FFF 0, color-mix(in srgb, var(--lc-aurora-teal) 75%, #FFF) 20%, var(--lc-primary) 78%, #0B4F49 100%);
+  box-shadow: 0 30px 60px -22px color-mix(in srgb, var(--lc-primary) 60%, transparent);
+  animation: bg-bob 9s ease-in-out infinite alternate;
+}
+.bg-orb--lg { --size: 120px; top: 72vh; right: 4vw; }
+.bg-orb--md { --size: 64px; top: 15vh; right: 16vw; }
+.bg-orb--sm { --size: 34px; top: 52vh; right: 22vw; }
+.bg-orb--md > i { animation-duration: 7s; animation-delay: -3s; }
+.bg-orb--sm > i {
+  background: radial-gradient(circle at 32% 28%, #FFF 0, var(--lc-aurora-peach) 35%, #E07B39 100%);
+  box-shadow: 0 16px 30px -12px rgb(224 123 57 / 0.5);
+  animation-duration: 6s;
+}
+
+/* Left side: dashed rings and contour lines, both faint. */
+.bg-ring > i {
+  display: block;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in srgb, var(--lc-primary) 32%, transparent);
+  animation: bg-spin 80s linear infinite;
+}
+.bg-ring--a { --size: 380px; top: 54vh; left: -330px; }
+.bg-ring--b { --size: 170px; bottom: -40px; left: -70px; }
+.bg-ring--b > i { animation-direction: reverse; animation-duration: 50s; }
+/* Only the outer arcs show, at the left edge, fading out before the gutter
+   so no line ever runs under the text column. */
+.bg-contours {
+  top: 4vh;
+  left: -470px;
+  width: 620px;
+  height: 620px;
+  -webkit-mask-image: linear-gradient(90deg, #000 62%, transparent 86%);
+  mask-image: linear-gradient(90deg, #000 62%, transparent 86%);
+}
+.bg-contours ellipse {
+  fill: none;
+  stroke: color-mix(in srgb, var(--lc-primary) 22%, transparent);
+  stroke-width: 1.2;
+}
+
+@keyframes bg-bob {
+  from { transform: translateY(-9px) rotate(-5deg); }
+  to   { transform: translateY(11px) rotate(5deg); }
+}
+@keyframes bg-spin { to { transform: rotate(360deg); } }
+
+/* Narrow screens: the text column is the whole width, so keep only the
+   aurora and one small orb; no line work or tiles behind the copy. */
+@media (max-width: 899px) {
+  .bg-tile, .bg-ring, .bg-contours, .bg-orb--md, .bg-orb--sm { display: none; }
+  .bg-orb--lg { --size: 64px; top: auto; bottom: 4vh; right: 5vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bg-float { transform: none; }
+  .bg-tile > i, .bg-orb > i, .bg-ring > i { animation: none; }
+}
+
 /* Dot grid in teal at about 7%, fading out towards the edges. */
 .bg-dots {
   position: absolute;

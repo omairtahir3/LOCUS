@@ -235,6 +235,9 @@ export default function Landing() {
               </Motion.div>
             </Motion.div>
 
+            {/* Captions and scene: one sticky unit on mobile (so the scene never
+                slides under the captions); layout-transparent on desktop. */}
+            <div className="hero-scene">
             {scroll && (
               <div className="hero-captions">
                 <p className="beat" style={{ '--a': -1, '--b': BEATS.turn[0] }}>
@@ -263,6 +266,7 @@ export default function Landing() {
                   </Suspense>
                 </SceneBoundary>
               ) : still}
+            </div>
             </div>
           </div>
         </div>

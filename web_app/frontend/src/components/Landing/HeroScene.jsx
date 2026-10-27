@@ -106,7 +106,8 @@ function Scene({ state, cards, cardEls, lite }) {
     const aspect = size.width / size.height;
     const tan = Math.tan((FOV * Math.PI) / 360);
     const dist = Math.max((w / 0.36) / 2 / (tan * aspect), (h / 0.3) / 2 / tan);
-    const lookY = 0.08 * dist * tan;
+    // Centred on the hero copy beside it rather than sitting low in the panel.
+    const lookY = -0.04 * dist * tan;
     camera.position.set(0, lookY + dist * 0.14, dist);
     camera.lookAt(0, lookY, 0);
     camera.updateProjectionMatrix();

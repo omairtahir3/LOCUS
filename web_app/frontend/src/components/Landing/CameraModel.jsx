@@ -106,7 +106,7 @@ export default function CameraModel({ rig }) {
       drawScene(g, w, h * 0.7);
       g.restore();
       g.fillStyle = '#D5DADF';
-      g.font = `700 ${w * 0.16}px "Nunito Sans", system-ui, sans-serif`;
+      g.font = `700 ${w * 0.16}px "Space Grotesk", system-ui, sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText('LOCUS', w / 2, h * 0.85);

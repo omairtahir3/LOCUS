@@ -10,10 +10,9 @@
    --lc-accent-text. Light theme only; there is no dark set. Status
    colours are never meant to stand alone; pair each with its icon and
    label. */
-/* Type (from the ui-ux-pro-max typography data): Lora, a warm readable serif,
-   for display; Nunito Sans, a clear humanist sans, for body text. (Atkinson
-   Hyperlegible was tried: its slashed zero made times read as "Ø8:Ø2".) */
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Nunito+Sans:ital,opsz,wght@0,6..12,400..800;1,6..12,400..800&display=swap');
+/* Type (ui-ux-pro-max typography data, "Tech Startup" pairing): Space Grotesk
+   for display, DM Sans for body. Both have plain zeros, so times read cleanly. */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400..700&family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap');
 
 :root {
   /* Primary: teal, for actions (buttons, links, focus). White on it 5.5:1. */
@@ -59,8 +58,8 @@
   --lc-cap-place: #A3431C;    --lc-cap-place-bg: #F8E6DD;
 
   /* Type */
-  --lc-font-display: 'Lora', Georgia, 'Times New Roman', serif;
-  --lc-font-body: 'Nunito Sans', ui-sans-serif, system-ui, sans-serif;
+  --lc-font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --lc-font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
   --lc-text-xs: 0.8125rem;   /* 13 */
   --lc-text-sm: 0.9375rem;   /* 15 */
   --lc-text-base: 1.0625rem; /* 17 */

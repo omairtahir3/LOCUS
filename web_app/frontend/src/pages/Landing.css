@@ -139,7 +139,7 @@
   font-size: clamp(2.9rem, 1.5rem + 3.6vw, 5.4rem);
   font-weight: 700;
   line-height: 0.98;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.04em;
 }
 .hero-copy p {
   margin-top: var(--lc-space-5);
@@ -168,8 +168,9 @@
   opacity: clamp(0, min((var(--p) - var(--a)) * 25, (var(--b) - var(--p)) * 25), 1);
 }
 
+.hero-scene { display: contents; }
 .hero-visual {
-  grid-column: 7 / -1;
+  grid-column: 6 / -1;
   grid-row: 1 / -1;
   position: relative;
   min-height: 0;
@@ -181,25 +182,25 @@
   .hero--scroll .hero-track { height: 440vh; height: 440svh; }
   .hero-stage { display: contents; }
   .hero-copy { padding: calc(var(--nav-h) + var(--lc-space-5)) var(--gutter) var(--lc-space-7); }
-  .hero-captions {
+  /* One sticky unit: the captions strip on top, the scene filling the rest. */
+  .hero--scroll .hero-scene {
     position: sticky;
     top: 0;
-    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100svh;
+  }
+  .hero-captions {
+    position: relative;
+    flex: none;
     height: 8.6em;
     margin: 0;
     padding: var(--lc-space-4) var(--gutter) 0;
-    /* Frosted, so the copy scrolling under it fades and the aurora behind
-       shows through without an edge. */
-    background: color-mix(in srgb, var(--lc-bg) 30%, transparent);
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
-    -webkit-mask-image: linear-gradient(#000 80%, transparent);
-    mask-image: linear-gradient(#000 80%, transparent);
     font-size: 1.2rem;
   }
   .hero-captions p { inset: var(--lc-space-4) var(--gutter) auto; }
-  /* Sticks just under the captions strip (8.6em at its 1.2rem). */
-  .hero-visual { position: sticky; top: calc(8.6 * 1.2rem); height: calc(100svh - 8.6 * 1.2rem); }
+  .hero-visual { position: relative; flex: 1; min-height: 0; }
 }
 
 /* Still hero (reduced motion, or no WebGL): nothing sticks or scrubs. */
@@ -803,7 +804,9 @@
 }
 
 /* f) Marquee of capability chips */
-.marquee-band { padding-block: var(--lc-space-5); }
+/* The next section's wave (56px) lays over this band's foot: leave it room so
+   it never crosses the chips. */
+.marquee-band { padding-block: var(--lc-space-5) calc(56px + var(--lc-space-5)); }
 .marquee {
   overflow: hidden;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
@@ -964,6 +967,6 @@
   box-shadow: var(--lc-shadow-2);
 }
 
-/* Lora is a serif: give the large display lines a touch more air. */
-.hero-copy h1 { line-height: 1.02; }
-.problem-list li { line-height: 1.1; }
+/* Space Grotesk display: tight tracking on the big lines. */
+.lp h2, .problem-list li, .cap .cap-q { letter-spacing: -0.03em; }
+.problem-list li { line-height: 1.04; }
