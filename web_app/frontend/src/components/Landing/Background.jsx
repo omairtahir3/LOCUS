@@ -6,7 +6,7 @@ import './Background.css';
 //  - fixed layers here: "aurora" colour fields (teal, mint, sky, peach) that
 //    drift and parallax against scroll at different speeds, a faint dot grid
 //    masked to the centre, and film grain;
-//  - decorative elements: glossy orbs and frosted capability tiles on the
+//  - decorative elements: viewfinder frames and frosted capability tiles on the
 //    right, dashed rings and contour lines on the left, all parallaxed and
 //    gently floating, and kept off the left text column;
 //  - section tones (.tone-plain / .tone-tint) with soft wave tops and a
@@ -28,7 +28,7 @@ const BLOBS = [
   { cls: 'bg-blob--deep', f: 0.0005, amp: 220 },
 ];
 
-// Decorative elements. Tiles and orbs stay on the right; the left side only
+// Decorative elements. Tiles and viewfinder frames stay on the right; the left side only
 // gets low-contrast line work, so nothing busy sits under the text column.
 const TILES = [
   { Icon: Pill, cap: 'dose', pos: { top: '24vh', right: '4vw' }, f: 0.0013, amp: 90 },
@@ -37,10 +37,12 @@ const TILES = [
   { Icon: MessageCircle, cap: 'talk', pos: { top: '82vh', right: '30vw' }, f: 0.0011, amp: 110 },
   { Icon: MapPin, cap: 'place', pos: { top: '44vh', right: '6vw' }, f: 0.0007, amp: 160 },
 ];
-const ORBS = [
-  { cls: 'bg-orb--lg', f: 0.0006, amp: 200 },
-  { cls: 'bg-orb--md', f: 0.0012, amp: 120 },
-  { cls: 'bg-orb--sm', f: 0.0018, amp: 80 },
+// Viewfinder frames: the camera's corner brackets with a focus point, echoing
+// the evidence frames on the cards.
+const FRAMES = [
+  { cls: 'bg-frame--lg', f: 0.0006, amp: 200 },
+  { cls: 'bg-frame--md', f: 0.0012, amp: 120 },
+  { cls: 'bg-frame--sm', f: 0.0018, amp: 80 },
 ];
 // Topographic-style contours: concentric, slightly irregular ellipses.
 const CONTOURS = [0, 1, 2, 3, 4, 5, 6].map(i => ({
@@ -82,8 +84,8 @@ export default function Background() {
       </svg>
       <div className="bg-float bg-ring bg-ring--a" style={float(0.0008, 120)}><i /></div>
       <div className="bg-float bg-ring bg-ring--b" style={float(0.0013, 80)}><i /></div>
-      {ORBS.map(o => (
-        <div key={o.cls} className={`bg-float bg-orb ${o.cls}`} style={float(o.f, o.amp)}><i /></div>
+      {FRAMES.map(o => (
+        <div key={o.cls} className={`bg-float bg-frame ${o.cls}`} style={float(o.f, o.amp)}><i /></div>
       ))}
       {TILES.map((t, i) => {
         const { Icon } = t;
