@@ -788,8 +788,16 @@
   .devices-copy, .devices-stage { grid-column: 1 / -1; }
   .devices-stage { height: auto; margin-top: var(--lc-space-6); display: grid; gap: var(--lc-space-5); perspective: none; }
   .dev { position: relative; inset: auto; transform: none; }
-  .dev--laptop { width: 100%; }
-  .dev--phone { width: min(260px, 70%); justify-self: center; }
+  .dev--laptop { width: 100%; aspect-ratio: auto; }
+  .dash { height: auto; }
+  .dev--phone { width: min(260px, 70%); justify-self: center; aspect-ratio: auto; }
+  .phone { padding-bottom: var(--lc-space-5); }
+}
+@media (max-width: 520px) {
+  /* Too narrow for the sidebar and three tiles: keep the two that matter. */
+  .dash { grid-template-columns: 1fr; }
+  .dash aside, .dash-tiles > div:nth-child(3) { display: none; }
+  .dash-tiles { grid-template-columns: 1fr 1fr; }
 }
 
 /* f) Marquee of capability chips */
