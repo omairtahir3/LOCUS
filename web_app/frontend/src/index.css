@@ -343,6 +343,11 @@ img {
   top: calc(100% + 10px);
   left: 0;
   width: 290px;
+  /* A second line of defence behind dock-pop-right: whatever a panel is
+     anchored to, it can never be wider than the window it opens in. The
+     alerts panel was anchored left from a button near the right edge and ran
+     off the page entirely. */
+  max-width: calc(100vw - 24px);
   background: var(--surface);
   border: var(--rule);
   border-radius: var(--radius-lg);
@@ -1903,4 +1908,308 @@ img {
 @media (max-width: 640px) {
   .pattern-list li { grid-template-columns: 64px 1fr; }
   .pattern-detail { grid-column: 2; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Day summary (the main page)
+
+   A bento grid rather than a row of equal tiles. The day timeline is the one
+   thing someone opens this page to read, so it gets two columns; everything
+   else gets one and is allowed to be small. Medication is one of the small
+   ones on purpose -- it was the whole page before.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 32px;
+}
+
+.bento-head,
+.bento-banner { grid-column: 1 / -1; }
+
+.bento-card.is-wide { grid-column: span 2; }
+
+/* ── The pinned alert ────────────────────────────────────────────────────── */
+
+/* Icon + word + colour, never colour alone: an emergency changes the glyph to
+   a siren and says "Emergency alert active" in text. */
+.bento-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--warning);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-lg);
+  background: var(--warning-light);
+  color: var(--text-primary);
+}
+
+.bento-banner svg:first-child { flex-shrink: 0; color: var(--warning-text); }
+.bento-banner > span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bento-banner strong { font-size: var(--text-base); }
+
+.bento-banner-sub {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bento-banner.is-emergency {
+  border-color: var(--danger);
+  border-left-color: var(--danger);
+  background: var(--danger-light);
+}
+
+.bento-banner.is-emergency svg:first-child { color: var(--danger-text); }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.bento-head { padding: 4px 0 2px; }
+
+.bento-date {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.bento-greeting {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* The one sentence. It is about the day, not about doses -- the old headline
+   had no other sentence available to it. */
+.bento-status {
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  margin-top: 6px;
+}
+
+.bento-where {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+
+.bento-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  padding: 16px 18px 18px;
+  min-width: 0;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.bento-card:hover { box-shadow: var(--lift-2); transform: translateY(-1px); }
+
+.bento-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bento-card-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bento-card-head h3 svg { color: var(--primary-text); flex-shrink: 0; }
+
+.bento-card-head a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-text);
+  white-space: nowrap;
+}
+
+/* The empty state inside a card does not need a second border around it. */
+.bento-card .empty-state {
+  border: none;
+  background: none;
+  padding: 18px 0;
+}
+
+.bento-card .empty-state svg { width: 32px; height: 32px; margin-bottom: 10px; }
+.bento-card .empty-state h3 { font-size: var(--text-base); }
+.bento-card .empty-state p { font-size: var(--text-sm); }
+
+/* ── The day timeline ────────────────────────────────────────────────────── */
+
+.day-line { list-style: none; margin: 0; padding: 0; }
+
+.day-line li {
+  display: grid;
+  grid-template-columns: 56px 40px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.day-line li + li { border-top: 1px solid var(--border-light); }
+
+.day-line time {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.day-line-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-light);
+}
+
+/* A placeholder, so rows with a frame and rows without still line up. */
+.day-line-thumb.is-blank { display: block; }
+
+.day-line-text { display: flex; flex-direction: column; min-width: 0; }
+
+.day-line-title {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-line-detail { font-size: var(--text-sm); color: var(--text-secondary); }
+
+/* ── Shared small bits ───────────────────────────────────────────────────── */
+
+.bento-quiet {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.bento-list { list-style: none; margin: 0; padding: 0; }
+
+.bento-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.bento-list li + li { border-top: 1px solid var(--border-light); }
+.bento-list li svg { flex-shrink: 0; margin-top: 3px; color: var(--text-muted); }
+.bento-list li > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+
+.bento-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.bento-flag {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-light);
+  border-left: 3px solid var(--warning);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.bento-flag svg { flex-shrink: 0; color: var(--warning-text); }
+
+.bento-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-text);
+}
+
+.bento-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.bento-figures dt { font-size: var(--text-xs); color: var(--text-secondary); }
+.bento-figures dd { margin: 1px 0 0; }
+
+.bento-value { font-size: var(--text-lg); font-weight: 600; color: var(--primary-text); }
+
+/* Set in the same slot a figure would occupy, so an absent measure reads as
+   an answer rather than a gap. Never styled as 0%. */
+.bento-unknown { font-size: var(--text-sm); color: var(--text-muted); }
+
+/* ── Location chip ───────────────────────────────────────────────────────── */
+
+.bento-chip-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.bento-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.bento-chip.is-home { background: var(--primary-light); color: var(--primary-dark); }
+.bento-chip.is-away { background: var(--warning-light); color: var(--warning-text); }
+
+/* ── Next dose ───────────────────────────────────────────────────────────── */
+
+.bento-dose { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.bento-dose-name { font-size: var(--text-lg); font-weight: 600; color: var(--text-primary); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .bento { grid-template-columns: repeat(2, 1fr); }
+  .bento-card.is-wide { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  .bento { grid-template-columns: 1fr; gap: 14px; }
+  .bento-card.is-wide { grid-column: auto; }
+  .bento-figures { grid-template-columns: 1fr 1fr; }
+  .day-line li { grid-template-columns: 50px 36px 1fr; gap: 10px; }
+  .day-line-thumb { width: 36px; height: 36px; }
+
+  /* Hover lift is a pointer affordance; on touch it only ever fires after a
+     tap has already happened. */
+  .bento-card:hover { transform: none; box-shadow: var(--lift-1); }
 }

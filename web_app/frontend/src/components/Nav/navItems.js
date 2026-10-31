@@ -1,6 +1,6 @@
 import {
   Home, Users, Activity, MapPin, Bell, Pill, Package,
-  Search, CalendarClock,
+  Search, CalendarClock, Images, Settings,
 } from 'lucide-react';
 
 /**
@@ -27,9 +27,10 @@ export const WEARER_ITEMS = [
   { to: '/my-dashboard',   label: 'Today',      icon: Home,          primary: true, end: true },
   { to: '/routine',        label: 'Routine',    icon: CalendarClock },
   { to: '/belongings',     label: 'Belongings', icon: Package,       primary: true },
-  { to: '/relationships',  label: 'People',     icon: Users,         primary: true, badge: 'faces' },
+  { to: '/relationships',  label: 'People',     icon: Users,         primary: true },
   { to: '/memory-search',  label: 'Memory',     icon: Search },
   { to: '/my-medications', label: 'Medication', icon: Pill,          primary: true },
+  { to: '/keyframes',      label: 'Recent keyframes', icon: Images,   badge: 'faces' },
 ];
 
 export const CAREGIVER_ITEMS = [
@@ -42,6 +43,7 @@ export const CAREGIVER_ITEMS = [
   // delivery mechanism; "Alerts" names what the reader is looking for.
   { to: '/notifications',  label: 'Alerts',     icon: Bell,          primary: true },
   { to: '/medications',    label: 'Medication', icon: Pill },
+  { to: '/keyframes',      label: 'Recent keyframes', icon: Images,   badge: 'faces' },
 ];
 
 export const isCaregiver = (user) =>
@@ -51,12 +53,9 @@ export const itemsFor = (user) =>
   isCaregiver(user) ? CAREGIVER_ITEMS : WEARER_ITEMS;
 
 /**
- * Everything the command palette can jump to: the dock items, plus the
- * destinations that are real routes but not worth a dock slot. Keyframe Audit
- * is here and under People as "Review faces" -- it is where a waiting face is
- * confirmed, so it must stay reachable even though it is not a dock item.
+ * Reachable, but not a dock destination. Only Settings: it lives in the
+ * profile menu, and the palette should still find it by name.
  */
 export const EXTRA_DESTINATIONS = [
-  { to: '/keyframes', label: 'Review faces', icon: Users, hint: 'Confirm or dismiss unknown faces' },
-  { to: '/settings',  label: 'Settings',     icon: Home,  hint: 'Profile, privacy and storage' },
+  { to: '/settings', label: 'Settings', icon: Settings, hint: 'Profile, privacy and storage' },
 ];

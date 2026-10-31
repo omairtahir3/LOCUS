@@ -52,10 +52,13 @@ export default function BottomTabs() {
           className={sheet ? 'is-active' : ''}
           onClick={() => setSheet(v => !v)}
           aria-expanded={sheet}
-          aria-label={sheet ? 'Close more destinations' : 'More destinations'}
+          aria-label={sheet
+            ? 'Close more destinations'
+            : `More destinations${faces > 0 ? `, ${faces} face${faces === 1 ? '' : 's'} waiting to be named` : ''}`}
         >
           <span className="tabbar-glyph">
             {sheet ? <X size={20} aria-hidden="true" /> : <MoreHorizontal size={20} aria-hidden="true" />}
+            {!sheet && faces > 0 && <span className="dock-badge" aria-hidden="true">{faces}</span>}
           </span>
           <span>More</span>
         </button>

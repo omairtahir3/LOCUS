@@ -81,7 +81,7 @@ export default function AlertsBell() {
       </button>
 
       {open && (
-        <div className="dock-pop" role="dialog" aria-label="Recent alerts">
+        <div className="dock-pop dock-pop-right" role="dialog" aria-label="Recent alerts">
           <div className="dock-pop-head">
             <span>{emergency ? 'Emergency' : 'Alerts'}</span>
             {unread > 0 && <span className="dock-pop-count">{unread} unread</span>}

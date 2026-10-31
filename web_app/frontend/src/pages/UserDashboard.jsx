@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { userAPI, authAPI, detectionAPI } from '../services/api';
 import { formatTime12Hour } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
+import DaySummary from '../components/Today/DaySummary';
 import {
   Pill, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp,
   ChevronRight, Calendar, Zap, Bell, Target, ArrowRight, Activity, Camera
@@ -336,8 +337,12 @@ export default function UserDashboard() {
 
       <header className="header-greeting">
         <h1>Hello, {user?.name?.split(' ')[0]}!</h1>
-        <p>You're doing great. Stay on track today.</p>
       </header>
+
+      {/* Rooms, activities, people, belongings, routine, location and alerts.
+          Medication is one small card in here; the schedule and the camera
+          controls keep their own sections below. */}
+      <DaySummary name={user?.name} homeLocation={user?.home_location} />
 
       <div className="card" style={{ marginBottom: 32, borderRadius: 32 }}>
         <div className="card-header" style={{ padding: '24px 32px' }}>
@@ -389,15 +394,15 @@ export default function UserDashboard() {
         )}
 
         <div className="square-stat">
-          <div style={{ color: 'var(--primary)', marginBottom: 12 }}><Target size={32} /></div>
+          <div style={{ color: 'var(--primary-text)', marginBottom: 12 }}><Target size={32} /></div>
           <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{todayTaken}/{todayTotal}</div>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>Taken Today</div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B' }}>Taken Today</div>
         </div>
 
         <div className="square-stat">
           <div style={{ color: 'var(--accent)', marginBottom: 12 }}><TrendingUp size={32} /></div>
           <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{adherencePercent.toFixed(0)}%</div>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>Weekly Goal</div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B' }}>Weekly Goal</div>
         </div>
       </div>
 
@@ -472,9 +477,9 @@ export default function UserDashboard() {
             <p style={{ color: '#64748B', fontSize: '0.95rem', lineHeight: 1.5 }}>
               You've taken <strong>{takenWeek}</strong> out of <strong>{totalWeek}</strong> scheduled doses this week.
               <br/>
-              <span style={{color: 'var(--danger)'}}>Missed: <strong>{missedWeek}</strong></span>
+              <span style={{color: 'var(--danger-text)'}}>Missed: <strong>{missedWeek}</strong></span>
               <span style={{margin: '0 8px'}}>•</span>
-              <span style={{color: 'var(--warning)'}}>Camera Off: <strong>{skippedWeek}</strong></span>
+              <span style={{color: 'var(--warning-text)'}}>Camera Off: <strong>{skippedWeek}</strong></span>
             </p>
           </div>
 
@@ -499,7 +504,7 @@ export default function UserDashboard() {
             </p>
             
             <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
                 Camera Configuration URL
               </div>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
