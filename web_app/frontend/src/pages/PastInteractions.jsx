@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { relationshipsAPI, detectionAPI } from '../services/api';
 import { ChevronLeft, User, Calendar, MapPin } from 'lucide-react';
 import { formatSmartDate } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
 
 export default function PastInteractions() {
   const { id } = useParams();
@@ -34,26 +35,24 @@ export default function PastInteractions() {
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto' }}>
-      <div className="page-header">
-        <div>
-          <Link to={-1} style={{ display: 'flex', alignItems: 'center', color: 'var(--accent)', textDecoration: 'none', marginBottom: 8 }}>
-            <ChevronLeft size={16} style={{ marginRight: 4 }} />
-            Back
-          </Link>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: '50%', background: 'var(--accent)', color: '#fff', 
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', fontWeight: 'bold'
-            }}>
+      <Link to={-1} className="page-back">
+        <ChevronLeft size={16} />
+        Back
+      </Link>
+
+      <PageHeader
+        title={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="avatar" style={{ width: 44, height: 44, background: 'var(--accent)' }}>
               {relationship.person_name.charAt(0).toUpperCase()}
-            </div>
+            </span>
             {relationship.person_name}
-          </h1>
-          <p className="page-subtitle" style={{ marginTop: 4 }}>
-            {relationship.relationship_type ? `Relation: ${relationship.relationship_type}` : 'Social Interaction History'}
-          </p>
-        </div>
-      </div>
+          </span>
+        }
+        description={relationship.relationship_type
+          ? `Relation: ${relationship.relationship_type}`
+          : 'Social interaction history'}
+      />
 
       <div className="card" style={{ padding: 24 }}>
         <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -4,8 +4,9 @@ import { eventLogsAPI, relationshipsAPI, detectionAPI, caregiverAPI } from '../s
 import { useAuth } from '../context/AuthContext';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User, AlertTriangle } from 'lucide-react';
-import UserSelector from '../components/Layout/UserSelector';
 import { formatDateTime12h } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -100,14 +101,14 @@ export default function KeyframeAudit() {
   };
 
   const getBlurLabel = (score) => {
-    if (score >= 100) return { label: 'Sharp', color: 'var(--success)' };
-    if (score >= 50) return { label: 'Soft', color: 'var(--warning)' };
-    return { label: 'Blurry', color: 'var(--danger)' };
+    if (score >= 100) return { label: 'Sharp', color: 'var(--success-text)' };
+    if (score >= 50) return { label: 'Soft', color: 'var(--warning-text)' };
+    return { label: 'Blurry', color: 'var(--danger-text)' };
   };
 
   const getMotionLabel = (score) => {
-    if (score >= 15) return { label: 'High', color: 'var(--danger)' };
-    if (score >= 5) return { label: 'Medium', color: 'var(--warning)' };
+    if (score >= 15) return { label: 'High', color: 'var(--danger-text)' };
+    if (score >= 5) return { label: 'Medium', color: 'var(--warning-text)' };
     return { label: 'Low', color: 'var(--text-muted)' };
   };
 
@@ -159,18 +160,16 @@ export default function KeyframeAudit() {
   const displayFrames = filter === 'medicine_only' ? [] : keyframes;
 
   if (loading) {
-    return <div className="empty-state"><p>Loading keyframe data...</p></div>;
+    return <Loading rows={5} label="Loading keyframe data" />;
   }
 
   return (
     <div style={{ padding: '0 20px', maxWidth: '1400px', margin: '0 auto', marginBottom: '80px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 className="page-title">Keyframe Confidence Audit</h2>
-          <p className="page-description">Per-frame AI evidence for medication intake verification</p>
-        </div>
-        <UserSelector />
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <PageHeader
+        title="Keyframe Confidence Audit"
+        description="Per-frame AI evidence for medication intake verification"
+        actions={<>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
             className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('all')}
@@ -190,8 +189,9 @@ export default function KeyframeAudit() {
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
             <Eye size={16} /> Refresh
           </button>
-        </div>
-      </div>
+          </div>
+        </>}
+      />
 
       {/* Latest Detection Result Summary */}
       {lastResult && (
@@ -218,7 +218,7 @@ export default function KeyframeAudit() {
 
           <div className="stat-grid">
             <div className="stat-card">
-              <div className="stat-value" style={{ color: 'var(--primary)' }}>
+              <div className="stat-value" style={{ color: 'var(--primary-text)' }}>
                 {((lastResult.final_confidence || 0) * 100).toFixed(0)}%
               </div>
               <div className="stat-label">Overall Confidence</div>
@@ -287,7 +287,7 @@ export default function KeyframeAudit() {
                     </div>
                     <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
                     {user?.role === 'caregiver' && (
-                      <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary-text)' }}>
                         <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
                       </div>
                     )}
@@ -365,7 +365,7 @@ export default function KeyframeAudit() {
                       </div>
                       <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
                       {user?.role === 'caregiver' && (
-                        <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary-text)' }}>
                           <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
                         </div>
                       )}
@@ -499,7 +499,7 @@ export default function KeyframeAudit() {
                         <Clock size={12} />
                         {kf.saved_at ? formatDateTime12h(kf.saved_at) : 'Unknown time'}
                         {user?.role === 'caregiver' && (
-                          <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
+                          <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary-text)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
                             <User size={10} style={{ marginRight: 4 }} />
                             {userMap[kf.user_id] || 'Unknown User'}
                           </span>
@@ -512,7 +512,7 @@ export default function KeyframeAudit() {
                         )}
                         {kf.type === 'face_crop' && (
                           <span className="badge" style={{
-                            background: 'var(--primary-light)', color: 'var(--primary)',
+                            background: 'var(--primary-light)', color: 'var(--primary-text)',
                             fontSize: '0.65rem', fontWeight: 700
                           }}>Face Crop</span>
                         )}

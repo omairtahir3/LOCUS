@@ -5,6 +5,7 @@ import PrivacyPanel from '../components/Privacy/PrivacyPanel';
 import StorageUsage from '../components/Storage/StorageUsage';
 import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
+import PageHeader from '../components/Layout/PageHeader';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -41,9 +42,7 @@ export default function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 700 }}>
-      <div className="page-header">
-        <h2 className="page-title">Settings</h2>
-      </div>
+      <PageHeader title="Settings" />
 
       {/* Profile */}
       <div className="card mb-4">
@@ -94,7 +93,7 @@ export default function SettingsPage() {
       <div className="card mb-4">
         <div className="card-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Shield size={18} style={{ color: 'var(--primary)' }} />
+            <Shield size={18} style={{ color: 'var(--primary-text)' }} />
             <div style={{ flex: 1 }}>
               <div className="card-title">Privacy</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
@@ -121,7 +120,7 @@ export default function SettingsPage() {
           too, and a desk is where adding ten to fifteen photographs is bearable. */}
       <div className="card mb-4">
         <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Package size={20} style={{ color: 'var(--primary)' }} />
+          <Package size={20} style={{ color: 'var(--primary-text)' }} />
           <div style={{ flex: 1 }}>
             <div className="card-title">Personal Belongings</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>

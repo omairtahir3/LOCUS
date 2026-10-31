@@ -3,10 +3,10 @@ import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { MapPin, Navigation, AlertTriangle, Shield, Package } from 'lucide-react';
 import LocationMapComponent from '../components/LocationMap';
 import api, { userItemsAPI } from '../services/api';
-import UserSelector from '../components/Layout/UserSelector';
 
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/Layout/PageHeader';
 
 export default function LocationMap() {
   const [locationData, setLocationData] = useState(null);
@@ -100,13 +100,10 @@ export default function LocationMap() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 className="page-title">Location Map</h2>
-          <p className="page-description">Real-time family member location tracking</p>
-        </div>
-        <UserSelector />
-      </div>
+      <PageHeader
+        title="Location Map"
+        description="Real-time family member location tracking"
+      />
 
       {sosData && (
         <div style={{ backgroundColor: 'var(--danger)', color: 'white', padding: 20, borderRadius: 16, marginBottom: 20 }}>
@@ -131,7 +128,7 @@ export default function LocationMap() {
               </button>
               <button 
                 className="btn" 
-                style={{ backgroundColor: 'white', color: 'var(--danger)', fontWeight: 'bold' }}
+                style={{ backgroundColor: 'white', color: 'var(--danger-text)', fontWeight: 'bold' }}
                 onClick={handleResolveSOS}
                 disabled={resolving}
               >
@@ -148,7 +145,7 @@ export default function LocationMap() {
             <p>Loading GPS Data...</p>
           </div>
         ) : error ? (
-          <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'var(--danger)' }}>
+          <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'var(--danger-text)' }}>
             <MapPin size={48} style={{ opacity: 0.5, marginBottom: 16 }} />
             <p>{error}</p>
           </div>
@@ -203,7 +200,7 @@ export default function LocationMap() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs"
-                  style={{ color: 'var(--primary)', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                  style={{ color: 'var(--primary-text)', textDecoration: 'none', whiteSpace: 'nowrap' }}
                 >
                   Open in Maps
                 </a>

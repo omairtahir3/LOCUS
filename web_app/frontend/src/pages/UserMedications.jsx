@@ -3,6 +3,8 @@ import { userAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Pill, Plus, Edit3, Trash2, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -70,27 +72,27 @@ export default function UserMedications() {
 
   const statusIcon = (s) => {
     switch (s) {
-      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
-      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger)' }} />;
-      case 'snoozed': return <Clock size={14} style={{ color: 'var(--warning)' }} />;
-      case 'needs_verification': return <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />;
+      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success-text)' }} />;
+      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger-text)' }} />;
+      case 'snoozed': return <Clock size={14} style={{ color: 'var(--warning-text)' }} />;
+      case 'needs_verification': return <AlertTriangle size={14} style={{ color: 'var(--warning-text)' }} />;
       default: return <Clock size={14} style={{ color: 'var(--text-muted)' }} />;
     }
   };
 
-  if (loading) return <div className="empty-state"><p>Loading medications...</p></div>;
+  if (loading) return <Loading rows={4} label="Loading medications" />;
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">My Medications</h2>
-          <p className="page-description">Manage your medications and view history</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-          <Plus size={16} /> Add Medication
-        </button>
-      </div>
+      <PageHeader
+        title="My Medications"
+        description="Manage your medications and view history"
+        actions={
+          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
+            <Plus size={16} /> Add Medication
+          </button>
+        }
+      />
 
       {/* Tab Switcher */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: 'var(--surface-hover)', borderRadius: 'var(--radius-md)', padding: 4, width: 'fit-content' }}>
@@ -173,7 +175,7 @@ export default function UserMedications() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button 
                               className="btn btn-sm" 
-                              style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }}
+                              style={{ background: 'var(--success-light)', color: 'var(--success-text)', border: '1px solid var(--success)' }}
                               onClick={async () => {
                                 try {
                                   await userAPI.updateLog(s.id || s._id, { status: 'taken', verification_method: 'manual', notes: 'Manually verified' });
@@ -185,7 +187,7 @@ export default function UserMedications() {
                             </button>
                             <button 
                               className="btn btn-sm" 
-                              style={{ background: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                              style={{ background: 'var(--danger-light)', color: 'var(--danger-text)', border: '1px solid var(--danger)' }}
                               onClick={async () => {
                                 try {
                                   await userAPI.updateLog(s.id || s._id, { status: 'scheduled', verification_method: 'manual', notes: 'Returned to scheduled' });
@@ -201,7 +203,7 @@ export default function UserMedications() {
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <button 
                               className="btn btn-sm" 
-                              style={{ background: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}
+                              style={{ background: 'var(--success-light)', color: 'var(--success-text)', border: '1px solid var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}
                               onClick={async () => {
                                 try {
                                   if (s.id || s._id) {
@@ -372,7 +374,7 @@ export default function UserMedications() {
                          log.verification_method === 'manual' ? 'Manual' :
                          log.verification_method || '-'}
                         {log.confidence_score != null && (
-                          <span style={{ marginLeft: 6, fontWeight: 600, color: 'var(--primary)' }}>
+                          <span style={{ marginLeft: 6, fontWeight: 600, color: 'var(--primary-text)' }}>
                             {(log.confidence_score * 100).toFixed(0)}%
                           </span>
                         )}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import AdherenceStrip from '../components/Adherence/AdherenceStrip';
 import { useParams, Link } from 'react-router-dom';
 import { caregiverAPI, medicationAPI, detectionAPI, authAPI } from '../services/api';
 import {
@@ -6,6 +7,7 @@ import {
   MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell, Camera
 } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
+import Loading from '../components/Feedback/Loading';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -24,6 +26,7 @@ export default function FamilyMemberDetail() {
   const [cameraUrl, setCameraUrl] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
   const [rtmpHost, setRtmpHost] = useState('');
+  const [doseHistory, setDoseHistory] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -40,16 +43,20 @@ export default function FamilyMemberDetail() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [sumRes, schRes, verRes, anomRes] = await Promise.all([
+      const [sumRes, schRes, verRes, anomRes, histRes] = await Promise.all([
         caregiverAPI.getUserSummary(userId),
         medicationAPI.getSchedule(userId),
         caregiverAPI.getVerificationEvents(userId, { limit: 10 }).catch(() => ({ data: [] })),
         caregiverAPI.getAnomalies(userId).catch(() => ({ data: [] })),
+        // A month of doses, so the strip can show the shape of the habit rather
+        // than today's number. Non-fatal: the rest of the page stands without it.
+        medicationAPI.getHistory({ userId, limit: 200 }).catch(() => ({ data: [] })),
       ]);
       setSummary(sumRes.data);
       setSchedule(schRes.data || []);
       setVerificationEvents(verRes.data || []);
       setAnomalies(anomRes.data || []);
+      setDoseHistory(Array.isArray(histRes.data) ? histRes.data : (histRes.data?.logs || []));
     } catch (err) {
       console.error(err);
     } finally {
@@ -104,7 +111,7 @@ export default function FamilyMemberDetail() {
   };
 
   if (loading) {
-    return <div className="empty-state"><p>Loading family member data...</p></div>;
+    return <Loading rows={5} label="Loading family member data" />;
   }
 
   const user = summary?.user;
@@ -113,9 +120,9 @@ export default function FamilyMemberDetail() {
 
   const statusIcon = (s) => {
     switch (s) {
-      case 'taken': return <CheckCircle size={16} style={{ color: 'var(--success)' }} />;
-      case 'missed': return <XCircle size={16} style={{ color: 'var(--danger)' }} />;
-      case 'snoozed': return <Clock size={16} style={{ color: 'var(--warning)' }} />;
+      case 'taken': return <CheckCircle size={16} style={{ color: 'var(--success-text)' }} />;
+      case 'missed': return <XCircle size={16} style={{ color: 'var(--danger-text)' }} />;
+      case 'snoozed': return <Clock size={16} style={{ color: 'var(--warning-text)' }} />;
       default: return <Clock size={16} style={{ color: 'var(--text-muted)' }} />;
     }
   };
@@ -127,8 +134,8 @@ export default function FamilyMemberDetail() {
   };
 
   const anomalySeverityStyle = (severity) => {
-    if (severity === 'critical') return { bg: 'var(--danger-light)', color: 'var(--danger)', icon: <AlertTriangle size={18} /> };
-    if (severity === 'warning') return { bg: 'var(--warning-light)', color: 'var(--warning)', icon: <TrendingDown size={18} /> };
+    if (severity === 'critical') return { bg: 'var(--danger-light)', color: 'var(--danger-text)', icon: <AlertTriangle size={18} /> };
+    if (severity === 'warning') return { bg: 'var(--warning-light)', color: 'var(--warning-text)', icon: <TrendingDown size={18} /> };
     return { bg: 'var(--info-light)', color: 'var(--info)', icon: <Eye size={18} /> };
   };
 
@@ -249,6 +256,10 @@ export default function FamilyMemberDetail() {
 
       <div className="grid-2" style={{ alignItems: 'flex-start' }}>
         {/* Today's Schedule */}
+        <div style={{ marginBottom: 20 }}>
+          <AdherenceStrip logs={doseHistory} days={30} name={summary?.user?.name} />
+        </div>
+
         <div className="card">
           <div className="card-header">
             <div>
@@ -325,14 +336,14 @@ export default function FamilyMemberDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {alerts.map((a) => {
                 const typeConfig = {
-                  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger)' },
+                  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger-text)' },
                   camera_off_alert:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
                   skipped_medicine:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
-                  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success)' },
+                  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success-text)' },
                   dose_reminder:     { icon: Bell,  bg: 'var(--info-light)',    color: 'var(--info)' },
-                  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning)' },
+                  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning-text)' },
                   status_check:      { icon: Bell,  bg: 'var(--accent-light)',  color: 'var(--accent)' },
-                  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary)' },
+                  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary-text)' },
                   system:            { icon: Bell,  bg: 'var(--surface-hover)', color: 'var(--text-secondary)' },
                 };
                 const cfg = typeConfig[a.type] || typeConfig.system;
@@ -465,7 +476,7 @@ export default function FamilyMemberDetail() {
             </p>
             
             <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
                 Camera Configuration URL
               </div>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>

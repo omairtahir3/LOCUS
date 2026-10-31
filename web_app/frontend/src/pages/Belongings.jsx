@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Package, Plus, Trash2, Upload, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { userItemsAPI } from '../services/api';
+import Loading from '../components/Feedback/Loading';
 
 /**
  * Personal Belongings on the web.
@@ -120,7 +121,7 @@ export default function Belongings() {
 
       {error && (
         <div style={{
-          background: 'var(--danger-light)', color: 'var(--danger)', padding: 12,
+          background: 'var(--danger-light)', color: 'var(--danger-text)', padding: 12,
           borderRadius: 10, marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center',
         }}>
           <AlertTriangle size={16} /> {error}
@@ -128,7 +129,7 @@ export default function Belongings() {
       )}
 
       {loading ? (
-        <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>
+        <Loading rows={3} label="Loading belongings" />
       ) : items.length === 0 ? (
         <div style={{
           padding: 48, textAlign: 'center', background: 'var(--surface)',
@@ -165,7 +166,7 @@ export default function Belongings() {
                   )}
                 </div>
                 <button className="btn" onClick={() => remove(it)} title="Remove"
-                  style={{ color: 'var(--danger)' }}>
+                  style={{ color: 'var(--danger-text)' }}>
                   <Trash2 size={16} />
                 </button>
               </div>

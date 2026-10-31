@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { Search, Shield, Mic, SearchX, Footprints, User, Pill, Hospital, ShoppingCart, Video, Camera, Pin, MapPin, Activity, Package, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { eventLogsAPI, detectionAPI } from '../services/api';
 import { formatClockTime } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
 
 const FILTERS = ['All', 'Medicine', 'People', 'Activity', 'Objects'];
 
@@ -216,7 +218,7 @@ export default function MemorySearch() {
         title: `Saw ${personName}`,
         time: timeLabel,
         icon: User,
-        color: 'var(--primary)',
+        color: 'var(--primary-text)',
         group: groupLabel,
         category: 'People',
         confidence: '',
@@ -237,7 +239,7 @@ export default function MemorySearch() {
         title: ev.details?.sentence || ev.details?.label || ev.details?.description || 'Activity detected',
         time: timeLabel,
         icon: Activity,
-        color: 'var(--warning)',
+        color: 'var(--warning-text)',
         group: groupLabel,
         category: 'Activity',
         confidence: ev.confidence ? `${(ev.confidence * 100).toFixed(0)}%` : '',
@@ -305,16 +307,13 @@ export default function MemorySearch() {
 
   return (
     <div>
-      <div className="page-header" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h2 className="page-title">Memory Search</h2>
-          <p className="page-description">
-            {date
-              ? `Everything recorded on ${new Date(`${date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`
-              : 'Your most recent memories'}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <PageHeader
+        title="Memory Search"
+        description={date
+          ? `Everything recorded on ${new Date(`${date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`
+          : 'Your most recent memories'}
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             className="btn"
             onClick={() => setDate(d => shiftDay(d || todayStr, -1))}
@@ -348,9 +347,10 @@ export default function MemorySearch() {
             title={date ? 'Show recent memories from any day' : 'Go back to a single day'}
           >
             {date ? 'All days' : 'By day'}
-          </button>
-        </div>
-      </div>
+            </button>
+          </div>
+        }
+      />
 
       <div className="card" style={{ marginBottom: 20, padding: 16 }}>
         <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
@@ -467,12 +467,12 @@ export default function MemorySearch() {
           </div>
         </div>
       ) : loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading...</div>
+        <Loading rows={3} label="Loading memories" />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {Object.entries(groupedMemories).map(([group, items]) => (
             <div key={group}>
-              <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+              <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12 }}>
                 {group}
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -535,7 +535,7 @@ export default function MemorySearch() {
                               <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
                                 {m.person_id ? (
                                   <>
-                                    Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
+                                    Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary-text)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
                                   </>
                                 ) : (
                                   m.title
@@ -545,14 +545,14 @@ export default function MemorySearch() {
                                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.time}</span>
                                 {m.confidence && (
                                   <span style={{
-                                    fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)',
+                                    fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary-text)',
                                     background: 'var(--primary-light)', padding: '2px 8px', borderRadius: 12,
                                   }}>{m.confidence}</span>
                                 )}
                                 {m.status && (
                                   <span style={{
                                     fontSize: '0.7rem', fontWeight: 700,
-                                    color: 'var(--success)',
+                                    color: 'var(--success-text)',
                                     background: 'rgba(34,197,94,0.15)',
                                     padding: '2px 8px', borderRadius: 12,
                                   }}>{m.status}</span>
@@ -593,7 +593,7 @@ export default function MemorySearch() {
                             <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
                               {m.person_id ? (
                                 <>
-                                  Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
+                                  Saw <Link to={`/interactions/${m.person_id}`} style={{ color: 'var(--primary-text)', textDecoration: 'none' }} className="hover:underline">{m.person_name}</Link>
                                 </>
                               ) : (
                                 m.title
@@ -603,14 +603,14 @@ export default function MemorySearch() {
                               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.time}</span>
                               {m.confidence && (
                                 <span style={{
-                                  fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)',
+                                  fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary-text)',
                                   background: 'var(--primary-light)', padding: '2px 8px', borderRadius: 12,
                                 }}>{m.confidence}</span>
                               )}
                               {m.status && (
                                 <span style={{
                                   fontSize: '0.7rem', fontWeight: 700,
-                                  color: 'var(--success)',
+                                  color: 'var(--success-text)',
                                   background: 'rgba(34,197,94,0.15)',
                                   padding: '2px 8px', borderRadius: 12,
                                 }}>{m.status}</span>
