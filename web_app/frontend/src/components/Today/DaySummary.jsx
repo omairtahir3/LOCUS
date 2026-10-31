@@ -78,11 +78,19 @@ function metresBetween(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 const HOME_RADIUS_M = 150;   // the same radius item_indexer uses for "at home"
+// A fix nobody has refreshed is not a place somebody IS. The threshold is the
+// backend's own: item_indexer.OUTDOOR_MAX_FIX_AGE_MIN, which is how long that
+// code will trust a fix before it stops deciding anything from it.
+const FIX_MAX_AGE_MIN = 10;
 
 export default function DaySummary({ userId, name, homeLocation, canAct = false, self = false }) {
   const [day, setDay] = useState(null);
   const [items, setItems] = useState([]);
   const [fix, setFix] = useState(null);
+  // Judged when the reading arrives rather than during render: Date.now() in
+  // render is impure, and "is this fresh" is a question about the moment the
+  // data was read, which is the only moment it can honestly be answered.
+  const [fixStale, setFixStale] = useState(true);
   const [schedule, setSchedule] = useState([]);
   const [notices, setNotices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -103,7 +111,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       if (!alive) return;
       setDay(t.status === 'fulfilled' ? t.value.data : null);
       setItems(b.status === 'fulfilled' ? (b.value.data?.items || []) : []);
-      setFix(l.status === 'fulfilled' ? l.value.data : null);
+      const theFix = l.status === 'fulfilled' ? l.value.data : null;
+      setFix(theFix);
+      setFixStale(!theFix?.timestamp
+        || (Date.now() - new Date(theFix.timestamp)) > FIX_MAX_AGE_MIN * 60000);
       setSchedule(s.status === 'fulfilled' ? (s.value.data || []) : []);
       setNotices(n.status === 'fulfilled' ? (n.value.data?.notifications || []) : []);
       setLoading(false);
@@ -146,9 +157,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   }, [schedule]);
 
   const away = useMemo(() => {
-    if (!fix?.lat || !homeLocation?.lat) return null;     // cannot tell
+    // No home address, or a reading too old to mean anything now.
+    if (!fix?.lat || !homeLocation?.lat || fixStale) return null;
     return metresBetween(fix, homeLocation) > HOME_RADIUS_M;
-  }, [fix, homeLocation]);
+  }, [fix, homeLocation, fixStale]);
 
   // One sentence about the day, and it is about the DAY -- not about doses.
   const statusLine = (() => {
@@ -366,7 +378,12 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         </div>
       </section>
 
-      {/* ── Location ───────────────────────────────────────────────────── */}
+      {/* ── Location: the caregiver's view only ────────────────────────── */}
+      {/* This linked to /location, which is CaregiverOnlyRoute, so a wearer
+          who tapped Map was redirected straight back to this page. Where
+          somebody is is a caregiver's question; nobody needs an app to place
+          them in the room they are standing in. */}
+      {canAct && (
       <section className="bento-card is-short">
         <header className="bento-card-head">
           <h3><MapPin size={16} aria-hidden="true" /> Location</h3>
@@ -378,8 +395,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         ) : away === null ? (
           // No home address configured, so Home/Away cannot be claimed.
           <p className="bento-quiet">
-            Last seen {formatSmartDate(fix.timestamp)}.{' '}
-            <Link to="/location">See it on the map</Link>
+            {fixStale
+              ? <>Last placed {formatSmartDate(fix.timestamp)} — too long ago to say where they are now.</>
+              : <>Last seen {formatSmartDate(fix.timestamp)}. No home address is set, so Home and Away cannot be told apart.</>}
+            {' '}<Link to="/location">See it on the map</Link>
           </p>
         ) : (
           <p className="bento-chip-row">
@@ -393,6 +412,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           </p>
         )}
       </section>
+      )}
 
       {/* ── Medication: one small card, deliberately ───────────────────── */}
       <section className="bento-card is-short">
