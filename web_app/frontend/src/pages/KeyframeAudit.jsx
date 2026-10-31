@@ -164,27 +164,27 @@ export default function KeyframeAudit() {
   }
 
   return (
-    <div style={{ padding: '0 20px', maxWidth: '1400px', margin: '0 auto', marginBottom: '80px' }}>
+    <div>
       <PageHeader
-        title="Keyframe Confidence Audit"
-        description="Per-frame AI evidence for medication intake verification"
+        title="Recent frames"
+        description="What the camera kept, the evidence behind each medication check, and any face still waiting for a name"
         actions={<>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="kf-filters">
           <button
             className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('all')}
-          >All Frames ({keyframes.length})</button>
+          >All frames ({keyframes.length})</button>
           <button
             className={`btn btn-sm ${filter === 'medicine_only' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('medicine_only')}
           >
-            <Pill size={14} /> Medicine Evidence ({evidenceFrames.length})
+            <Pill size={14} /> Medicine evidence ({evidenceFrames.length})
           </button>
           <button
             className={`btn btn-sm ${filter === 'unknown_faces' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('unknown_faces')}
           >
-            <User size={14} /> Unknown Faces ({unknownFaces.length})
+            <User size={14} /> Unknown faces ({unknownFaces.length})
           </button>
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
             <Eye size={16} /> Refresh
@@ -385,7 +385,8 @@ export default function KeyframeAudit() {
                           alt={`Evidence ${evId}`}
                           style={{ width: '100%', maxHeight: 400, objectFit: 'contain', borderRadius: 'var(--radius-md)', background: '#000' }}
                         />
-                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'grid', gap: 8,
+                                      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
                           <div><strong>ID:</strong> {evId?.slice(0, 8)}...</div>
                           <div><strong>Phase:</strong> {phaseInfo.label}</div>
                           <div><strong>Medicine:</strong> {ev.medication_name}</div>
@@ -562,7 +563,8 @@ export default function KeyframeAudit() {
                       />
                       <div style={{
                         marginTop: 12, fontSize: '0.8rem', color: 'var(--text-secondary)',
-                        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12
+                        display: 'grid', gap: 12,
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))'
                       }}>
                         <div><strong>ID:</strong> {kf.keyframe_id?.slice(0, 8)}...</div>
                         <div><strong>Blur Score:</strong> {(kf.blur_score || 0).toFixed(1)}</div>

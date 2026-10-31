@@ -310,8 +310,8 @@ export default function MemorySearch() {
       <PageHeader
         title="Memory Search"
         description={date
-          ? `Everything recorded on ${new Date(`${date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`
-          : 'Your most recent memories'}
+          ? `Everything the camera recognised on ${new Date(`${date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`
+          : 'Doses, people, rooms and belongings the camera recognised — most recent first'}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
@@ -352,51 +352,67 @@ export default function MemorySearch() {
         }
       />
 
-      <div className="card" style={{ marginBottom: 20, padding: 16 }}>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={18} style={{ position: 'absolute', left: 14, top: 14, color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              className="form-input"
-              style={{ paddingLeft: 42, height: 46 }}
-              placeholder="Search, or ask where you left something..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') askAgent(query); }}
-            />
-          </div>
+      <div className="mem-search">
+        {/* ONE BOX, TWO JOBS, AND IT NOW SAYS SO.
+            Typing narrows the list below by title; Ask sends the words to the
+            agent, which answers in a sentence and shows the frame it came
+            from. Both were already true -- nothing on screen said either, so
+            people typed a question, watched the list filter to nothing, and
+            concluded the search was broken. */}
+        <div className="mem-field">
+          <Search size={18} aria-hidden="true" />
+          <input
+            type="text"
+            placeholder="Filter by name, or ask a question"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') askAgent(query); }}
+            aria-label="Filter memories, or ask a question"
+          />
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => askAgent(query)}
+            disabled={!query.trim() || asking}
+          >
+            {asking ? 'Asking…' : 'Ask'}
+          </button>
           {Speech && (
             <button
               onClick={listen}
               disabled={listening || asking}
-              title={listening ? 'Listening' : 'Ask out loud'}
-              className="btn btn-primary"
-              style={{
-                width: 46, height: 46, padding: 0, display: 'flex',
-                alignItems: 'center', justifyContent: 'center',
-                background: listening ? 'var(--danger)' : undefined,
-              }}
+              className={`btn btn-sm mem-mic${listening ? ' is-listening' : ''}`}
+              aria-label={listening ? 'Listening' : 'Ask out loud'}
             >
-              <Mic size={20} />
+              <Mic size={18} aria-hidden="true" />
             </button>
           )}
         </div>
 
+        <p className="mem-hint">
+          Typing narrows the list below. <strong>Ask</strong> has LOCUS answer in
+          a sentence and show you the photograph.
+        </p>
+
+        {/* Examples, because nobody guesses what a system like this can be
+            asked. Clicking one asks it rather than only filling the box --
+            the point is to see an answer. */}
+        {!answer && !asking && (
+          <ul className="mem-examples">
+            {['Where are my keys?', 'Who did I see today?', 'Did I take my medicine?']
+              .map(q => (
+                <li key={q}>
+                  <button onClick={() => { setQuery(q); askAgent(q); }}>{q}</button>
+                </li>
+              ))}
+          </ul>
+        )}
+
         {asking && (
-          <div style={{ padding: '10px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Looking through your memories...
-          </div>
+          <p className="mem-asking" role="status">Looking through your memories…</p>
         )}
 
         {answer && !asking && (
-          <div
-            style={{
-              display: 'flex', gap: 12, alignItems: 'flex-start',
-              background: 'var(--border-light)', borderRadius: 10,
-              padding: 12, marginBottom: 12,
-            }}
-          >
+          <div className="mem-answer">
             {answer.keyframe_id && !answerImageBroken && (
               <img
                 src={detectionAPI.getKeyframeImage(answer.keyframe_id, 240)}
@@ -407,52 +423,43 @@ export default function MemorySearch() {
                   url: detectionAPI.getKeyframeImage(answer.keyframe_id),
                   title: answer.answer,
                 })}
-                style={{
-                  width: 84, height: 84, borderRadius: 8, objectFit: 'cover',
-                  cursor: 'zoom-in', flexShrink: 0,
-                }}
               />
             )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.45 }}>
-                {answer.answer}
-              </div>
+            <div className="mem-answer-text">
+              <p className="mem-answer-line">{answer.answer}</p>
               {/* The place is deliberately absent: nothing in the record says
-                  which room it was, so the photograph is the answer to "where". */}
+                  which room it was, so the photograph is the answer to
+                  "where". */}
               {answer.keyframe_id && !answerImageBroken && (
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  Tap the photo to see the spot.
-                </div>
+                <p className="mem-answer-note">Open the photo to see the spot.</p>
               )}
             </div>
             <button
               onClick={() => setAnswer(null)}
-              title="Dismiss"
-              className="btn"
-              style={{ width: 28, height: 28, padding: 0, flexShrink: 0 }}
+              className="btn btn-sm mem-answer-close"
+              aria-label="Dismiss answer"
             >
-              <X size={14} />
+              <X size={14} aria-hidden="true" />
             </button>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-          {FILTERS.map(f => (
-            <button
-              key={f}
-              onClick={() => setActiveFilter(f)}
-              style={{
-                padding: '6px 14px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 600,
-                whiteSpace: 'nowrap', transition: 'all 0.2s', border: 'none', cursor: 'pointer',
-                background: activeFilter === f
-                  ? (f === 'Medicine' ? 'var(--success)' : f === 'Activity' ? 'var(--warning)' : 'var(--primary)')
-                  : 'var(--border-light)',
-                color: activeFilter === f ? '#fff' : 'var(--text-secondary)'
-              }}
-            >
-              {f === 'All' ? `All (${formattedEvents.length})` : `${f} (${formattedEvents.filter(m => m.category === f).length})`}
-            </button>
-          ))}
+        <div className="mem-filters" role="group" aria-label="Filter by kind">
+          {FILTERS.map(f => {
+            const n = f === 'All'
+              ? formattedEvents.length
+              : formattedEvents.filter(m => m.category === f).length;
+            return (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={activeFilter === f ? 'is-active' : ''}
+                aria-pressed={activeFilter === f}
+              >
+                {f} <span className="mem-filter-count">{n}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -460,10 +467,14 @@ export default function MemorySearch() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
           <SearchX size={56} style={{ opacity: 0.5, marginBottom: 12 }} />
           <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-            {query.length > 0 ? 'No results found' : 'No memories yet'}
+            {query.length > 0
+              ? `Nothing here matches “${query}”`
+              : date ? 'Nothing was recognised on this day' : 'No memories yet'}
           </div>
-          <div style={{ fontSize: '0.85rem', textAlign: 'center' }}>
-            When the AI camera detects events, they will appear here.
+          <div style={{ fontSize: '0.85rem', textAlign: 'center', maxWidth: '42ch' }}>
+            {query.length > 0
+              ? 'Try Ask instead — it reads the whole record, not just the titles on this page.'
+              : 'Doses, faces, rooms and belongings appear here as the camera recognises them. Photographs are kept for 36 hours; the written record stays for weeks, so an older day can have entries with no picture.'}
           </div>
         </div>
       ) : loading ? (

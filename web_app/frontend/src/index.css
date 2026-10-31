@@ -2419,3 +2419,232 @@ img {
    it sits in every row and must not compete with the data. */
 .med-delete { color: var(--text-muted); }
 .med-delete:hover { color: var(--danger-text); background: var(--danger-light); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Memory search
+
+   The page was one unlabelled box that quietly did two different things:
+   typing filtered the list by title, Enter sent the words to the agent. So a
+   person typed a question, watched the list filter itself to nothing, and
+   concluded the search did not work. Both actions are now named.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.mem-search {
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.mem-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.mem-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.mem-field > svg { flex-shrink: 0; color: var(--text-muted); }
+
+.mem-field input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.mem-field .btn { flex-shrink: 0; }
+
+.mem-mic {
+  width: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Recording is a state worth being unmistakable about. */
+.mem-mic.is-listening {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse);
+}
+
+.mem-hint {
+  margin-top: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.mem-hint strong { color: var(--text-primary); }
+
+.mem-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.mem-examples button {
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-full);
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mem-examples button:hover {
+  border-style: solid;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: var(--primary-light);
+}
+
+.mem-asking { margin-top: 12px; font-size: var(--text-base); color: var(--text-secondary); }
+
+/* ── The agent's answer ──────────────────────────────────────────────────── */
+
+.mem-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--primary-light);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(204, 251, 241, .26), rgba(204, 251, 241, .08));
+}
+
+.mem-answer img {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+.mem-answer-text { flex: 1; min-width: 0; }
+
+.mem-answer-line {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.mem-answer-note { margin-top: 4px; font-size: var(--text-xs); color: var(--text-secondary); }
+
+.mem-answer-close { flex-shrink: 0; width: 28px; padding: 0; }
+
+/* ── Kind filters ───────────────────────────────────────────────────────── */
+
+/* One active style, not a different hue per filter. The old chips painted
+   white on --success (2.42:1) and on --warning (2.05:1), so the label of the
+   selected filter was the least readable text on the page. These also carry
+   aria-pressed, so the selection is not conveyed by colour alone. */
+.mem-filters {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.mem-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mem-filters button:hover { border-color: var(--text-muted); color: var(--text-primary); }
+
+.mem-filters button.is-active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.mem-filter-count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.mem-filters button.is-active .mem-filter-count { color: var(--primary-dark); }
+
+@media (max-width: 640px) {
+  .mem-search { padding: 14px; }
+
+  /* The Ask button and the mic would squeeze the field below usable width, so
+     they wrap underneath it and keep full-size touch targets. */
+  .mem-field { flex-wrap: wrap; padding: 10px 12px; }
+  .mem-field input { flex-basis: 100%; order: -1; }
+  .mem-field > svg { display: none; }
+  .mem-field .btn { flex: 1; min-height: 42px; }
+  .mem-mic { flex: 0 0 48px; }
+
+  .mem-answer { flex-wrap: wrap; }
+  .mem-answer img { width: 100%; height: 160px; }
+}
+
+/* ── Recent frames: filters ─────────────────────────────────────────────── */
+
+/* Four buttons on one unwrapping row ran off the side of a phone, and the
+   page also wrapped itself in its own 20px padding inside .page-container's
+   32px -- 52px of gutter on a 390px screen. */
+.kf-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  /* Each filter takes a full row rather than shrinking to an unreadable
+     stub, and keeps a 44px target. The counts are the point of these
+     labels, so they must not be what gets truncated. */
+  .kf-filters { width: 100%; }
+
+  .kf-filters .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-height: 40px;
+    justify-content: center;
+  }
+}

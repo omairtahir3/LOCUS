@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { User, Bell, Shield, Save, Link as LinkIcon, Users, Package } from 'lucide-react';
 import PrivacyPanel from '../components/Privacy/PrivacyPanel';
 import StorageUsage from '../components/Storage/StorageUsage';
+import CameraSetup from '../components/Camera/CameraSetup';
 import { Link } from 'react-router-dom';
 import { authAPI } from '../services/api';
 import PageHeader from '../components/Layout/PageHeader';
@@ -86,13 +87,12 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Link a User */}
+      {/* Pairing comes first: privacy is about what that camera may keep. */}
       <CameraSetup />
 
       {/* Privacy Mode, and the rooms and places that switch recording off by
           themselves. Above Personal Belongings deliberately: what the camera
           must NOT see belongs before what it is told to look for. */}
-      {/* Pairing comes first: privacy is about what that camera may keep. */}
       <div className="card mb-4">
         <div className="card-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
