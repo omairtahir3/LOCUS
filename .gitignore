@@ -70,3 +70,15 @@ scratch/
 # the key must be rotated regardless, because removal does not undo exposure.
 web_app/backend/firebase-service-account.json
 web_app/backend/.env.example
+
+# Working documents for the FYP report and presentation. Kept locally, off
+# GitHub: they are deliverables for the submission and the evaluation deck,
+# not documentation of the code, and FEATURE_AUDIT enumerates known gaps.
+ARCHITECTURE_NARRATIVE.md
+CHAPTER_4_IMPLEMENTATION.md
+CHAPTER_5_TESTING.md
+DIAGRAM_CORRECTIONS.md
+FEATURE_AUDIT.md
+PRESENTATION_60.md
+# Untouched Vite scaffold text; said nothing about this project.
+web_app/frontend/README.md
