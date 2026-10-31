@@ -134,7 +134,18 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   const insights = day?.insights || [];
   const findingsFromTimeline = day?.anomalies || [];
 
-  const unread = useMemo(() => notices.filter(n => !n.is_read), [notices]);
+  // /notifications returns everything addressed to the signed-in caregiver,
+  // which on a per-person page includes alerts about OTHER people. Each row
+  // carries subject_user_id (set by utils/notifications.js and
+  // routes/caregiver.js), so scoping is a filter here rather than a backend
+  // change. Unscoped -- the wearer's own page -- every notification is theirs.
+  const scoped = useMemo(() => (
+    userId
+      ? notices.filter(n => String(n.subject_user_id || '') === String(userId))
+      : notices
+  ), [notices, userId]);
+
+  const unread = useMemo(() => scoped.filter(n => !n.is_read), [scoped]);
   const emergency = unread.filter(n => EMERGENCY_TYPES.includes(n.type));
   const routineNotices = useMemo(
     () => unread.filter(n => ROUTINE_TYPES.includes(n.type)), [unread]);

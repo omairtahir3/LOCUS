@@ -51,6 +51,9 @@
   --success-text: #0b825a;
   --warning-text: #9d6507;
   --danger-text:  #ce3a3a;
+  /* #3B82F6 measures 3.68:1 on --info-light, so an informational heading was
+     the least readable line in its own banner. */
+  --info-text:    #1d4ed8;
 
   /* Layout */
   /* The floating dock replaced a 260px sidebar and a 64px topbar. Only its
@@ -2647,4 +2650,32 @@ img {
     min-height: 40px;
     justify-content: center;
   }
+}
+
+
+/* ── A person as a page title ───────────────────────────────────────────── */
+
+.person-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.person-title .avatar {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-inverse);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .person-title { gap: 10px; }
+  .person-title .avatar { width: 38px; height: 38px; font-size: 1rem; }
 }

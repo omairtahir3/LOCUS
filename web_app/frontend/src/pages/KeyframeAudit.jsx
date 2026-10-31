@@ -167,7 +167,7 @@ export default function KeyframeAudit() {
     <div>
       <PageHeader
         title="Recent frames"
-        description="What the camera kept, the evidence behind each medication check, and any face still waiting for a name"
+        description="Captured frames, medication evidence and unnamed faces"
         actions={<>
           <div className="kf-filters">
           <button

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import AdherenceStrip from '../components/Adherence/AdherenceStrip';
 import { useParams, Link } from 'react-router-dom';
-import { caregiverAPI, medicationAPI, detectionAPI, authAPI } from '../services/api';
+import { caregiverAPI, medicationAPI, authAPI } from '../services/api';
 import {
   ArrowLeft, Pill, CheckCircle, XCircle, Clock, AlertTriangle,
   MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell, Camera
@@ -9,6 +9,8 @@ import {
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 import Loading from '../components/Feedback/Loading';
 import { doseLabel } from '../utils/doseStatus';
+import PageHeader from '../components/Layout/PageHeader';
+import DaySummary from '../components/Today/DaySummary';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -24,8 +26,6 @@ export default function FamilyMemberDetail() {
   
   // AI Config State
   const [configModal, setConfigModal] = useState(false);
-  const [cameraUrl, setCameraUrl] = useState('');
-  const [savingConfig, setSavingConfig] = useState(false);
   const [rtmpHost, setRtmpHost] = useState('');
   const [doseHistory, setDoseHistory] = useState([]);
 
@@ -65,27 +65,6 @@ export default function FamilyMemberDetail() {
     }
   };
 
-  const saveCameraConfig = async () => {
-    setSavingConfig(true);
-    try {
-      let finalUrl = cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '');
-      if (finalUrl && !finalUrl.startsWith('rtsp')) {
-        finalUrl = `rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/${finalUrl}`;
-      }
-
-      await detectionAPI.configure({
-        user_id: userId,
-        camera_stream_url: finalUrl
-      });
-      setConfigModal(false);
-      loadData();
-    } catch (err) {
-      alert('Failed to save AI configuration');
-    } finally {
-      setSavingConfig(false);
-    }
-  };
-
   const sendMessage = async () => {
     if (!msgTitle || !msgBody) return;
     setSending(true);
@@ -95,7 +74,7 @@ export default function FamilyMemberDetail() {
       setMsgTitle('');
       setMsgBody('');
       loadData();
-    } catch (err) {
+    } catch {
       alert('Failed to send message');
     } finally {
       setSending(false);
@@ -106,7 +85,7 @@ export default function FamilyMemberDetail() {
     try {
       await caregiverAPI.statusCheck(userId);
       alert('Status check request sent!');
-    } catch (err) {
+    } catch {
       alert('Failed to send status check');
     }
   };
@@ -116,7 +95,6 @@ export default function FamilyMemberDetail() {
   }
 
   const user = summary?.user;
-  const adherence = summary?.today_adherence;
   const alerts = summary?.pending_alerts || [];
 
   const statusIcon = (s) => {
@@ -137,18 +115,19 @@ export default function FamilyMemberDetail() {
   const anomalySeverityStyle = (severity) => {
     if (severity === 'critical') return { bg: 'var(--danger-light)', color: 'var(--danger-text)', icon: <AlertTriangle size={18} /> };
     if (severity === 'warning') return { bg: 'var(--warning-light)', color: 'var(--warning-text)', icon: <TrendingDown size={18} /> };
-    return { bg: 'var(--info-light)', color: 'var(--info)', icon: <Eye size={18} /> };
+    return { bg: 'var(--info-light)', color: 'var(--info-text)', icon: <Eye size={18} /> };
   };
 
   return (
     <div>
-      {/* Back + Header */}
-      <Link to="/family" className="btn btn-ghost btn-sm mb-4" style={{ marginLeft: -8 }}>
-        <ArrowLeft size={16} /> Back to Family Members
+      <Link to="/family" className="page-back">
+        <ArrowLeft size={16} aria-hidden="true" /> All family members
       </Link>
 
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap' }}>
-        {(user?.picture || user?.profile_picture) ? (
+      <PageHeader
+        title={
+          <span className="person-title">
+            {(user?.picture || user?.profile_picture) ? (
           <img 
             src={user.picture || user.profile_picture} 
             alt="" 
@@ -158,37 +137,29 @@ export default function FamilyMemberDetail() {
             style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)', width: 56, height: 56 }} 
             onError={(e) => { e.target.style.display = 'none'; }}
           />
-        ) : (
-          <div className="avatar avatar-lg" style={{ background: '#0D9488', fontSize: '1.4rem' }}>
-            {user?.name?.charAt(0)?.toUpperCase()}
-          </div>
-        )}
-        <div style={{ flex: 1 }}>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>{user?.name}</h2>
-          <p className="text-muted text-sm">{user?.email} • {user?.phone || 'No phone'}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+            ) : (
+              <span className="avatar avatar-lg" style={{ background: 'var(--primary)', fontSize: '1.3rem' }}>
+                {user?.name?.charAt(0)?.toUpperCase()}
+              </span>
+            )}
+            {user?.name}
+          </span>
+        }
+        description={[user?.email, user?.phone].filter(Boolean).join(' · ') || 'No contact details'}
+        actions={<>
           <button 
             className="btn btn-outline-primary btn-sm" 
-            onClick={() => {
-              const url = user?.camera_stream_url || '';
-              if (url.includes('127.0.0.1:8554/live/')) {
-                setCameraUrl(url.split('/live/')[1]);
-              } else {
-                setCameraUrl(url);
-              }
-              setConfigModal(true);
-            }}>
+            onClick={() => setConfigModal(true)}>
             <Camera size={16} /> AI Camera
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setMsgModal(true)}>
             <MessageSquare size={16} /> Send Message
           </button>
           <button className="btn btn-primary btn-sm" onClick={requestStatusCheck}>
-            <PhoneCall size={16} /> Status Check
+            <PhoneCall size={16} /> Status check
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Behavioral Anomaly Alerts */}
       {anomalies.length > 0 && (
@@ -215,7 +186,8 @@ export default function FamilyMemberDetail() {
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>{a.message}</div>
                 </div>
                 <span className={`badge ${a.severity === 'critical' ? 'badge-danger' : a.severity === 'warning' ? 'badge-warning' : 'badge-info'}`}>
-                  {a.severity}
+                  {a.severity === 'critical' ? 'Needs attention now'
+                    : a.severity === 'warning' ? 'Worth a look' : 'For information'}
                 </span>
               </div>
             );
@@ -223,37 +195,15 @@ export default function FamilyMemberDetail() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-icon success"><CheckCircle size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.taken || 0}</div>
-            <div className="stat-label">Taken</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon danger"><XCircle size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.missed || 0}</div>
-            <div className="stat-label">Missed</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon warning"><Clock size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.snoozed || 0}</div>
-            <div className="stat-label">Snoozed</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon primary"><Pill size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.adherence_percentage?.toFixed(0) || 0}%</div>
-            <div className="stat-label">Adherence</div>
-          </div>
-        </div>
-      </div>
+      {/* This person's whole day, not four dose counters. Scoped by the route
+          param rather than the dock's selection, because the caregiver asked
+          for THIS person by opening their page. */}
+      <DaySummary
+        userId={userId}
+        name={user?.name}
+        homeLocation={user?.home_location}
+        canAct
+      />
 
       <div className="grid-2" style={{ alignItems: 'flex-start' }}>
         {/* Today's Schedule */}
