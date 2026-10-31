@@ -2213,3 +2213,209 @@ img {
      tap has already happened. */
   .bento-card:hover { transform: none; box-shadow: var(--lift-1); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Camera setup (Settings)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.camera-setup { padding: 4px 0 2px; }
+
+.camera-setup-lead {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  max-width: 62ch;
+}
+
+.camera-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(204, 251, 241, .30), rgba(204, 251, 241, .12));
+}
+
+.camera-url code {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--primary-dark);
+  word-break: break-all;
+  user-select: all;        /* one click selects the whole address */
+}
+
+.camera-url .btn { flex-shrink: 0; }
+
+.camera-setup-note {
+  margin-top: 12px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Dose cards (Medication)
+
+   Today's schedule was a five-column table: Time, Medication, Dosage, Status,
+   Action. A table is right for the history, where somebody scans down one
+   column; it is wrong for today, where each row is a thing you act on. The
+   time leads, because that is how a dose is identified out loud.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dose-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+
+.dose {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: var(--rule);
+  /* The tone lives on the leading edge: visible in greyscale, and outside the
+     text so no label is ever painted in a status colour. */
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dose:hover { box-shadow: var(--lift-1); }
+
+.dose.is-taken   { border-left-color: var(--success); }
+.dose.is-missed  { border-left-color: var(--danger); }
+.dose.is-wait    { border-left-color: var(--warning); }
+.dose.is-unknown { border-left-color: var(--border); background: var(--surface-hover); }
+.dose.is-due     { border-left-color: var(--primary); }
+
+.dose-time {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dose-body { min-width: 0; }
+
+.dose-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dose-dosage { font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary); }
+
+.dose-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.dose-chip.is-taken   { background: var(--success-light); color: var(--success-text); }
+.dose-chip.is-missed  { background: var(--danger-light);  color: var(--danger-text); }
+.dose-chip.is-wait    { background: var(--warning-light); color: var(--warning-text); }
+.dose-chip.is-unknown { background: var(--border-light);  color: var(--text-secondary); }
+.dose-chip.is-due     { background: var(--primary-light); color: var(--primary-dark); }
+
+.dose-verified { margin-top: 4px; font-size: var(--text-xs); color: var(--text-muted); }
+
+.dose-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.dose-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Confirming and refusing a dose are not the same weight of action, so they
+   are not the same button. Both clear 4.5:1 on their own fill. */
+.dose-yes { background: var(--success-light); color: var(--success-text); border: 1px solid var(--success); }
+.dose-no  { background: var(--danger-light);  color: var(--danger-text);  border: 1px solid var(--danger); }
+
+@media (max-width: 720px) {
+  .dose { grid-template-columns: 76px 1fr; gap: 10px; }
+  .dose-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .dose-time { font-size: var(--text-base); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Appeal, on a light theme
+
+   The landing page's layered ground, quieter: two soft teal washes fixed to
+   the viewport with no drift and no parallax. Fixed rather than scrolling so
+   there is nothing to repaint while reading, which is also what keeps it from
+   reading as decoration competing with the content.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(760px 420px at 12% -6%,  rgba(13, 148, 136, .085), transparent 70%),
+    radial-gradient(620px 380px at 92% 2%,   rgba(99, 102, 241, .055), transparent 72%),
+    var(--bg);
+}
+
+/* Cards arrive once, on mount, in reading order. The global reduced-motion
+   rule collapses the duration, which leaves them simply present. */
+@keyframes bento-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.bento > * {
+  animation: bento-rise 420ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.bento > *:nth-child(1) { animation-delay: 0ms; }
+.bento > *:nth-child(2) { animation-delay: 45ms; }
+.bento > *:nth-child(3) { animation-delay: 90ms; }
+.bento > *:nth-child(4) { animation-delay: 135ms; }
+.bento > *:nth-child(5) { animation-delay: 180ms; }
+.bento > *:nth-child(6) { animation-delay: 215ms; }
+.bento > *:nth-child(7) { animation-delay: 250ms; }
+.bento > *:nth-child(8) { animation-delay: 280ms; }
+.bento > *:nth-child(9) { animation-delay: 305ms; }
+.bento > *:nth-child(n + 10) { animation-delay: 330ms; }
+
+/* The hero card earns a little more presence than the rest. */
+.bento-card.is-wide {
+  background:
+    linear-gradient(180deg, rgba(204, 251, 241, .22), rgba(255, 255, 255, 0) 120px),
+    var(--surface);
+  box-shadow: var(--lift-2);
+}
+
+/* Figures and chips shift value often enough that a hard swap reads as a
+   glitch; the colour eases, the number does not move. */
+.bento-value,
+.bento-chip,
+.dose-chip {
+  transition: color var(--transition-base), background var(--transition-base);
+}
+
+/* The one destructive control in the medication list. Quiet until hovered:
+   it sits in every row and must not compete with the data. */
+.med-delete { color: var(--text-muted); }
+.med-delete:hover { color: var(--danger-text); background: var(--danger-light); }

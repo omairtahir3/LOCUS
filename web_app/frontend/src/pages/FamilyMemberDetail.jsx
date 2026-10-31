@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 import Loading from '../components/Feedback/Loading';
+import { doseLabel } from '../utils/doseStatus';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -301,7 +302,7 @@ export default function FamilyMemberDetail() {
                               displayStatus === 'missed' ? 'badge-danger' :
                               displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
                             }`}>
-                              {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+                              {statusIcon(displayStatus)} {doseLabel(displayStatus)}
                             </span>
                           );
                         })()}

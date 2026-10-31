@@ -4,6 +4,7 @@ import { Pill, Plus, Calendar, Clock, Edit2, Trash2, CheckCircle, XCircle, SkipF
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import PageHeader from '../components/Layout/PageHeader';
+import { doseLabel } from '../utils/doseStatus';
 
 export default function Medications() {
   const selectedUserContext = useSelectedUser();
@@ -121,7 +122,7 @@ export default function Medications() {
         displayStatus === 'camera_off' ? 'badge-neutral' :
         displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
       }`}>
-        {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+        {statusIcon(displayStatus)} {doseLabel(displayStatus)}
       </span>
     );
   };

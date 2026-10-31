@@ -58,6 +58,14 @@ const LEFT_BEHIND_TYPES = [
 const EMERGENCY_TYPES = ['emergency'];
 
 const firstName = (n) => (n || '').trim().split(' ')[0];
+
+/** Local clock, so it matches the day the rest of the page is describing. */
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 const titleCase = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** Metres between two fixes. Enough for "is this the home address". */
@@ -71,7 +79,7 @@ function metresBetween(a, b) {
 }
 const HOME_RADIUS_M = 150;   // the same radius item_indexer uses for "at home"
 
-export default function DaySummary({ userId, name, homeLocation, canAct = false }) {
+export default function DaySummary({ userId, name, homeLocation, canAct = false, self = false }) {
   const [day, setDay] = useState(null);
   const [items, setItems] = useState([]);
   const [fix, setFix] = useState(null);
@@ -189,7 +197,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false 
           {new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
         <h2 className="bento-greeting">
-          {who ? `${who}'s day` : 'Your day'}
+          {self ? `${greeting()}${who ? `, ${who}` : ''}` : (who ? `${who}'s day` : 'Your day')}
         </h2>
         <p className="bento-status">{statusLine}</p>
         <p className="bento-where">

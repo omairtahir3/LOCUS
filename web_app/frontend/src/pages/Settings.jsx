@@ -87,9 +87,12 @@ export default function SettingsPage() {
       </div>
 
       {/* Link a User */}
+      <CameraSetup />
+
       {/* Privacy Mode, and the rooms and places that switch recording off by
           themselves. Above Personal Belongings deliberately: what the camera
           must NOT see belongs before what it is told to look for. */}
+      {/* Pairing comes first: privacy is about what that camera may keep. */}
       <div className="card mb-4">
         <div className="card-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
