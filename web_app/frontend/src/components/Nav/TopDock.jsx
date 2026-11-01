@@ -76,10 +76,10 @@ export default function TopDock() {
                     )}
                     <Icon size={17} aria-hidden="true" />
                     <span className="dock-label">{label}</span>
-                    {/* Keyframe Audit is not a dock item any more -- it sits
-                        under People as "Review faces" -- so the badge is how
-                        anyone learns a face is waiting. The count is announced
-                        rather than left to a coloured dot. */}
+                    {/* The count of faces waiting to be named, on the
+                        Recent keyframes item. Announced rather than left to
+                        a coloured dot, which says nothing to a screen
+                        reader and nothing about how many. */}
                     {badge === 'faces' && faces > 0 && (
                       <>
                         <span className="dock-badge" aria-hidden="true">{faces}</span>

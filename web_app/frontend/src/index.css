@@ -281,10 +281,23 @@ img {
 
 .is-shrunk .dock a { padding: 6px 12px; }
 
-/* Under 1180px the labels drop and the dock becomes icons, before it has any
-   chance to collide with the clusters either side. Each link keeps its text
-   in the DOM, so the accessible name survives. */
-@media (max-width: 1180px) {
+/* The labels drop and the dock becomes icons before it has any chance to
+   collide with the clusters either side. Each link keeps its text in the DOM,
+   so the accessible name survives.
+
+   TWO THRESHOLDS, BECAUSE THERE ARE TWO DOCKS
+
+   "Recent keyframes" is 16 characters where no other label is more than 10,
+   so the item that carries it costs about 170px. A caregiver pays that on top
+   of eight items and a person-chip: the pill measures ~955px and, with the
+   chip (~178px) and the three round buttons (~132px), needs 1289px of content
+   box -- which the bar only has above ~1353px. Below that the avatar was
+   pushed past the page's own right edge.
+
+   A wearer's dock has one item fewer and no chip, so it needs ~1135px and
+   keeps its words a good deal further down. That matters more here than
+   anywhere: the person reading it is the one the labels are for. */
+@media (max-width: 1240px) {
   .dock .dock-label {
     position: absolute;
     width: 1px;
@@ -295,6 +308,22 @@ img {
   }
 
   .dock a { padding: 9px 11px; }
+}
+
+/* The person-chip is the tell: only a caregiver's bar has one. 1360 rather
+   than 1353 so a 1366px laptop -- the commonest screen this runs on after
+   1920 -- keeps its labels. */
+@media (min-width: 1241px) and (max-width: 1360px) {
+  .dock-bar:has(.person-chip) .dock .dock-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .dock-bar:has(.person-chip) .dock a { padding: 9px 11px; }
 }
 
 /* ── Round icon buttons in the clusters ──────────────────────────────────── */
