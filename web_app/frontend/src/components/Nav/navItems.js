@@ -27,10 +27,9 @@ export const WEARER_ITEMS = [
   { to: '/my-dashboard',   label: 'Today',      icon: Home,          primary: true, end: true },
   { to: '/routine',        label: 'Routine',    icon: CalendarClock },
   { to: '/belongings',     label: 'Belongings', icon: Package,       primary: true },
-  { to: '/relationships',  label: 'People',     icon: Users,         primary: true },
+  { to: '/relationships',  label: 'People',     icon: Users,         primary: true, badge: 'faces' },
   { to: '/memory-search',  label: 'Memory',     icon: Search },
   { to: '/my-medications', label: 'Medication', icon: Pill,          primary: true },
-  { to: '/keyframes',      label: 'Recent keyframes', icon: Images,   badge: 'faces' },
 ];
 
 export const CAREGIVER_ITEMS = [
@@ -43,7 +42,6 @@ export const CAREGIVER_ITEMS = [
   // delivery mechanism; "Alerts" names what the reader is looking for.
   { to: '/notifications',  label: 'Alerts',     icon: Bell,          primary: true },
   { to: '/medications',    label: 'Medication', icon: Pill },
-  { to: '/keyframes',      label: 'Recent keyframes', icon: Images,   badge: 'faces' },
 ];
 
 export const isCaregiver = (user) =>
@@ -53,9 +51,16 @@ export const itemsFor = (user) =>
   isCaregiver(user) ? CAREGIVER_ITEMS : WEARER_ITEMS;
 
 /**
- * Reachable, but not a dock destination. Only Settings: it lives in the
- * profile menu, and the palette should still find it by name.
+ * Reachable, but not dock destinations.
+ *
+ * "Recent keyframes" was briefly a dock item and is folded back under People:
+ * the label was half again as long as any other, which broke the dock's
+ * rhythm, and confirming a face is something you go and do rather than a
+ * place you visit. The waiting count rides on People instead, and the page
+ * is reachable from there, from the People card on Today, from the command
+ * palette, and from the More sheet.
  */
 export const EXTRA_DESTINATIONS = [
-  { to: '/settings', label: 'Settings', icon: Settings, hint: 'Profile, privacy and storage' },
+  { to: '/keyframes', label: 'Review faces', icon: Images, hint: 'Confirm or dismiss unknown faces' },
+  { to: '/settings',  label: 'Settings',     icon: Settings, hint: 'Profile, privacy and storage' },
 ];

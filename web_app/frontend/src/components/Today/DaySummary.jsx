@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Siren, Home, MapPin, Package, Users, Pill,
   MessageSquare, CalendarClock, Images, ChevronRight, Clock,
-  Camera, CameraOff,
+  Camera, CameraOff, Activity,
 } from 'lucide-react';
 import api, {
   eventLogsAPI, userItemsAPI, medicationAPI, notificationAPI, detectionAPI,
@@ -50,6 +50,18 @@ import { NO_DATA, NO_DATA_LABEL } from '../../utils/adherence';
  *   nothing; null admits we cannot tell that from a camera that was off.
  */
 
+/* One glyph per kind of event, so the rail can be read without the words.
+   Keys are the `kind` values GET /event-logs/timeline emits. */
+const KIND_ICON = {
+  routine:    Home,
+  activity:   Activity,
+  medication: Pill,
+  social:     Users,
+  items:      Package,
+  moment:     Camera,
+  anomaly:    AlertTriangle,
+};
+
 const ROUTINE_TYPES = [
   'routine_medication_gap', 'routine_inactivity', 'routine_camera_off',
   'routine_deviation', 'routine_habitual_item',
@@ -60,6 +72,17 @@ const LEFT_BEHIND_TYPES = [
 const EMERGENCY_TYPES = ['emergency'];
 
 const firstName = (n) => (n || '').trim().split(' ')[0];
+
+/** A card with nothing in it still has to say what it is for. */
+function CardEmpty({ icon: Glyph, children, action, to, tone }) {
+  return (
+    <div className={`card-empty${tone ? ` is-${tone}` : ''}`}>
+      <span className="card-empty-disc" aria-hidden="true"><Glyph size={20} /></span>
+      <p>{children}</p>
+      {action && to && <Link to={to} className="card-empty-action">{action}</Link>}
+    </div>
+  );
+}
 
 /** Local clock, so it matches the day the rest of the page is describing. */
 function greeting() {
@@ -126,6 +149,18 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
     return () => { alive = false; };
   }, [userId]);
 
+  // The existing endpoint, and the banner reflects the result straight away
+  // rather than waiting for the next mount.
+  const markAllRead = async () => {
+    try {
+      await notificationAPI.markAllRead();
+      setNotices(ns => ns.map(n => ({ ...n, is_read: true })));
+    } catch {
+      // Leave the banner up. Silently hiding an alert we failed to clear
+      // would be the one outcome worse than the alert staying.
+    }
+  };
+
   const who = name ? firstName(name) : null;
 
   // ── Derived, all from the payloads above ────────────────────────────────
@@ -134,7 +169,9 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   const timeline = useMemo(() => day?.items || [], [day]);
   const summary = day?.summary || {};
   const insights = day?.insights || [];
-  const findingsFromTimeline = day?.anomalies || [];
+  // Memoised for the same reason timeline is: `day?.anomalies || []` makes a
+  // fresh array every render, which would defeat the findings useMemo below.
+  const findingsFromTimeline = useMemo(() => day?.anomalies || [], [day]);
 
   // /notifications returns everything addressed to the signed-in caregiver,
   // which on a per-person page includes alerts about OTHER people. Each row
@@ -226,15 +263,19 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   return (
     <div className="bento">
       {/* ── Alerts, pinned ─────────────────────────────────────────────── */}
-      {(emergency.length > 0 || unread.length > 0) && (
-        <Link
-          to="/notifications"
+      {/* Was a whole-banner link whose only affordance was a chevron, so the
+          one thing you could do with an alert was leave the page. The actions
+          are named now, and they are the ones that already exist. */}
+      {unread.length > 0 && (
+        <section
           className={`bento-banner${emergency.length ? ' is-emergency' : ''}`}
+          role={emergency.length ? 'alert' : 'status'}
         >
-          {emergency.length
-            ? <Siren size={20} aria-hidden="true" />
-            : <AlertTriangle size={20} aria-hidden="true" />}
-          <span>
+          <span className="bento-banner-icon" aria-hidden="true">
+            {emergency.length ? <Siren size={20} /> : <AlertTriangle size={20} />}
+          </span>
+
+          <span className="bento-banner-text">
             <strong>
               {emergency.length
                 ? 'Emergency alert active'
@@ -244,8 +285,18 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
               {(emergency[0] || unread[0])?.title}
             </span>
           </span>
-          <ChevronRight size={18} aria-hidden="true" />
-        </Link>
+
+          <span className="bento-banner-actions">
+            <Link to="/notifications" className="btn btn-sm banner-review">Review</Link>
+            {/* Not offered during an emergency: an SOS is not something to be
+                cleared from a summary strip. */}
+            {!emergency.length && (
+              <button className="btn btn-sm banner-dismiss" onClick={markAllRead}>
+                Mark all read
+              </button>
+            )}
+          </span>
+        </section>
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -319,31 +370,55 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         </header>
 
         {timeline.length === 0 ? (
-          <div className="empty-state">
-            <CalendarClock aria-hidden="true" />
-            <h3>Nothing recorded yet</h3>
-            <p>Rooms, activities, people and belongings appear here as they are recognised.</p>
+          /* A ghost of the thing that will be here, rather than a shrug. The
+             rail and four muted nodes show the SHAPE of a day, so an empty
+             page still explains what this card is for. */
+          <div className="day-ghost">
+            <ol className="day-line is-ghost" aria-hidden="true">
+              {[0, 1, 2, 3].map(i => (
+                <li key={i}>
+                  <time />
+                  <span className="day-line-node" />
+                  <span className="day-line-card">
+                    <span className="ghost-bar" style={{ width: `${68 - i * 9}%` }} />
+                    <span className="ghost-bar is-short" style={{ width: `${40 - i * 5}%` }} />
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="day-ghost-line">
+              Rooms, people and belongings appear here as the camera recognises
+              them through the day.
+            </p>
           </div>
         ) : (
           <ol className="day-line">
-            {timeline.slice(-9).reverse().map((e, i) => (
-              <li key={`${e.at}-${i}`} className={`is-${e.kind}`}>
-                <time>{formatClockTime(e.at)}</time>
-                {e.keyframe_id ? (
-                  <img
-                    className="day-line-thumb"
-                    src={detectionAPI.getKeyframeImage(e.keyframe_id, 160)}
-                    alt=""
-                    loading="lazy"
-                    onError={ev => { ev.target.style.visibility = 'hidden'; }}
-                  />
-                ) : <span className="day-line-thumb is-blank" aria-hidden="true" />}
-                <span className="day-line-text">
-                  <span className="day-line-title">{e.title}</span>
-                  {e.detail && <span className="day-line-detail">{e.detail}</span>}
-                </span>
-              </li>
-            ))}
+            {timeline.slice(-9).reverse().map((e, i) => {
+              const Glyph = KIND_ICON[e.kind] || CalendarClock;
+              return (
+                <li key={`${e.at}-${i}`} className={`is-${e.kind}`}>
+                  <time>{formatClockTime(e.at)}</time>
+                  <span className="day-line-node" aria-hidden="true">
+                    <Glyph size={13} />
+                  </span>
+                  <span className="day-line-card">
+                    {e.keyframe_id && (
+                      <img
+                        className="day-line-thumb"
+                        src={detectionAPI.getKeyframeImage(e.keyframe_id, 160)}
+                        alt=""
+                        loading="lazy"
+                        onError={ev => { ev.target.style.display = 'none'; }}
+                      />
+                    )}
+                    <span className="day-line-text">
+                      <span className="day-line-title">{e.title}</span>
+                      {e.detail && <span className="day-line-detail">{e.detail}</span>}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
           </ol>
         )}
       </section>
@@ -409,10 +484,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         )}
 
         {items.length === 0 ? (
-          <p className="bento-quiet">
-            Nothing enrolled yet, or nothing seen recently. Enrol an item to have
-            it tracked.
-          </p>
+          <CardEmpty icon={Package} action="Enrol an item" to="/belongings">
+            Nothing enrolled yet. Once an item is enrolled, this shows where it
+            was last seen.
+          </CardEmpty>
         ) : (
           <ul className="bento-list">
             {items.slice(0, 4).map(it => (
@@ -439,7 +514,9 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         </header>
 
         {peopleToday.length === 0 ? (
-          <p className="bento-quiet">Nobody has been recognised today.</p>
+          <CardEmpty icon={Users}>
+            Nobody has been recognised today.
+          </CardEmpty>
         ) : (
           <ul className="bento-list">
             {peopleToday.slice(0, 4).map((p, i) => (
@@ -450,7 +527,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
 
         <Link to="/keyframes" className="bento-action">
           <Images size={14} aria-hidden="true" />
-          Review recent keyframes
+          Review faces
         </Link>
       </section>
 
@@ -460,13 +537,13 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           <h3><span className="card-chip"><MessageSquare size={15} aria-hidden="true" /></span> Conversations</h3>
         </header>
         {/* No endpoint exists for conversation summaries. Saying so is the
-            honest card; inventing a summary would be the alternative. */}
-        <div className="empty-state">
-          <MessageSquare aria-hidden="true" />
-          <h3>Not available yet</h3>
-          <p>Conversation summaries are not part of this build. Recognised
-             people appear under People.</p>
-        </div>
+            honest card; inventing a summary would be the alternative. Drawn
+            as "coming", not as "broken". */}
+        <CardEmpty icon={MessageSquare} tone="soon">
+          <span className="card-empty-badge">Coming soon</span>
+          Summaries of the conversations the camera hears. People recognised
+          today are under People.
+        </CardEmpty>
       </section>
 
       {/* ── Location: the caregiver's view only ────────────────────────── */}
@@ -482,7 +559,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         </header>
 
         {!fix?.lat ? (
-          <p className="bento-quiet">No location reported yet.</p>
+          <CardEmpty icon={MapPin}>No location has been reported yet.</CardEmpty>
         ) : away === null ? (
           // No home address configured, so Home/Away cannot be claimed.
           <p className="bento-quiet">
@@ -515,7 +592,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         </header>
 
         {!nextDose ? (
-          <p className="bento-quiet">Nothing else due today.</p>
+          <CardEmpty icon={Pill}>Nothing else is due today.</CardEmpty>
         ) : (
           <p className="bento-dose">
             <span className="bento-dose-name">{nextDose.medication_name}</span>
