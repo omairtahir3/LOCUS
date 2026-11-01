@@ -9,6 +9,7 @@ import api, {
 } from '../../services/api';
 import { formatClockTime, formatSmartDate } from '../../utils/dateUtils';
 import Loading from '../Feedback/Loading';
+import { NO_DATA, NO_DATA_LABEL } from '../../utils/adherence';
 
 /**
  * The whole day, on one page.
@@ -157,6 +158,13 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
     return [...new Set(names)];
   }, [timeline]);
 
+  // An insight with value null is one the endpoint could not compute. If
+  // every one of them is null there is no baseline at all, and a grid of four
+  // dashes says less than one sentence does.
+  const measured = insights.filter(i => i.value !== null);
+  const hasBaseline = measured.length > 0;
+  const hasFindings = findingsFromTimeline.length > 0 || routineNotices.length > 0;
+
   const lastRoom = (summary.rooms || []).slice(-1)[0] || null;
   const lastEvent = timeline.length ? timeline[timeline.length - 1] : null;
 
@@ -275,10 +283,12 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           <Link to="/routine">Open <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
-        {findingsFromTimeline.length === 0 && routineNotices.length === 0 ? (
+        {!hasFindings ? (
           <p className="bento-quiet">
-            Still learning this routine. Nothing has been flagged against
-            {who ? ` ${who}'s` : ' your'} usual pattern.
+            {hasBaseline
+              ? <>Nothing unusual against {who ? `${who}'s` : 'your'} usual pattern.</>
+              : <>Still learning this routine — there is not enough history yet to
+                 say what usual looks like for {who || 'you'}.</>}
           </p>
         ) : (
           <ul className="bento-list">
@@ -297,14 +307,18 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           </ul>
         )}
 
-        {insights.length > 0 && (
+        {/* Only once something is measurable. A dash is an answer; four of
+            them in a grid is a broken-looking table. */}
+        {hasBaseline && (
           <dl className="bento-figures">
             {insights.map(ins => (
               <div key={ins.key}>
                 <dt>{ins.label}</dt>
                 <dd>
                   {ins.value === null
-                    ? <span className="bento-unknown">Not enough data</span>
+                    ? <span className="bento-unknown" title={NO_DATA_LABEL}>
+                        {NO_DATA}<span className="sr-only"> {NO_DATA_LABEL}</span>
+                      </span>
                     : <span className="bento-value">{ins.value}%</span>}
                 </dd>
               </div>

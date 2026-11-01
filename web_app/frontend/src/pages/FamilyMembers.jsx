@@ -4,6 +4,7 @@ import { caregiverAPI } from '../services/api';
 import { Users, ChevronRight, Search } from 'lucide-react';
 import PageHeader from '../components/Layout/PageHeader';
 import Loading from '../components/Feedback/Loading';
+import { adherencePct, NO_DATA, NO_DATA_LABEL } from '../utils/adherence';
 
 const AVATAR_COLORS = ['#0D9488', '#6366F1', '#EC4899', '#F59E0B', '#10B981', '#3B82F6'];
 
@@ -106,7 +107,11 @@ export default function FamilyMembers() {
                         <div className="text-xs text-muted">Missed</div>
                       </div>
                       <div style={{ flex: 1, textAlign: 'center' }}>
-                        <div className="font-bold" style={{ color: 'var(--primary-text)' }}>{adh.adherence_percentage?.toFixed(0) || 0}%</div>
+                        <div className="font-bold" style={{ color: 'var(--primary-text)' }}>
+                          {adherencePct(adh) === null
+                            ? <span style={{ color: 'var(--text-muted)' }} title={NO_DATA_LABEL}>{NO_DATA}</span>
+                            : `${adherencePct(adh)}%`}
+                        </div>
                         <div className="text-xs text-muted">Adherence</div>
                       </div>
                       <div style={{ flex: 1, textAlign: 'center' }}>

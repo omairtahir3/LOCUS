@@ -7,6 +7,7 @@ import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill,
 import { formatDateTime12h } from '../utils/dateUtils';
 import PageHeader from '../components/Layout/PageHeader';
 import Loading from '../components/Feedback/Loading';
+import { NO_DATA } from '../utils/adherence';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -391,8 +392,8 @@ export default function KeyframeAudit() {
                           <div><strong>Phase:</strong> {phaseInfo.label}</div>
                           <div><strong>Medicine:</strong> {ev.medication_name}</div>
                           <div><strong>Status:</strong> {ev.detection_status}</div>
-                          <div><strong>Confidence:</strong> {((ev.detection_confidence || 0) * 100).toFixed(1)}%</div>
-                          <div><strong>Phase Score:</strong> {((ev.phase_score || 0) * 100).toFixed(1)}%</div>
+                          <div><strong>Confidence:</strong> {ev.detection_confidence == null ? NO_DATA : `${(ev.detection_confidence * 100).toFixed(1)}%`}</div>
+                          <div><strong>Phase score:</strong> {ev.phase_score == null ? NO_DATA : `${(ev.phase_score * 100).toFixed(1)}%`}</div>
                         </div>
                       </div>
                     )}

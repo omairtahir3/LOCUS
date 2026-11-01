@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import DaySummary from '../components/Today/DaySummary';
 import { formatClockTime } from '../utils/dateUtils';
+import { adherencePct, NO_DATA, NO_DATA_LABEL } from '../utils/adherence';
 import {
   Users, Pill, AlertTriangle, Bell, CheckCircle,
   Clock, ChevronRight, Activity, TrendingUp, Calendar,
@@ -337,7 +338,7 @@ export default function Dashboard() {
             ) : (
               users.map((u, i) => {
                 const summary = summaries[u._id];
-                const adherence = summary?.today_adherence?.adherence_percentage || 0;
+                const adherence = adherencePct(summary?.today_adherence);
                 return (
                   <div key={u._id} className="member-card">
                     <div className="member-header">
@@ -373,7 +374,9 @@ export default function Dashboard() {
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: 700 }}>
                         <span style={{ color: 'var(--text-secondary)' }}>Daily Adherence</span>
-                        <span style={{ color: adherence >= 80 ? 'var(--success)' : 'var(--warning)' }}>{adherence}%</span>
+                        {adherence === null
+                          ? <span style={{ color: 'var(--text-muted)' }} title={NO_DATA_LABEL}>{NO_DATA}</span>
+                          : <span style={{ color: adherence >= 80 ? 'var(--success-text)' : 'var(--warning-text)' }}>{adherence}%</span>}
                       </div>
                       <div className="adherence-bar-container">
                         <div 

@@ -7,6 +7,7 @@ import { formatClockTime } from '../utils/dateUtils';
 import PageHeader from '../components/Layout/PageHeader';
 import Loading from '../components/Feedback/Loading';
 import { isCaregiver } from '../components/Nav/navItems';
+import { NO_DATA, NO_DATA_LABEL } from '../utils/adherence';
 
 /**
  * What today looked like, and what the system has actually learned.
@@ -65,6 +66,9 @@ export default function Routine() {
   // Room and activity sessions are the shape of a day. Doses, faces and item
   // sightings belong to their own pages.
   const pattern = items.filter(i => i.kind === 'routine' || i.kind === 'activity');
+  // Null means the endpoint could not compute it. None measurable at all means
+  // there is no baseline, and then a figure of any kind would be invented.
+  const hasBaseline = insights.some(i => i.value !== null);
 
   const who = isCaregiver(user) ? (selectedUser?.name || 'this person') : 'you';
 
@@ -85,10 +89,13 @@ export default function Routine() {
         {findings.length === 0 ? (
           <div className="empty-state">
             <CalendarClock aria-hidden="true" />
-            <h3>Still learning this routine</h3>
+            <h3>{hasBaseline ? 'Nothing unusual' : 'Still learning this routine'}</h3>
             <p>
-              Nothing has been flagged against {who === 'you' ? 'your' : `${who}'s`} usual pattern.
-              A finding only appears once there is enough history to say what usual is.
+              {hasBaseline
+                ? <>Nothing has been flagged against {who === 'you' ? 'your' : `${who}'s`} usual
+                   pattern today.</>
+                : <>There is not enough history yet to say what usual looks like
+                   for {who}. Findings appear once there is.</>}
             </p>
           </div>
         ) : (
@@ -109,14 +116,18 @@ export default function Routine() {
         {/* The four measures the endpoint computes. A null value means the
             system cannot tell -- printed as its own sentence rather than as a
             zero, because 0% and "we do not know" are different claims. */}
-        {insights.length > 0 && (
+        {/* Only when at least one measure exists. The endpoint's own sentence
+            is printed under each, including for the ones it could not do. */}
+        {hasBaseline && (
           <dl className="insight-list">
             {insights.map(ins => (
               <div key={ins.key}>
                 <dt>{ins.label}</dt>
                 <dd>
                   {ins.value === null
-                    ? <span className="insight-unknown">Not enough data yet</span>
+                    ? <span className="insight-unknown" title={NO_DATA_LABEL}>
+                        {NO_DATA}<span className="sr-only"> {NO_DATA_LABEL}</span>
+                      </span>
                     : <span className="insight-value">{ins.value}%</span>}
                   <span className="insight-detail">{ins.detail}</span>
                 </dd>

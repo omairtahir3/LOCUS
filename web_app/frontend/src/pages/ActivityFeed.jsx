@@ -4,6 +4,7 @@ import { useSelectedUser } from '../context/SelectedUserContext';
 import { eventLogsAPI } from '../services/api';
 import { formatClockTime } from '../utils/dateUtils';
 import PageHeader from '../components/Layout/PageHeader';
+import { NO_DATA } from '../utils/adherence';
 
 // The page used to render a hard-coded array: a plausible-looking day with
 // "Met with neighbor Mrs. Johnson" and "~2,400 steps" that came from nowhere
@@ -286,7 +287,7 @@ export default function ActivityFeed() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
                     <span className="text-sm">{m.label}</span>
                     <span className="text-sm font-bold" style={{ flexShrink: 0, color: m.value == null ? 'var(--text-muted)' : undefined }}>
-                      {m.value == null ? 'No data' : `${m.value}%`}
+                      {m.value == null ? NO_DATA : `${m.value}%`}
                     </span>
                   </div>
                   <div style={{ height: 8, background: 'var(--border-light)', borderRadius: 4, overflow: 'hidden' }}>
