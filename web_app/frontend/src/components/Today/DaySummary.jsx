@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Siren, Home, MapPin, Package, Users, Pill,
   MessageSquare, CalendarClock, Images, ChevronRight, Clock,
+  Camera, CameraOff,
 } from 'lucide-react';
 import api, {
   eventLogsAPI, userItemsAPI, medicationAPI, notificationAPI, detectionAPI,
@@ -185,6 +186,11 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
 
   const hasFindings = findings.length > 0;
 
+  // The coverage measure returns null when the system cannot tell a camera
+  // that saw nothing from a camera that was off, so "no frames today" is only
+  // stated when it CAN tell.
+  const coverageKnown = insights.some(i => i.key === 'coverage' && i.value !== null);
+
   const lastRoom = (summary.rooms || []).slice(-1)[0] || null;
   const lastEvent = timeline.length ? timeline[timeline.length - 1] : null;
 
@@ -243,20 +249,66 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
+      {/* Was four stacked grey lines. Each pill below appears only when the
+          data behind it exists -- an absent camera, room or fix shows no pill
+          rather than a pill reading "unknown". */}
       <section className="bento-head">
         <p className="bento-date">
           {new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
-        <h2 className="bento-greeting">
-          {self ? `${greeting()}${who ? `, ${who}` : ''}` : (who ? `${who}'s day` : 'Your day')}
-        </h2>
-        <p className="bento-status">{statusLine}</p>
-        <p className="bento-where">
-          {lastRoom
-            ? <>Last seen in the <strong>{titleCase(lastRoom)}</strong></>
-            : <>No room recognised yet today</>}
-          {lastEvent && <> · {formatClockTime(lastEvent.at)}</>}
-        </p>
+
+        <div className="bento-identity">
+          <span className="bento-avatar" aria-hidden="true">
+            {(name || '?').charAt(0).toUpperCase()}
+          </span>
+          <div>
+            <h2 className="bento-greeting">
+              {self ? `${greeting()}${who ? `, ${who}` : ''}` : (who ? `${who}'s day` : 'Your day')}
+            </h2>
+            <p className="bento-status">{statusLine}</p>
+          </div>
+        </div>
+
+        <ul className="pill-row">
+          {/* Not a live camera state -- nothing reports one. This is what was
+              observed today, which is a fact the timeline already rests on. */}
+          {summary.tracked_minutes > 0 ? (
+            <li className="pill is-on">
+              <Camera size={14} aria-hidden="true" />
+              Camera recorded {Math.round(summary.tracked_minutes / 60) >= 1
+                ? `${Math.round(summary.tracked_minutes / 60)}h today`
+                : `${Math.round(summary.tracked_minutes)} min today`}
+            </li>
+          ) : coverageKnown && (
+            <li className="pill is-off">
+              <CameraOff size={14} aria-hidden="true" />
+              No frames recorded today
+            </li>
+          )}
+
+          {lastRoom && (
+            <li className="pill">
+              <Home size={14} aria-hidden="true" />
+              Last in the {titleCase(lastRoom)}
+              {lastEvent && <span className="pill-sub">{formatClockTime(lastEvent.at)}</span>}
+            </li>
+          )}
+
+          {away !== null && (
+            <li className={`pill ${away ? 'is-away' : 'is-on'}`}>
+              <MapPin size={14} aria-hidden="true" />
+              {away ? 'Away' : 'At home'}
+              {fix?.timestamp && <span className="pill-sub">{formatSmartDate(fix.timestamp)}</span>}
+            </li>
+          )}
+
+          {unread.length > 0 && (
+            <li className="pill is-alert">
+              <AlertTriangle size={14} aria-hidden="true" />
+              {unread.length} {unread.length === 1 ? 'alert' : 'alerts'}
+            </li>
+          )}
+        </ul>
       </section>
 
       {/* ── Day timeline: the hero ─────────────────────────────────────── */}

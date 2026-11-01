@@ -2844,3 +2844,83 @@ img {
 @media (max-width: 720px) {
   .day-line li { grid-template-columns: 68px 36px 1fr; gap: 10px; }
 }
+
+/* ── Item 4: the page header ────────────────────────────────────────────── */
+
+.bento-head { padding: 2px 0 4px; }
+
+.bento-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.bento-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: var(--text-inverse);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px -8px rgba(13,80,76,.5);
+}
+
+.bento-status { margin-top: 2px; }
+
+/* Each pill is shown only when its data exists, so an empty row means the
+   system genuinely knows nothing yet -- not that something failed. */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, .78);
+  border: 1px solid rgba(13, 80, 76, .10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(13,80,76,.05);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.pill svg { flex-shrink: 0; color: var(--text-muted); }
+
+.pill-sub {
+  padding-left: 7px;
+  margin-left: 1px;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Status carries an icon and words; the tint only reinforces them. */
+.pill.is-on    { border-color: rgba(13,148,136,.28); color: var(--primary-dark); }
+.pill.is-on svg { color: var(--primary); }
+
+.pill.is-off   { border-color: var(--border); color: var(--text-secondary); }
+
+.pill.is-away  { border-color: rgba(245,158,11,.4); color: var(--warning-text); background: rgba(254,243,199,.7); }
+.pill.is-away svg { color: var(--warning-text); }
+
+.pill.is-alert { border-color: rgba(245,158,11,.45); color: var(--warning-text); background: rgba(254,243,199,.75); }
+.pill.is-alert svg { color: var(--warning-text); }
+
+@media (max-width: 640px) {
+  .bento-avatar { width: 44px; height: 44px; font-size: var(--text-lg); }
+  .bento-identity { gap: 12px; }
+}
