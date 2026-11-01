@@ -3235,3 +3235,68 @@ img {
   border-color: rgba(99, 102, 241, .25);
   color: var(--accent);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   The bottom row of the bento
+
+   Nine cards in a three-column grid left the last row short: a caregiver saw
+   Location and Next dose in the first two columns and an empty third, and a
+   wearer -- who gets no Location card -- saw Next dose alone with two thirds
+   of the row empty. A grid with a hole in it reads as a card that failed to
+   load, so the last card takes whatever is left of its row.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bento-card.is-dose.is-full { grid-column: 1 / -1; }   /* wearer: no Location */
+.bento-card.is-dose.is-rest { grid-column: span 2; }   /* caregiver: beside it */
+
+/* ── What a stretched dose card holds ────────────────────────────────────── */
+
+/* The time leads, which is how the Medication page draws a dose and how one
+   is named out loud -- "the eight o'clock one", not "the Panadol one". The
+   row then has somewhere to put the extra width: the clock on the left, the
+   drug and its dose in the middle, the status against the right edge. */
+.bento-dose {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bento-dose-when {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--primary-dark);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bento-dose-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.bento-dose > .badge { margin-left: auto; }
+
+/* Empty, it is the same shape rather than a tall column of nothing in a card
+   three times as wide as the icon it holds. */
+.bento-card.is-dose .card-empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0 6px;
+}
+
+/* ── Two columns ─────────────────────────────────────────────────────────── */
+
+/* With Location beside it the row is already exact, so the dose card drops
+   back to one column; without Location it still takes the row. */
+@media (max-width: 1100px) {
+  .bento-card.is-dose.is-rest { grid-column: auto; }
+}
+
+@media (max-width: 720px) {
+  .bento-card.is-dose.is-full,
+  .bento-card.is-dose.is-rest { grid-column: auto; }
+
+  .bento-card.is-dose .card-empty { flex-direction: column; align-items: flex-start; }
+  .bento-dose-when { font-size: var(--text-xl); }
+}

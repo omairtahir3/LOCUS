@@ -552,7 +552,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           somebody is is a caregiver's question; nobody needs an app to place
           them in the room they are standing in. */}
       {canAct && (
-      <section className="bento-card is-short">
+      <section className="bento-card is-loc">
         <header className="bento-card-head">
           <h3><span className="card-chip"><MapPin size={15} aria-hidden="true" /></span> Location</h3>
           <Link to="/location">Map <ChevronRight size={14} aria-hidden="true" /></Link>
@@ -582,8 +582,12 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       </section>
       )}
 
-      {/* ── Medication: one small card, deliberately ───────────────────── */}
-      <section className="bento-card is-short">
+      {/* ── Medication: the card that closes the row ───────────────── */}
+      {/* Last in the grid, so it is the card that decides whether the bottom
+          row ends in a hole. It takes whatever is left of that row: two of
+          the three columns beside Location for a caregiver, and the whole
+          row for a wearer, who has no Location card. */}
+      <section className={`bento-card is-dose ${canAct ? 'is-rest' : 'is-full'}`}>
         <header className="bento-card-head">
           <h3><span className="card-chip"><Pill size={15} aria-hidden="true" /></span> Next dose</h3>
           <Link to={canAct ? '/medications' : '/my-medications'}>
@@ -595,10 +599,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           <CardEmpty icon={Pill}>Nothing else is due today.</CardEmpty>
         ) : (
           <p className="bento-dose">
-            <span className="bento-dose-name">{nextDose.medication_name}</span>
-            <span className="bento-sub">
-              {nextDose.dosage ? `${nextDose.dosage} · ` : ''}
-              {formatClockTime(nextDose.scheduled_time)}
+            <span className="bento-dose-when">{formatClockTime(nextDose.scheduled_time)}</span>
+            <span className="bento-dose-what">
+              <span className="bento-dose-name">{nextDose.medication_name}</span>
+              {nextDose.dosage && <span className="bento-sub">{nextDose.dosage}</span>}
             </span>
             <span className={`badge badge-${nextDose.status === 'snoozed' ? 'warning' : 'info'}`}>
               {nextDose.status === 'snoozed' ? 'Snoozed' : 'Scheduled'}
