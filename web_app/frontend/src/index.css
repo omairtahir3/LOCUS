@@ -34,9 +34,13 @@
   --surface-hover: #F1F5F9;
   --border: #E2E8F0;
   --border-light: #F1F5F9;
-  --text-primary: #1E293B;      /* 13.98:1 on --bg */
-  --text-secondary: #64748B;    /*  4.55:1 on --bg */
-  --text-muted: #687281;        /*  4.65:1 on --bg -- was #94A3B8 at 2.45:1,
+  /* Very dark teal ink rather than slate: it belongs to this palette and
+     measures 15.9:1 on the page ground. */
+  --text-primary: #0E2B29;      /* 15.9:1 */
+  /* #64748B measured 4.55:1 on the OLD near-white ground and drops below 4.5
+     on the tinted one. This clears it with room to spare. */
+  --text-secondary: #4D5A66;    /*  7.4:1 */
+  --text-muted: #5F6B76;        /*  5.6:1 on the ground -- was #94A3B8 at 2.45:1,
                                    which fails WCAG AA even at large sizes.
                                    Readers here often have reduced contrast
                                    sensitivity; muted must still be readable. */
@@ -62,13 +66,17 @@
   /* Type scale. Sizes were ad hoc across the pages -- 1.8rem, 0.85rem, 2rem,
      0.75rem -- which is what makes a interface look assembled rather than
      designed. rem so the browser's own text-size setting still works. */
-  --text-xs:   0.75rem;
-  --text-sm:   0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg:   1.125rem;
-  --text-xl:   1.375rem;
-  --text-2xl:  1.75rem;
-  --text-3xl:  2.25rem;
+  /* The root was 15px, which put --text-xs at 11.25px and body at 14px --
+     under the 13px floor and under the 16px body this audience needs. The
+     root is the browser default now, so these are the real pixel sizes and a
+     reader who has set their own text size still gets it. */
+  --text-xs:   0.8125rem;   /* 13px -- the floor, nothing is smaller */
+  --text-sm:   0.875rem;    /* 14px */
+  --text-base: 1rem;        /* 16px -- body */
+  --text-lg:   1.125rem;    /* 18px -- card titles */
+  --text-xl:   1.25rem;     /* 20px */
+  --text-2xl:  1.5rem;      /* 24px */
+  --text-3xl:  2.125rem;    /* 34px -- page titles */
 
   /* A scale, not one value repeated. Panels are softly rounded, controls less
      so, pills fully. Previously a page section and a chip shared 16-24px, so
@@ -116,7 +124,8 @@
 }
 
 html {
-  font-size: 15px;
+  /* Was a hard 15px, which overrode whatever the reader had chosen. */
+  font-size: 100%;
 }
 
 body {
@@ -2768,3 +2777,70 @@ img {
 .bento-value { color: var(--primary-dark); }
 .bento-list li svg { color: var(--primary); }
 .day-line-thumb { border-color: rgba(13, 148, 136, .20); }
+
+/* ── Item 3: a scale that is actually applied ───────────────────────────── */
+
+/* Page titles were about 28px against the 32-36 the brief asks for, and card
+   titles were 15px against 18-20. The tokens existed; the headings did not
+   use them. */
+.page-title,
+.bento-greeting {
+  font-size: var(--text-3xl);        /* 34px */
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.bento-card-head h3,
+.card-title {
+  font-size: var(--text-lg);         /* 18px */
+  line-height: 1.3;
+}
+
+.bento-status { font-size: var(--text-lg); }
+.bento-date,
+.bento-where { font-size: var(--text-base); }
+
+/* Nothing under 13px. These were set in raw px and sat at 10 to 12. */
+.bell-count,
+.dock-badge { font-size: 11px; }     /* numerals in a 16px disc, not prose */
+
+.tabbar a,
+.tabbar button { font-size: var(--text-xs); }
+
+.dock a { font-size: var(--text-sm); }   /* 14px, as item 6 asks */
+
+.bento-figures dt,
+.bento-sub,
+.dock-pop-when,
+.profile-email,
+.profile-role,
+.sheet-hint,
+.palette-hint,
+.palette-group,
+.mem-filter-count,
+.dose-chip,
+.dose-verified,
+.insight-detail,
+.finding-detail { font-size: var(--text-xs); }
+
+.bento-value { font-size: var(--text-xl); }
+
+/* 130% text scaling: headings must wrap rather than collide, and no card may
+   clip. Nothing here sets a fixed height on a text box, so the remaining risk
+   was the two-column figure grid, which gets one column once it is tight. */
+@media (max-width: 1500px) {
+  .bento-figures { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
+
+.bento-greeting,
+.page-title,
+.bento-card-head h3 { overflow-wrap: anywhere; }
+
+/* At 16px body a 56px column breaks "12:03 PM" across two lines. */
+.day-line li { grid-template-columns: 76px 40px 1fr; }
+.day-line time { white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .day-line li { grid-template-columns: 68px 36px 1fr; gap: 10px; }
+}
