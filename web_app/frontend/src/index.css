@@ -2679,3 +2679,92 @@ img {
   .person-title { gap: 10px; }
   .person-title .avatar { width: 38px; height: 38px; font-size: 1rem; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Item 2: depth and colour
+
+   The page was white cards on #F8FAFC with a wash so faint it may as well not
+   have been there: two radial tints at 5.5-8.5% alpha, over a background only
+   3% off white. Measured against the card surface the whole page spanned about
+   two percent of lightness, so nothing read as sitting on anything.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The ground is now teal-tinted rather than blue-grey, and the washes are
+   strong enough to see: ~7% at the corners over a base that is itself tinted.
+   Fixed, so nothing repaints while reading. */
+.app-shell::before {
+  background:
+    radial-gradient(900px 520px at 10% -8%, rgba(13, 148, 136, .14), transparent 68%),
+    radial-gradient(760px 460px at 94% 0%, rgba(99, 102, 241, .085), transparent 70%),
+    radial-gradient(1100px 700px at 50% 108%, rgba(13, 148, 136, .07), transparent 72%),
+    linear-gradient(180deg, #EEF5F3 0%, #F4F8F7 46%, #F7FAF9 100%);
+}
+
+/* Layered elevation: a teal-tinted cast plus a 1px inner highlight along the
+   top edge, which is what keeps a white card from dissolving into a light
+   ground without resorting to a hard border. */
+.bento-card {
+  border: 1px solid rgba(13, 80, 76, .07);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 1px 2px rgba(13, 80, 76, .05),
+    0 8px 20px -10px rgba(13, 80, 76, .16);
+  transition: box-shadow var(--transition-base), transform var(--transition-base),
+              border-color var(--transition-base);
+}
+
+.bento-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(13, 148, 136, .22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 2px 4px rgba(13, 80, 76, .06),
+    0 16px 34px -12px rgba(13, 80, 76, .24);
+}
+
+/* The primary card is the only tinted surface, so it reads as the centre of
+   the page without being bigger than it already is. */
+.bento-card.is-wide {
+  background:
+    linear-gradient(168deg, rgba(204, 251, 241, .55) 0%, rgba(236, 253, 250, .35) 34%, #fff 76%);
+  border-color: rgba(13, 148, 136, .18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 2px 5px rgba(13, 80, 76, .06),
+    0 18px 40px -14px rgba(13, 80, 76, .22);
+}
+
+/* ── One header pattern everywhere ───────────────────────────────────────── */
+
+.card-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--primary-light), #E6FFFA);
+  border: 1px solid rgba(13, 148, 136, .20);
+  color: var(--primary-dark);
+}
+
+.bento-card-head { align-items: center; margin-bottom: 14px; }
+
+.bento-card-head h3 { gap: 10px; }
+
+.bento-card-head a {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  transition: background var(--transition-fast);
+}
+
+.bento-card-head a:hover { background: #BFF5EC; }
+
+/* Teal on the numbers and the marks, not only in link text. */
+.bento-value { color: var(--primary-dark); }
+.bento-list li svg { color: var(--primary); }
+.day-line-thumb { border-color: rgba(13, 148, 136, .20); }

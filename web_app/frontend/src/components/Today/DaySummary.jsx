@@ -163,7 +163,27 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   // dashes says less than one sentence does.
   const measured = insights.filter(i => i.value !== null);
   const hasBaseline = measured.length > 0;
-  const hasFindings = findingsFromTimeline.length > 0 || routineNotices.length > 0;
+  // A routine finding reaches this page twice -- once as a timeline anomaly
+  // and once as the notification raised from it -- so the same sentence was
+  // printed twice. Matched on the title, which is what the reader compares.
+  const findings = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    // Keyed on the TITLE alone. The timeline carries a detail the
+    // notification does not, so keying on the whole sentence let the same
+    // finding through twice, differing only by its trailing clause.
+    const add = (key, title, detail) => {
+      const k = (title || '').trim().toLowerCase();
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      out.push({ key, text: detail ? `${title} — ${detail}` : title });
+    };
+    findingsFromTimeline.forEach((f, i) => add(`t${i}`, f.title, f.detail));
+    routineNotices.forEach(n => add(n._id, n.title));
+    return out;
+  }, [findingsFromTimeline, routineNotices]);
+
+  const hasFindings = findings.length > 0;
 
   const lastRoom = (summary.rooms || []).slice(-1)[0] || null;
   const lastEvent = timeline.length ? timeline[timeline.length - 1] : null;
@@ -242,7 +262,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── Day timeline: the hero ─────────────────────────────────────── */}
       <section className="bento-card is-wide">
         <header className="bento-card-head">
-          <h3><CalendarClock size={16} aria-hidden="true" /> Today</h3>
+          <h3><span className="card-chip"><CalendarClock size={15} aria-hidden="true" /></span> Today</h3>
           <Link to="/activity">Full feed <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
@@ -279,7 +299,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── Routine ────────────────────────────────────────────────────── */}
       <section className="bento-card">
         <header className="bento-card-head">
-          <h3><CalendarClock size={16} aria-hidden="true" /> Routine</h3>
+          <h3><span className="card-chip"><CalendarClock size={15} aria-hidden="true" /></span> Routine</h3>
           <Link to="/routine">Open <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
@@ -292,16 +312,10 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
           </p>
         ) : (
           <ul className="bento-list">
-            {findingsFromTimeline.slice(0, 3).map((f, i) => (
-              <li key={`t${i}`}>
+            {findings.slice(0, 4).map(f => (
+              <li key={f.key}>
                 <AlertTriangle size={14} aria-hidden="true" />
-                <span>{f.title}{f.detail ? ` — ${f.detail}` : ''}</span>
-              </li>
-            ))}
-            {routineNotices.slice(0, 3).map(n => (
-              <li key={n._id}>
-                <AlertTriangle size={14} aria-hidden="true" />
-                <span>{n.title}</span>
+                <span>{f.text}</span>
               </li>
             ))}
           </ul>
@@ -330,7 +344,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── Belongings ─────────────────────────────────────────────────── */}
       <section className="bento-card">
         <header className="bento-card-head">
-          <h3><Package size={16} aria-hidden="true" /> Belongings</h3>
+          <h3><span className="card-chip"><Package size={15} aria-hidden="true" /></span> Belongings</h3>
           <Link to="/belongings">Open <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
@@ -368,7 +382,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── People ─────────────────────────────────────────────────────── */}
       <section className="bento-card">
         <header className="bento-card-head">
-          <h3><Users size={16} aria-hidden="true" /> People</h3>
+          <h3><span className="card-chip"><Users size={15} aria-hidden="true" /></span> People</h3>
           <Link to="/relationships">Open <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
@@ -391,7 +405,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── Conversations ──────────────────────────────────────────────── */}
       <section className="bento-card">
         <header className="bento-card-head">
-          <h3><MessageSquare size={16} aria-hidden="true" /> Conversations</h3>
+          <h3><span className="card-chip"><MessageSquare size={15} aria-hidden="true" /></span> Conversations</h3>
         </header>
         {/* No endpoint exists for conversation summaries. Saying so is the
             honest card; inventing a summary would be the alternative. */}
@@ -411,7 +425,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {canAct && (
       <section className="bento-card is-short">
         <header className="bento-card-head">
-          <h3><MapPin size={16} aria-hidden="true" /> Location</h3>
+          <h3><span className="card-chip"><MapPin size={15} aria-hidden="true" /></span> Location</h3>
           <Link to="/location">Map <ChevronRight size={14} aria-hidden="true" /></Link>
         </header>
 
@@ -442,7 +456,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
       {/* ── Medication: one small card, deliberately ───────────────────── */}
       <section className="bento-card is-short">
         <header className="bento-card-head">
-          <h3><Pill size={16} aria-hidden="true" /> Next dose</h3>
+          <h3><span className="card-chip"><Pill size={15} aria-hidden="true" /></span> Next dose</h3>
           <Link to={canAct ? '/medications' : '/my-medications'}>
             Open <ChevronRight size={14} aria-hidden="true" />
           </Link>
