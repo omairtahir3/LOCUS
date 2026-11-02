@@ -677,6 +677,15 @@ class MedicationDetectionPipeline:
         print(f"[Pipeline] [Audio] Conversation ended after "
               f"{done['heard_seconds']:.0f}s, {done['segments']} window(s), "
               f"{len(text)} chars")
+        # Say WHY when nothing was kept, at the moment it happens. A
+        # four-minute conversation that stored nothing used to print exactly
+        # the line above and leave no way to tell a quiet room from a broken
+        # model.
+        if not text:
+            print(f"[Pipeline] [Audio] ...and nothing was kept: "
+                  f"{done['windows_silent']} window(s) below the silence gate, "
+                  f"{done['windows_invented']} discarded as invented"
+                  + (f", last error: {done['last_error']}" if done['last_error'] else ""))
         if not key:
             return True
         try:
@@ -689,6 +698,11 @@ class MedicationDetectionPipeline:
                     "details.conversation.transcript": text,
                     "details.conversation.heard_seconds": round(done["heard_seconds"], 1),
                     "details.conversation.segments": done["segments"],
+                    # Kept on the row, not just printed: by the time anyone
+                    # asks why a conversation is empty the console is long gone.
+                    "details.conversation.windows_silent": done["windows_silent"],
+                    "details.conversation.windows_invented": done["windows_invented"],
+                    "details.conversation.transcriber_error": done["last_error"],
                     "details.conversation.ended_at": done["ended_at"],
                     "details.conversation.summary_status":
                         "pending" if text else "skipped_silent",

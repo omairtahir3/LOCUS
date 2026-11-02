@@ -407,8 +407,15 @@ class Transcriber:
                 return False
             # A different person: close the old one rather than blend two
             # conversations into one transcript.
+            # The counters are snapshotted so the session can report its OWN
+            # tally rather than the process total. Without this a conversation
+            # that stored nothing was indistinguishable from one that was
+            # never listened to: segments 0, and no record anywhere of whether
+            # the windows were silent, were judged invented, or threw.
             self._session = {"key": key, "started_at": datetime.now(timezone.utc),
-                             "parts": [], "last_seen": datetime.now(timezone.utc)}
+                             "parts": [], "last_seen": datetime.now(timezone.utc),
+                             "silent_at_open": self.windows_skipped_silent,
+                             "invented_at_open": self.windows_skipped_invented}
         self._ensure_loop()
         return True
 
@@ -428,6 +435,14 @@ class Transcriber:
             "ended_at": datetime.now(timezone.utc),
             "segments": len(s["parts"]),
             "heard_seconds": (datetime.now(timezone.utc) - s["started_at"]).total_seconds(),
+            # Why a session stored what it stored. An empty transcript has
+            # three quite different causes and they need different fixes:
+            #   windows_silent high   nothing reached the microphone
+            #   windows_invented high it heard noise and Whisper filled it in
+            #   last_error set        the model or the window threw
+            "windows_silent": self.windows_skipped_silent - s.get("silent_at_open", 0),
+            "windows_invented": self.windows_skipped_invented - s.get("invented_at_open", 0),
+            "last_error": self.last_error,
         }
 
     def session_open(self) -> bool:

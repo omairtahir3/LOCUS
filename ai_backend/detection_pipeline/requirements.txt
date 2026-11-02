@@ -20,3 +20,15 @@ requests>=2.31.0
 # leaves the machine. Pulls ctranslate2 and av; deliberately NOT torch.
 # The model weights download on first use (tiny is ~39 MB).
 faster-whisper>=1.2.1
+# The microphone itself. ai/audio_capture.py has always imported it and it has
+# never been listed here -- it happened to be installed on the machine this was
+# written on, so nothing noticed. On a clean environment its absence leaves
+# capture.available false and the pipeline runs silently without audio, which
+# is the hardest kind of missing dependency to spot.
+sounddevice>=0.5.0
+# Face recognition, and so the trigger for the whole conversation feature: a
+# conversation is only ever opened by a face event. Never listed here either,
+# and currently not installed in .venv at all -- which is why the pipeline
+# still starts but records no faces and therefore no conversations. 0.7.3 is
+# the release the buffalo_l pack this code names is built against.
+insightface>=0.7.3
