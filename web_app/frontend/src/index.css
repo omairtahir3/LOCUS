@@ -3300,3 +3300,114 @@ img {
   .bento-card.is-dose .card-empty { flex-direction: column; align-items: flex-start; }
   .bento-dose-when { font-size: var(--text-xl); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Conversations
+
+   What the camera heard, summarised. The summary is the content; the verbatim
+   words are a disclosure, styled as a quotation rather than as body text so it
+   is never mistaken for something the app is asserting -- it is a machine
+   transcription of a noisy room, and it reads like one.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.convo-list { list-style: none; margin: 0; padding: 0; }
+
+.convo { padding: 11px 0; }
+.convo + .convo { border-top: 1px solid var(--border-light); }
+
+.convo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.convo-who {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.convo-when {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.convo-summary {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Why there is no summary, which is not the same as there being no
+   conversation. Italic so it reads as the app speaking about the record
+   rather than as a summary of what was said. */
+.convo-quiet {
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.convo-topics {
+  margin-top: 3px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.convo-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--primary-text);
+  cursor: pointer;
+}
+
+.convo-more:hover:not(:disabled) { color: var(--primary-dark); }
+.convo-more:disabled { color: var(--text-muted); cursor: default; }
+
+.convo-transcript {
+  display: block;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(13, 148, 136, .3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-hover);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.convo-note {
+  display: block;
+  margin-top: 7px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* The same words on the day's rail. Teal-tinted so a row that carries a
+   conversation is findable by scanning the rail, and clamped to two lines so
+   one long chat cannot push the rest of the day off the card. */
+.day-line-said {
+  margin-top: 3px;
+  font-size: var(--text-sm);
+  color: var(--primary-dark);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

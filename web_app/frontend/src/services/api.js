@@ -210,7 +210,12 @@ export const eventLogsAPI = {
   // One day of the Core Module's output for the Activity Feed.
   timeline: (params) => api.get('/event-logs/timeline', { params }),
   // A question in the wearer's own words. Answered by utils/memoryAgent.
-  ask: (question, params) => api.post('/event-logs/ask', { question }, { params })
+  ask: (question, params) => api.post('/event-logs/ask', { question }, { params }),
+  // What the camera heard, summarised. The words themselves are a second,
+  // deliberate request -- they expire on the keyframe clock and the summary
+  // does not, so most of the time there is nothing there to fetch.
+  conversations: (params) => api.get('/event-logs/conversations', { params }),
+  transcript: (id, params) => api.get(`/event-logs/conversations/${id}/transcript`, { params }),
 };
 
 // ── Personal belongings ──────────────────────────────────────────────────────

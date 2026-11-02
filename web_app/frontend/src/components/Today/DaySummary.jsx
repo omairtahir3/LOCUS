@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Siren, Home, MapPin, Package, Users, Pill,
   MessageSquare, CalendarClock, Images, ChevronRight, Clock,
-  Camera, CameraOff, Activity,
+  Camera, CameraOff, Activity, ChevronDown,
 } from 'lucide-react';
 import api, {
   eventLogsAPI, userItemsAPI, medicationAPI, notificationAPI, detectionAPI,
@@ -33,12 +33,9 @@ import { NO_DATA, NO_DATA_LABEL } from '../../utils/adherence';
  *   GET /location/latest          the last GPS fix
  *   GET /medications/schedule/today   the next dose
  *   GET /notifications            alerts, and the routine_* findings
+ *   GET /event-logs/conversations what the camera heard, summarised
  *
- * Three deliberate absences:
- *
- *   Conversations has no endpoint and no model -- the Message collection is
- *   caregiver chat, not conversation summaries -- so the card says so rather
- *   than filling itself with plausible text.
+ * Two deliberate absences:
  *
  *   "Left behind" is not computed here. It is read from notifications of type
  *   routine_left_behind / routine_item_lost, which the backend raises against
@@ -84,6 +81,83 @@ function CardEmpty({ icon: Glyph, children, action, to, tone }) {
   );
 }
 
+/* Why a conversation has no summary. Four different nothings, and a blank
+   where a summary should be makes a working conversation look broken -- which
+   is exactly what the old placeholder card did to the whole feature. */
+const NO_SUMMARY_REASON = {
+  collecting: 'Still listening — they are with them now.',
+  pending: 'Heard. The summary is being written.',
+  skipped_silent: 'A face was seen, but nothing was audible.',
+  skipped_thin: 'Too little was said to summarise.',
+  skipped_unconfigured: 'No summariser is configured on this deployment.',
+  failed: 'This one could not be summarised.',
+};
+
+/**
+ * One conversation, with the words behind a deliberate second request.
+ *
+ * The summary is the memory of the conversation; the transcript is only how it
+ * was obtained, and it expires on the keyframe clock while the summary does
+ * not. So the words are never served beside the summary -- they are asked for,
+ * and most of the time (anything over 36 hours old) there is nothing to ask
+ * for, which is why has_transcript decides whether the control exists at all.
+ */
+function Conversation({ c }) {
+  const [text, setText] = useState(null);
+  const [state, setState] = useState('idle');   // idle | loading | open | gone
+
+  const show = async () => {
+    if (text) { setState('open'); return; }
+    setState('loading');
+    try {
+      const { data } = await eventLogsAPI.transcript(c.id);
+      setText(data.text);
+      setState('open');
+    } catch {
+      // 410 is the ordinary case, not a fault: the words aged out between the
+      // list being drawn and the button being pressed.
+      setState('gone');
+    }
+  };
+
+  const title = c.person_name
+    ? `With ${firstName(c.person_name)}`
+    : 'With someone not yet named';
+
+  return (
+    <li className="convo">
+      <p className="convo-head">
+        <span className="convo-who">{title}</span>
+        <time className="convo-when">{formatClockTime(c.at)}</time>
+      </p>
+
+      {c.summary
+        ? <p className="convo-summary">{c.summary}</p>
+        : <p className="convo-quiet">{NO_SUMMARY_REASON[c.status] || 'No summary.'}</p>}
+
+      {c.topics && <p className="convo-topics">{c.topics}</p>}
+
+      {c.has_transcript && state !== 'open' && (
+        <button className="convo-more" onClick={show} disabled={state === 'loading'}>
+          <ChevronDown size={13} aria-hidden="true" />
+          {state === 'loading' ? 'Fetching…'
+            : state === 'gone' ? 'The words have gone'
+            : 'Show what was heard'}
+        </button>
+      )}
+
+      {state === 'open' && text && (
+        <blockquote className="convo-transcript">
+          {text}
+          <span className="convo-note">
+            Machine transcription, kept for 36 hours. The summary stays.
+          </span>
+        </blockquote>
+      )}
+    </li>
+  );
+}
+
 /** Local clock, so it matches the day the rest of the page is describing. */
 function greeting() {
   const h = new Date().getHours();
@@ -118,6 +192,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
   const [fixStale, setFixStale] = useState(true);
   const [schedule, setSchedule] = useState([]);
   const [notices, setNotices] = useState([]);
+  const [convos, setConvos] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -126,12 +201,15 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
     const load = async () => {
       setLoading(true);
       // Settled, not all: one dead endpoint must not blank the whole page.
-      const [t, b, l, s, n] = await Promise.allSettled([
+      const [t, b, l, s, n, c] = await Promise.allSettled([
         eventLogsAPI.timeline(userId ? { userId } : {}),
         userItemsAPI.lastSeenAll(userId),
         api.get('/location/latest' + (userId ? `?user_id=${userId}` : '')),
         medicationAPI.getSchedule(userId),
         notificationAPI.getAll({ limit: 25 }),
+        // Its own request rather than read off the timeline: the card needs
+        // each conversation's event id to be able to ask for the words.
+        eventLogsAPI.conversations(userId ? { userId } : {}),
       ]);
       if (!alive) return;
       setDay(t.status === 'fulfilled' ? t.value.data : null);
@@ -142,6 +220,7 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         || (Date.now() - new Date(theFix.timestamp)) > FIX_MAX_AGE_MIN * 60000);
       setSchedule(s.status === 'fulfilled' ? (s.value.data || []) : []);
       setNotices(n.status === 'fulfilled' ? (n.value.data?.notifications || []) : []);
+      setConvos(c.status === 'fulfilled' ? (c.value.data?.conversations || []) : []);
       setLoading(false);
     };
 
@@ -414,6 +493,13 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
                     <span className="day-line-text">
                       <span className="day-line-title">{e.title}</span>
                       {e.detail && <span className="day-line-detail">{e.detail}</span>}
+                      {/* What was said, on the row for the moment it was said.
+                          The relationship stays on the line above it: "Your
+                          daughter" is why the entry matters, the summary is
+                          what happened in it. */}
+                      {e.conversation?.summary && (
+                        <span className="day-line-said">{e.conversation.summary}</span>
+                      )}
                     </span>
                   </span>
                 </li>
@@ -536,14 +622,19 @@ export default function DaySummary({ userId, name, homeLocation, canAct = false,
         <header className="bento-card-head">
           <h3><span className="card-chip"><MessageSquare size={15} aria-hidden="true" /></span> Conversations</h3>
         </header>
-        {/* No endpoint exists for conversation summaries. Saying so is the
-            honest card; inventing a summary would be the alternative. Drawn
-            as "coming", not as "broken". */}
-        <CardEmpty icon={MessageSquare} tone="soon">
-          <span className="card-empty-badge">Coming soon</span>
-          Summaries of the conversations the camera hears. People recognised
-          today are under People.
-        </CardEmpty>
+        {/* The pipeline has been transcribing these since it was written and
+            the summariser writing them up on the cron; nothing read them back,
+            so every one aged out unseen. This is that read path. */}
+        {convos.length === 0 ? (
+          <CardEmpty icon={MessageSquare}>
+            No conversation has been heard today. The microphone only runs when
+            a face is in view.
+          </CardEmpty>
+        ) : (
+          <ul className="convo-list">
+            {convos.slice(0, 3).map(c => <Conversation key={c.id} c={c} />)}
+          </ul>
+        )}
       </section>
 
       {/* ── Location: the caregiver's view only ────────────────────────── */}
