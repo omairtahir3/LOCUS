@@ -82,3 +82,17 @@ FEATURE_AUDIT.md
 PRESENTATION_60.md
 # Untouched Vite scaffold text; said nothing about this project.
 web_app/frontend/README.md
+
+# ==================== Credentials ====================
+# firebase-service-account.json holds a real private key and grants admin
+# access to the whole Firebase project. It was untracked only because nobody
+# had run `git add -A`; one careless add before open-sourcing would have
+# published a working admin credential.
+firebase-service-account.json
+**/firebase-service-account.json
+*-service-account.json
+serviceAccountKey.json
+*.pem
+*.p12
+*.jks
+*.keystore
