@@ -73,7 +73,12 @@ export default function KeyframeAudit() {
         detectionAPI.getKeyframes(queryParams),
         detectionAPI.getMedicationFrames(queryParams).catch(() => ({ data: [] })),
         detectionAPI.getStatus(),
-        eventLogsAPI.getKeyframes({ type: 'unknown_face', limit: 40 }).catch(() => ({ data: [] })),
+        // Scoped like the call above it. Unscoped, the unnamed faces came
+        // from the first person monitored rather than the one selected.
+        eventLogsAPI.getKeyframes({
+          type: 'unknown_face', limit: 40,
+          ...(currentSelectedUser?._id ? { userId: currentSelectedUser._id } : {}),
+        }).catch(() => ({ data: [] })),
       ]);
       
       let allFrames = kfRes.data || [];

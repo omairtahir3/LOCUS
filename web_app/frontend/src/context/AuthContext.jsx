@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { authAPI } from '../services/api';
+import { authAPI, clearFrameToken } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -44,6 +44,7 @@ export function AuthProvider({ children }) {
       setToken(t);
       localStorage.setItem('locus_token', t);
       localStorage.setItem('locus_user', JSON.stringify(u));
+      clearFrameToken();
       return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
@@ -63,6 +64,7 @@ export function AuthProvider({ children }) {
       setToken(t);
       localStorage.setItem('locus_token', t);
       localStorage.setItem('locus_user', JSON.stringify(u));
+      clearFrameToken();
       return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Registration failed');
@@ -77,6 +79,11 @@ export function AuthProvider({ children }) {
     setToken(null);
     localStorage.removeItem('locus_token');
     localStorage.removeItem('locus_user');
+    // Both of these outlived the session they belonged to. The frame token let
+    // the next account read frames as the previous one; the selected user sent
+    // a caregiver's requests at somebody another caregiver monitors.
+    clearFrameToken();
+    try { localStorage.removeItem('locus_selected_user_id'); } catch { /* private mode */ }
   };
 
   const googleLogin = async (googleToken, role = 'caregiver', confirmRole = false) => {
@@ -99,6 +106,7 @@ export function AuthProvider({ children }) {
       setToken(t);
       localStorage.setItem('locus_token', t);
       localStorage.setItem('locus_user', JSON.stringify(u));
+      clearFrameToken();
       return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Google Sign-In failed');

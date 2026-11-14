@@ -100,22 +100,6 @@ export default function Dashboard() {
           to { opacity: 1; transform: translateY(0); }
         }
         
-        .welcome-section {
-          margin-bottom: 32px;
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        }
-        .welcome-text h1 {
-          font-size: 1.8rem;
-          font-weight: 800;
-          color: var(--text-primary);
-          margin-bottom: 4px;
-        }
-        .welcome-text p {
-          color: var(--text-secondary);
-          font-size: 0.95rem;
-        }
         /* A 3px rail reading top-to-bottom: identity without tinting the card,
            so the value keeps its ink token and stays legible. */
 
@@ -230,7 +214,6 @@ export default function Dashboard() {
           gap: 20px;
         }
         @media (max-width: 768px) {
-          .welcome-section { flex-direction: column; align-items: flex-start; gap: 16px; }
           .family-grid { grid-template-columns: 1fr; }
         }
         .member-card {
@@ -296,19 +279,6 @@ export default function Dashboard() {
           flex-shrink: 0;
         }
       `}</style>
-
-      <div className="welcome-section">
-        <div className="welcome-text">
-          <h1>Welcome, {user?.name?.split(' ')[0]}!</h1>
-          <p>Here's how your family is doing today.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <div className="badge badge-neutral" style={{ padding: '8px 16px', borderRadius: '12px' }}>
-            <Calendar size={14} style={{ marginRight: 8 }} />
-            {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
-          </div>
-        </div>
-      </div>
 
       {/* The whole day for the selected person: rooms, activities, people,
           belongings, routine findings, location and alerts, with medication as

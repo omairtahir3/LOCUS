@@ -2,10 +2,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/selected_user_service.dart';
 import 'item_enroll_screen.dart';
 
 class MyItemsScreen extends StatefulWidget {
-  const MyItemsScreen({super.key});
+  const MyItemsScreen({super.key, this.embedded = false});
+
+  /// True when this is a tab inside MainShell, which already provides the
+  /// Scaffold and the app bar. Two stacked app bars is the alternative.
+  final bool embedded;
 
   @override
   State<MyItemsScreen> createState() => _MyItemsScreenState();
@@ -25,7 +30,12 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
   Future<void> _loadItems() async {
     setState(() => _isLoading = true);
     try {
-      final items = await ApiService.getUserItems();
+      // A caregiver can reach this screen from Settings, where it used to
+      // list the first person they monitor regardless of who was selected.
+      final sel = SelectedUserService().selectedUser;
+      final selId = sel?['_id']?.toString();
+      final scoped = ApiService.userRole == 'caregiver' ? selId : null;
+      final items = await ApiService.getUserItems(userId: scoped);
       if (mounted) {
         setState(() {
           _items = items;
@@ -51,7 +61,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
           decoration: InputDecoration(
             labelText: 'Item Name',
             hintText: 'e.g. Grandma\'s Reading Glasses',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
         actions: [
@@ -136,7 +146,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
           const SizedBox(width: 5),
           Expanded(
             child: Text(text,
-                style: TextStyle(fontSize: 11, color: colour, fontWeight: FontWeight.w600)),
+                style: TextStyle(fontSize: 13, color: colour, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -235,7 +245,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
         height: 64,
         decoration: BoxDecoration(
           color: AppColors.primaryLight,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 30),
       );
@@ -248,7 +258,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
       }
       final bytes = base64Decode(cleanB64);
       return ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Image.memory(
           bytes,
           width: 64,
@@ -259,7 +269,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
             height: 64,
             decoration: BoxDecoration(
               color: AppColors.primaryLight,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 30),
           ),
@@ -271,7 +281,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
         height: 64,
         decoration: BoxDecoration(
           color: AppColors.primaryLight,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 30),
       );
@@ -287,11 +297,13 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Personal Belongings'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('Personal Belongings'),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+            ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final enrolled = await Navigator.push(
@@ -352,7 +364,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                 child: Text(
                                   'Enrolled items are recognized automatically by AI camera and tracked in your Memory Search even after keyframes expire.',
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     color: AppColors.primaryDark,
                                     fontWeight: FontWeight.w500,
                                     height: 1.3,
@@ -453,7 +465,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                   border: Border.all(color: AppColors.border),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.02),
+                                      color: AppColors.shadow,
                                       blurRadius: 8,
                                       offset: const Offset(0, 2),
                                     ),
@@ -482,12 +494,12 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                                 decoration: BoxDecoration(
                                                   color: enrolledBy == 'caregiver' ? AppColors.accentLight : AppColors.primaryLight,
-                                                  borderRadius: BorderRadius.circular(8),
+                                                  borderRadius: BorderRadius.circular(10),
                                                 ),
                                                 child: Text(
                                                   enrolledBy == 'caregiver' ? 'Caregiver' : 'Personal',
                                                   style: TextStyle(
-                                                    fontSize: 11,
+                                                    fontSize: 13,
                                                     fontWeight: FontWeight.w600,
                                                     color: enrolledBy == 'caregiver' ? AppColors.accent : AppColors.primaryDark,
                                                   ),
@@ -498,7 +510,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                                 Text(
                                                   dateStr,
                                                   style: TextStyle(
-                                                    fontSize: 12,
+                                                    fontSize: 13,
                                                     color: AppColors.textMuted,
                                                   ),
                                                 ),
@@ -516,7 +528,7 @@ class _MyItemsScreenState extends State<MyItemsScreen> {
                                     ),
                                     PopupMenuButton<String>(
                                       icon: const Icon(Icons.more_vert, color: AppColors.textMuted),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                                       onSelected: (value) {
                                         if (value == 'rename') {
                                           _showRenameDialog(item);

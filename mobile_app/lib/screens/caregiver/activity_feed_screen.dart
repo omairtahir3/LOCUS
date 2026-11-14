@@ -215,7 +215,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
             ),
             child: Row(
@@ -333,7 +333,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
         child: Row(
@@ -361,7 +361,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                   Text(label,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                      style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
                 ],
               ),
             ),
@@ -377,7 +377,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
             Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
             Text(detail, textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
+                style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.5)),
           ],
         ),
       );
@@ -394,7 +394,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
           Text('Timeline', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text('${items.length} ${items.length == 1 ? 'entry' : 'entries'}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
           const SizedBox(height: 14),
           ...items.asMap().entries.map((e) {
             final i = e.key;
@@ -428,14 +428,14 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                             Expanded(child: Text('${it['title']}',
                                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5))),
                             Text(_clock(it['at'] as String?),
-                                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
                           ],
                         ),
                         if ('${it['detail']}'.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: Text('${it['detail']}',
-                                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
+                                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
                           ),
                       ],
                     ),
@@ -459,7 +459,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
           Text(anomalies.isEmpty
                   ? 'Nothing out of the ordinary'
                   : '${anomalies.length} thing${anomalies.length == 1 ? '' : 's'} LOCUS noticed',
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
           const SizedBox(height: 12),
           if (anomalies.isEmpty)
             Row(children: const [
@@ -467,7 +467,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
               SizedBox(width: 10),
               Expanded(child: Text(
                 'The day matched the usual pattern. Missed doses, long stretches without movement and items left behind would appear here.',
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5))),
+                style: TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.5))),
             ])
           else
             ...anomalies.map((a) {
@@ -492,12 +492,12 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                         Expanded(child: Text('${an['title']}',
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                         Text(_clock(an['at'] as String?),
-                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                            style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
                       ],
                     ),
                     const SizedBox(height: 2),
                     Text('${an['detail']}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
+                        style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
                   ],
                 ),
               );
@@ -516,11 +516,11 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
               style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           const Text('How the day compares with what is expected',
-              style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
           const SizedBox(height: 14),
           if (insights.isEmpty)
             const Text('No insights for this day yet.',
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted))
+                style: TextStyle(fontSize: 13, color: AppColors.textMuted))
           else
             ...insights.map((m) {
               final ins = (m as Map).cast<String, dynamic>();
@@ -558,7 +558,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text('${ins['detail']}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted, height: 1.4)),
+                            style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.4)),
                       ),
                   ],
                 ),

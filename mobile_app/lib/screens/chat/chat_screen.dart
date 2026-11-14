@@ -42,12 +42,14 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _loadHistory();
-    SocketService().socket?.on('chat_message', _onNewMessage);
+    // Through the service, so a socket rebuilt mid-conversation does not
+    // silently stop delivering messages to this screen.
+    SocketService().on('chat_message', _onNewMessage);
   }
 
   @override
   void dispose() {
-    SocketService().socket?.off('chat_message');
+    SocketService().off('chat_message', _onNewMessage);
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -129,7 +131,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Text(activeRecipientName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
             if (widget.isEmergency)
-              const Text('Emergency Active', style: TextStyle(color: AppColors.danger, fontSize: 12, fontWeight: FontWeight.w800)),
+              const Text('Emergency Active', style: TextStyle(color: AppColors.danger, fontSize: 13, fontWeight: FontWeight.w800)),
           ],
         ),
         backgroundColor: AppColors.surface,
@@ -200,7 +202,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   _formatTime(timestamp),
                   style: TextStyle(
                     color: isMe ? Colors.white70 : AppColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -215,8 +217,8 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(8),
-          color: Colors.red.shade100,
-          child: const Text('Error loading message', style: TextStyle(color: Colors.red, fontSize: 12)),
+          color: AppColors.dangerLight,
+          child: const Text('Error loading message', style: TextStyle(color: AppColors.danger, fontSize: 13)),
         ),
       );
     }

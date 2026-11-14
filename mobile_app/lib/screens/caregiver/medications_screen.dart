@@ -100,7 +100,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
                     Text('Medications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                     SizedBox(height: 2),
-                    Text('Schedules & History', style: TextStyle(color: Colors.black54, fontSize: 13)),
+                    Text('Schedules & History', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                   ]),
                 ),
                 const SizedBox(width: 8),
@@ -112,23 +112,23 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isDense: true,
                           value: service.selectedUser?['_id'],
-                          icon: const Icon(Icons.arrow_drop_down, color: Colors.black54, size: 18),
-                          style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                          icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary, size: 18),
+                          style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                           onChanged: (String? newValue) {
                             if (newValue != null) service.setSelectedUser(newValue);
                           },
                           items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
                             return DropdownMenuItem<String>(
                               value: u['_id'],
-                              child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 12)),
+                              child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 13)),
                             );
                           }).toList(),
                         ),
@@ -190,7 +190,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+        Text(subtitle, style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
       ],
     );
   }
@@ -208,14 +208,14 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
           // Time
           SizedBox(
             width: 60,
-            child: Text(s['scheduled_time'] ?? '', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            child: Text(s['scheduled_time'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           ),
           const SizedBox(width: 12),
           // Med info
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(s['medication_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-              Text(s['dosage'] ?? '', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              Text(s['dosage'] ?? '', style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ]),
           ),
           // Status badge
@@ -229,7 +229,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: AppColors.success.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
                 ),
                 child: const Row(
@@ -237,7 +237,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                   children: [
                     Icon(Icons.check_circle_outline, size: 14, color: AppColors.success),
                     SizedBox(width: 4),
-                    Text('Taken', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.success)),
+                    Text('Taken', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.success)),
                   ],
                 ),
               ),
@@ -265,13 +265,13 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                 h['medication_name'] ?? (h['medication_id'] is Map ? h['medication_id']['name'] : null) ?? '—',
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
               ),
-              Text(_formatTime(h['scheduled_time'] ?? h['createdAt']), style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+              Text(_formatTime(h['scheduled_time'] ?? h['createdAt']), style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ]),
           ),
           if (confidence != null)
             Padding(
               padding: const EdgeInsets.only(right: 10),
-              child: Text('${((confidence as num) * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              child: Text('${((confidence as num) * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ),
           _statusBadge(status),
           if (showAction) ...[
@@ -282,7 +282,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: AppColors.success.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
                 ),
                 child: const Row(
@@ -290,7 +290,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
                   children: [
                     Icon(Icons.check_circle_outline, size: 14, color: AppColors.success),
                     SizedBox(width: 4),
-                    Text('Taken', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.success)),
+                    Text('Taken', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.success)),
                   ],
                 ),
               ),
@@ -312,7 +312,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(color: c.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-      child: Text(status.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c)),
+      child: Text(status.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c)),
     );
   }
 
@@ -326,7 +326,7 @@ class _CaregiverMedicationsScreenState extends State<CaregiverMedicationsScreen>
         const SizedBox(height: 10),
         Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
         const SizedBox(height: 4),
-        Text(desc, style: TextStyle(fontSize: 12, color: AppColors.textMuted), textAlign: TextAlign.center),
+        Text(desc, style: TextStyle(fontSize: 13, color: AppColors.textMuted), textAlign: TextAlign.center),
       ]),
     );
   }

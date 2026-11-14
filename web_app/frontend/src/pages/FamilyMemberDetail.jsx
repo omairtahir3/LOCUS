@@ -205,12 +205,19 @@ export default function FamilyMemberDetail() {
         canAct
       />
 
-      <div className="grid-2" style={{ alignItems: 'flex-start' }}>
-        {/* Today's Schedule */}
-        <div style={{ marginBottom: 20 }}>
-          <AdherenceStrip logs={doseHistory} days={30} name={summary?.user?.name} />
-        </div>
+      {/* The 30-day strip is a WIDE object -- thirty day cells and a legend --
+          and it was the first of THREE children in a two-column grid. So it
+          was squeezed into half the width, where the cells wrapped onto a
+          second line, and the third child (Pending Alerts) started a new row
+          on its own and left the bottom-right quarter of the page empty.
+          Full width here: the strip gets its single row back, and the two
+          cards below pair off evenly with no hole after them. */}
+      <div style={{ marginBottom: 20 }}>
+        <AdherenceStrip logs={doseHistory} days={30} name={summary?.user?.name} />
+      </div>
 
+      <div className="grid-2">
+        {/* Today's Schedule */}
         <div className="card">
           <div className="card-header">
             <div>
@@ -279,7 +286,10 @@ export default function FamilyMemberDetail() {
             </div>
           </div>
           {alerts.length === 0 ? (
-            <div className="empty-state">
+            /* is-inset: already inside a bordered card, so the dashed box and
+               its 44px of padding drew a box inside a box and made "nothing to
+               report" the tallest thing on the page. */
+            <div className="empty-state is-inset">
               <CheckCircle size={36} />
               <p>No pending alerts for this family member</p>
             </div>
@@ -334,47 +344,45 @@ export default function FamilyMemberDetail() {
         </div>
 
         {verificationEvents.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state is-inset">
             <Shield size={36} />
             <p>No AI verification events recorded yet</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {verificationEvents.map((ev) => (
-              <div key={ev._id} style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                padding: '12px 16px',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-light)',
-                background: ev.classification === 'auto_verified' ? 'var(--success-light)' : 'var(--danger-light)',
-                transition: 'all 0.15s',
-              }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 'var(--radius-md)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: ev.classification === 'auto_verified' ? 'var(--success)' : 'var(--danger)',
-                  color: 'white', fontWeight: 700, fontSize: '0.85rem',
-                }}>
-                  {(ev.confidence_score * 100).toFixed(0)}%
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ev.medication_name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                    {ev.scheduled_time ? formatSmartDate(ev.scheduled_time) : 'Unknown time'}
-                    {ev.dosage && <span> - {ev.dosage}</span>}
+          /* Every row was filled edge to edge with --success-light, so a
+             healthy week read as two solid green bars stacked under a white
+             card -- louder than the emergency banner, and unlike anything
+             else on the dashboard. The colour moves to the confidence chip,
+             which is the one part of the row that is actually a judgement;
+             the row itself returns to a surface with a hairline, the same
+             shape as a notification. Nothing is removed. */
+          <div className="verify-list">
+            {verificationEvents.map((ev) => {
+              const verified = ev.classification === 'auto_verified';
+              return (
+                <div key={ev._id} className={`verify-row ${verified ? 'is-verified' : 'is-unverified'}`}>
+                  <span className="verify-score">
+                    {(ev.confidence_score * 100).toFixed(0)}%
+                  </span>
+                  <div className="verify-main">
+                    <div className="verify-name">{ev.medication_name}</div>
+                    <div className="verify-when">
+                      {ev.scheduled_time ? formatSmartDate(ev.scheduled_time) : 'Unknown time'}
+                      {ev.dosage && <span> &middot; {ev.dosage}</span>}
+                    </div>
+                  </div>
+                  <div className="verify-side">
+                    <span className={`badge ${classificationBadge(ev.classification)}`}>
+                      {verified ? 'Auto Verified' : 'Unverified'}
+                    </span>
+                    <span className="verify-action">
+                      {ev.action === 'log_automatically' ? 'Logged automatically' :
+                       ev.action === 'request_user_confirmation' ? 'Awaiting confirmation' : 'Discarded'}
+                    </span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                  <span className={`badge ${classificationBadge(ev.classification)}`}>
-                    {ev.classification === 'auto_verified' ? 'Auto Verified' : 'Unverified'}
-                  </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    {ev.action === 'log_automatically' ? 'Logged automatically' :
-                     ev.action === 'request_user_confirmation' ? 'Awaiting confirmation' : 'Discarded'}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

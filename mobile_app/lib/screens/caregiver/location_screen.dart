@@ -29,7 +29,7 @@ class LocationScreen extends StatelessWidget {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.shield_outlined, size: 12, color: AppColors.primaryDark),
                   const SizedBox(width: 4),
-                  Text('Coming Soon', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primaryDark)),
+                  Text('Coming Soon', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.primaryDark)),
                 ]),
               ),
             ],
@@ -79,7 +79,7 @@ class LocationScreen extends StatelessWidget {
                       padding: EdgeInsets.symmetric(horizontal: 40),
                       child: Text(
                         'Real-time GPS tracking and geofence alerts will be available when the location backend is connected.',
-                        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                        style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -111,16 +111,16 @@ class LocationScreen extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: color.withValues(alpha: 0.15)),
         ),
         child: Column(
           children: [
             Icon(icon, color: color, size: 22),
             const SizedBox(height: 8),
-            Text(title, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary), textAlign: TextAlign.center),
+            Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary), textAlign: TextAlign.center),
             const SizedBox(height: 2),
-            Text(desc, style: const TextStyle(fontSize: 9, color: AppColors.textMuted), textAlign: TextAlign.center),
+            Text(desc, style: const TextStyle(fontSize: 13, color: AppColors.textMuted), textAlign: TextAlign.center),
           ],
         ),
       ),

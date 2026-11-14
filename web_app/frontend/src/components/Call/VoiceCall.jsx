@@ -71,7 +71,7 @@ export default function VoiceCall({ call }) {
       {sos && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10,
-          color: 'var(--danger)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: 0.4,
+          color: 'var(--danger-text)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: 0.4,
         }}>
           <AlertTriangle size={14} /> EMERGENCY
         </div>

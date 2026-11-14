@@ -102,7 +102,7 @@ class _PrivacyControlState extends State<PrivacyControl> {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 12),
         child: Text('Loading privacy settings...',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
       );
     }
 
@@ -153,7 +153,7 @@ class _PrivacyControlState extends State<PrivacyControl> {
           mode == 'off'
               ? current.$4
               : '${current.$4} Switched on ${_since(p['mode_set_at'] as String?) ?? 'recently'}.',
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
         if (autoDead) ...[
           const SizedBox(height: 10),
@@ -161,7 +161,7 @@ class _PrivacyControlState extends State<PrivacyControl> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: AppColors.primaryLight,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(children: [
               const Icon(Icons.shield_outlined, size: 15, color: AppColors.primary),
@@ -183,7 +183,7 @@ class _PrivacyControlState extends State<PrivacyControl> {
             'The camera recognises a room from what is in it. When it sees one '
             'of these it stops recording and destroys anything it had already '
             'kept from that room.',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 12),
           Wrap(

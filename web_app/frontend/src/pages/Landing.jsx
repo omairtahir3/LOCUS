@@ -39,6 +39,12 @@ function detect() {
   return {
     webgl,
     still: mq('(prefers-reduced-motion: reduce)'),
+    // `lite` is a cheaper scene. `mobile` is no scene: below the stacked
+    // layout breakpoint, or on any touch device, the hero is the flat SVG and
+    // the lazy chunk -- three, drei, gsap, lenis, the whole of it -- is never
+    // imported. A phone that cannot afford the scene should not pay to
+    // download it either, which is what a lighter scene still costs.
+    mobile: mq('(max-width: 899px)') || mq('(pointer: coarse)'),
     lite: mq('(max-width: 760px), (pointer: coarse)') || (navigator.hardwareConcurrency || 8) <= 4,
   };
 }
@@ -177,9 +183,17 @@ export default function Landing() {
   const trackRef = useRef(null);
   const stageRef = useRef(null);
   const copyRef = useRef(null);
-  const scroll = env.webgl && !env.still;
+  const scroll = env.webgl && !env.still && !env.mobile;
   const [state] = useState(() => (scroll ? { p: 0, intro: 0 } : { p: OPEN_STILL, intro: 1 }));
   const cards = env.lite ? HERO_CARDS.slice(0, 3) : HERO_CARDS;
+
+  useEffect(() => {
+    if (!scroll) return;
+    const previous = history.scrollRestoration;
+    if (previous) history.scrollRestoration = 'manual';
+    window.scrollTo(0, 0);
+    return () => { if (previous) history.scrollRestoration = previous; };
+  }, [scroll]);
 
   useEffect(() => {
     if (token && user)
@@ -199,6 +213,8 @@ export default function Landing() {
   }, [env.still]);
 
   const still = <HeroStill cards={cards} />;
+  // Reduced motion already falls through to the still; so does a phone.
+  const scene = env.webgl && !env.mobile;
 
   // framer-motion: the light feature set only, and it follows the OS reduced
   // motion setting for every animation it runs.
@@ -259,7 +275,7 @@ export default function Landing() {
             <div className="hero-visual" aria-hidden="true">
               <div className="bg-spotlight" />
               {scroll && <HeroChips until={BEATS.cardStart} />}
-              {env.webgl ? (
+              {scene ? (
                 <SceneBoundary fallback={still}>
                   <Suspense fallback={scroll ? <HeroStill /> : still}>
                     <HeroScene state={state} cards={cards} lite={env.lite} scroll={scroll}

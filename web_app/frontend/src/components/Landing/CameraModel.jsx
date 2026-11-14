@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import {
+  BoxGeometry, CanvasTexture, MeshBasicMaterial, MeshPhysicalMaterial,
+  MeshStandardMaterial, RepeatWrapping, SRGBColorSpace,
+} from 'three';
 
 // A chest-worn action camera modelled on the GoPro HERO13 Black reference
 // photos (references/): built from primitives, no model file, no licence,
@@ -75,7 +78,17 @@ function drawScene(g, w, h) {
   g.restore();
 }
 
-export default function CameraModel({ rig }) {
+// Both screens are the same material with a different picture in the
+// emissive slot.
+const screenMat = map => new MeshPhysicalMaterial({
+  color: '#000', emissive: '#FFF', emissiveMap: map, emissiveIntensity: 0.92,
+  roughness: 0.12, clearcoat: 1, envMapIntensity: 0.25,
+});
+
+const RIBS = 13;          // vent slats under the lens module
+const RIB_X = i => -0.264 + i * 0.044;
+
+export default function CameraModel({ rig, lite = false }) {
   const door = useRef();
   const glow = useRef();
   const spillLight = useRef();
@@ -83,7 +96,7 @@ export default function CameraModel({ rig }) {
 
   const tex = useMemo(() => {
     // Fine grip on the rubber: deterministic low-contrast noise as a bump map.
-    const grip = canvasTexture(128, 128, (g, s) => {
+    const grip = canvasTexture(96, 96, (g, s) => {
       const img = g.createImageData(s, s);
       for (let i = 0; i < img.data.length; i += 4) {
         const n = Math.sin(i * 12.9898) * 43758.5453;
@@ -96,7 +109,7 @@ export default function CameraModel({ rig }) {
     grip.repeat.set(6, 4);
 
     // Front screen: picture on top, the wordmark below it where the logo is.
-    const front = canvasTexture(256, 328, (g, w, h) => {
+    const front = canvasTexture(192, 246, (g, w, h) => {
       g.fillStyle = '#05070A';
       g.fillRect(0, 0, w, h);
       g.save();
@@ -113,7 +126,7 @@ export default function CameraModel({ rig }) {
     });
 
     // Rear touchscreen: the same picture with the camera's status overlay.
-    const rear = canvasTexture(512, 336, (g, w, h) => {
+    const rear = canvasTexture(320, 210, (g, w, h) => {
       drawScene(g, w, h);
       g.fillStyle = 'rgba(0,0,0,0.25)';
       g.fillRect(0, 0, w, 44);
@@ -140,7 +153,7 @@ export default function CameraModel({ rig }) {
     });
 
     // Warm light spilling from the door: a soft disc with faint rays.
-    const spill = canvasTexture(256, 256, (g, s) => {
+    const spill = canvasTexture(192, 192, (g, s) => {
       const r = s / 2;
       const grad = g.createRadialGradient(r, r, 0, r, r, r);
       grad.addColorStop(0, 'rgba(255,214,150,0.95)');
@@ -178,121 +191,146 @@ export default function CameraModel({ rig }) {
     spillSprite.current.visible = spill > 0.01;
   });
 
-  const rubber = <meshPhysicalMaterial color={RUBBER} roughness={0.62} envMapIntensity={0.16} specularIntensity={0.45} bumpMap={tex.grip} bumpScale={0.4} />;
-  const gloss = <meshPhysicalMaterial color="#050506" roughness={0.06} clearcoat={1} envMapIntensity={0.9} />;
-  const screen = map => (
-    <meshPhysicalMaterial color="#000" emissive="#FFF" emissiveMap={map} emissiveIntensity={0.92}
-      roughness={0.12} clearcoat={1} envMapIntensity={0.25} />
-  );
+  // One material instance per surface, shared by every part that uses it.
+  // These were JSX elements held in consts and dropped into several meshes,
+  // which reads as sharing but is not one: React mounts a separate material
+  // for each place an element appears, so the rubber alone existed five times
+  // over, each with its own copy of the uniforms.
+  const mats = useMemo(() => ({
+    rubber: new MeshPhysicalMaterial({
+      color: RUBBER, roughness: 0.62, envMapIntensity: 0.16,
+      specularIntensity: 0.45, bumpMap: tex.grip, bumpScale: 0.4,
+    }),
+    gloss: new MeshPhysicalMaterial({
+      color: '#050506', roughness: 0.06, clearcoat: 1, envMapIntensity: 0.9,
+    }),
+    front: screenMat(tex.front),
+    rear: screenMat(tex.rear),
+    led: new MeshBasicMaterial({ color: '#E5332A' }),
+    barrel: new MeshPhysicalMaterial({ color: '#0B0B0D', roughness: 0.45 }),
+    ring: new MeshStandardMaterial({ color: '#3A3A40', metalness: 1, roughness: 0.3 }),
+    // Iridescence is the most expensive shader in the scene. It is the lens
+    // coating and worth it on a machine that can afford it; on one that
+    // cannot, a plain clearcoat reads nearly the same at this size.
+    dome: lite
+      ? new MeshPhysicalMaterial({
+          color: '#16123A', roughness: 0.05, metalness: 0.6, clearcoat: 1,
+        })
+      : new MeshPhysicalMaterial({
+          color: '#16123A', roughness: 0.03, metalness: 0.5, clearcoat: 1,
+          iridescence: 1, iridescenceIOR: 1.3, iridescenceThicknessRange: [380, 520],
+        }),
+    ringSmall: new MeshStandardMaterial({ color: '#5A5A66', metalness: 1, roughness: 0.25 }),
+    ventBase: new MeshBasicMaterial({ color: '#060607' }),
+    rib: new MeshPhysicalMaterial({ color: '#202023', roughness: 0.7 }),
+    shutter: new MeshPhysicalMaterial({ color: '#1C1C1F', roughness: 0.7, envMapIntensity: 0.3 }),
+    modeBtn: new MeshPhysicalMaterial({ color: '#202024', roughness: 0.6 }),
+    modeRing: new MeshBasicMaterial({ color: '#8A8A92' }),
+    mountPlate: new MeshPhysicalMaterial({ color: '#0E0E10', roughness: 0.9 }),
+    seam: new MeshBasicMaterial({ color: '#050506' }),
+    glow: new MeshStandardMaterial({ color: '#000', emissive: AMBER, emissiveIntensity: 0 }),
+    bayInner: new MeshPhysicalMaterial({ color: '#232120', roughness: 0.6 }),
+    hinge: new MeshStandardMaterial({ color: '#7A7A82', metalness: 1, roughness: 0.3 }),
+    latch: new MeshPhysicalMaterial({ color: '#2E2E34', roughness: 0.4 }),
+  }), [tex, lite]);
+
+  useEffect(() => () => Object.values(mats).forEach(m => m.dispose()), [mats]);
+
+  // The vent slats: thirteen meshes over ONE box geometry and ONE material,
+  // where before each was a RoundedBox extruding its own geometry and
+  // mounting its own material. They are 0.026 wide, so the rounding was never
+  // visible. Thirteen draw calls of twelve triangles cost nothing; thirteen
+  // extrusions did.
+  const ribGeo = useMemo(() => new BoxGeometry(0.026, 0.2, 0.014), []);
+  useEffect(() => () => ribGeo.dispose(), [ribGeo]);
 
   return (
     <group>
       {/* Body */}
-      <RoundedBox args={[W, H, D]} radius={0.12} smoothness={6}>{rubber}</RoundedBox>
+      <RoundedBox args={[W, H, D]} radius={0.12} smoothness={4} bevelSegments={2}
+        material={mats.rubber} />
 
       {/* Front screen, left half: black glass bezel, lit display, red LED */}
-      <RoundedBox args={[0.62, 0.82, 0.016]} radius={0.006} smoothness={2} position={[-0.3, 0, FRONT + 0.004]}>
-        {gloss}
-      </RoundedBox>
-      <mesh position={[-0.296, -0.02, FRONT + 0.0135]}>
+      <RoundedBox args={[0.62, 0.82, 0.016]} radius={0.006} smoothness={2} bevelSegments={1}
+        position={[-0.3, 0, FRONT + 0.004]} material={mats.gloss} />
+      <mesh position={[-0.296, -0.02, FRONT + 0.0135]} material={mats.front}>
         <planeGeometry args={[0.53, 0.68]} />
-        {screen(tex.front)}
       </mesh>
-      <mesh position={[-0.29, 0.355, FRONT + 0.014]}>
+      <mesh position={[-0.29, 0.355, FRONT + 0.014]} material={mats.led}>
         <planeGeometry args={[0.1, 0.024]} />
-        <meshBasicMaterial color="#E5332A" />
       </mesh>
 
       {/* Lens module, flush with the top-right corner, standing proud */}
       <group position={[0.394, 0.18, FRONT]}>
-        <RoundedBox args={[0.676, 0.652, 0.2]} radius={0.1} smoothness={6} position={[0, 0, 0.06]}>
-          {rubber}
-        </RoundedBox>
-        <RoundedBox args={[0.545, 0.55, 0.02]} radius={0.07} smoothness={4} position={[0, 0.007, 0.162]}>
-          {gloss}
-        </RoundedBox>
+        <RoundedBox args={[0.676, 0.652, 0.2]} radius={0.1} smoothness={4} bevelSegments={2}
+          position={[0, 0, 0.06]} material={mats.rubber} />
+        <RoundedBox args={[0.545, 0.55, 0.02]} radius={0.07} smoothness={3} bevelSegments={1}
+          position={[0, 0.007, 0.162]} material={mats.gloss} />
         <group position={[-0.024, -0.004, 0.172]}>
-          <mesh rotation-x={Math.PI / 2} position={[0, 0, 0.012]}>
-            <cylinderGeometry args={[0.21, 0.215, 0.024, 64]} />
-            <meshPhysicalMaterial color="#0B0B0D" roughness={0.45} />
+          <mesh rotation-x={Math.PI / 2} position={[0, 0, 0.012]} material={mats.barrel}>
+            <cylinderGeometry args={[0.21, 0.215, 0.024, 32]} />
           </mesh>
-          <mesh position={[0, 0, 0.025]}>
-            <torusGeometry args={[0.178, 0.012, 16, 64]} />
-            <meshStandardMaterial color="#3A3A40" metalness={1} roughness={0.3} />
+          <mesh position={[0, 0, 0.025]} material={mats.ring}>
+            <torusGeometry args={[0.178, 0.012, 10, 36]} />
           </mesh>
           {/* coated glass dome with the blue-violet reflection: a sphere cap
               0.17 across its base and 0.05 high, seated in the ring */}
-          <mesh rotation-x={Math.PI / 2} position={[0, 0, -0.249]}>
-            <sphereGeometry args={[0.314, 64, 16, 0, Math.PI * 2, 0, 0.572]} />
-            <meshPhysicalMaterial color="#16123A" roughness={0.03} metalness={0.5} clearcoat={1}
-              iridescence={1} iridescenceIOR={1.3} iridescenceThicknessRange={[380, 520]} />
+          <mesh rotation-x={Math.PI / 2} position={[0, 0, -0.249]} material={mats.dome}>
+            <sphereGeometry args={[0.314, 36, 10, 0, Math.PI * 2, 0, 0.572]} />
           </mesh>
-          <mesh position={[0, 0, 0.058]}>
-            <torusGeometry args={[0.07, 0.006, 12, 48]} />
-            <meshStandardMaterial color="#5A5A66" metalness={1} roughness={0.25} />
+          <mesh position={[0, 0, 0.058]} material={mats.ringSmall}>
+            <torusGeometry args={[0.07, 0.006, 8, 24]} />
           </mesh>
         </group>
       </group>
 
       {/* Ribbed vent under the lens module */}
       <group position={[0.425, -0.28, FRONT]}>
-        <RoundedBox args={[0.57, 0.24, 0.03]} radius={0.012} smoothness={3} position={[0, 0, 0.004]}>
-          <meshBasicMaterial color="#060607" />
-        </RoundedBox>
-        {Array.from({ length: 13 }, (_, i) => -0.264 + i * 0.044).map(x => (
-          <RoundedBox key={x} args={[0.026, 0.2, 0.014]} radius={0.01} smoothness={2} position={[x, 0, 0.02]}>
-            <meshPhysicalMaterial color="#202023" roughness={0.7} />
-          </RoundedBox>
+        <RoundedBox args={[0.57, 0.24, 0.03]} radius={0.012} smoothness={2} bevelSegments={1}
+          position={[0, 0, 0.004]} material={mats.ventBase} />
+        {Array.from({ length: RIBS }, (_, i) => (
+          <mesh key={i} position={[RIB_X(i), 0, 0.02]}
+            geometry={ribGeo} material={mats.rib} />
         ))}
       </group>
 
       {/* Rear touchscreen, almost the whole back */}
-      <RoundedBox args={[1.3, 0.86, 0.016]} radius={0.006} smoothness={2} position={[0, 0, BACK - 0.004]}>
-        {gloss}
-      </RoundedBox>
-      <mesh rotation-y={Math.PI} position={[0, 0, BACK - 0.0135]}>
+      <RoundedBox args={[1.3, 0.86, 0.016]} radius={0.006} smoothness={2} bevelSegments={1}
+        position={[0, 0, BACK - 0.004]} material={mats.gloss} />
+      <mesh rotation-y={Math.PI} position={[0, 0, BACK - 0.0135]} material={mats.rear}>
         <planeGeometry args={[1.2, 0.79]} />
-        {screen(tex.rear)}
       </mesh>
 
       {/* Shutter on top above the screen; mode button on the lens side */}
-      <RoundedBox args={[0.3, 0.05, 0.22]} radius={0.024} smoothness={3} position={[-0.26, H / 2 + 0.008, 0]}>
-        <meshPhysicalMaterial color="#1C1C1F" roughness={0.7} envMapIntensity={0.3} />
-      </RoundedBox>
+      <RoundedBox args={[0.3, 0.05, 0.22]} radius={0.024} smoothness={3} bevelSegments={1}
+        position={[-0.26, H / 2 + 0.008, 0]} material={mats.shutter} />
       <group position={[RIGHT + 0.006, 0.16, 0.12]} rotation-z={Math.PI / 2}>
-        <mesh>
-          <cylinderGeometry args={[0.085, 0.085, 0.02, 40]} />
-          <meshPhysicalMaterial color="#202024" roughness={0.6} />
+        <mesh material={mats.modeBtn}>
+          <cylinderGeometry args={[0.085, 0.085, 0.02, 24]} />
         </mesh>
-        <mesh position={[0, 0.011, 0]} rotation-x={-Math.PI / 2}>
-          <torusGeometry args={[0.035, 0.005, 8, 32, Math.PI * 1.6]} />
-          <meshBasicMaterial color="#8A8A92" />
+        <mesh position={[0, 0.011, 0]} rotation-x={-Math.PI / 2} material={mats.modeRing}>
+          <torusGeometry args={[0.035, 0.005, 6, 24, Math.PI * 1.6]} />
         </mesh>
       </group>
 
       {/* Mounting fingers folded flat into the bottom, as in the photos */}
-      <mesh position={[0, -H / 2 - 0.002, 0]}>
+      <mesh position={[0, -H / 2 - 0.002, 0]} material={mats.mountPlate}>
         <boxGeometry args={[0.5, 0.006, 0.4]} />
-        <meshPhysicalMaterial color="#0E0E10" roughness={0.9} />
       </mesh>
       {[-0.1, 0.1].map(x => (
-        <RoundedBox key={x} args={[0.07, 0.014, 0.34]} radius={0.006} smoothness={2} position={[x, -H / 2 - 0.006, 0]}>
-          {rubber}
-        </RoundedBox>
+        <RoundedBox key={x} args={[0.07, 0.014, 0.34]} radius={0.006} smoothness={2} bevelSegments={1}
+          position={[x, -H / 2 - 0.006, 0]} material={mats.rubber} />
       ))}
 
       {/* Battery bay on the left side: seam, glowing interior, battery */}
-      <mesh position={[LEFT - 0.002, 0, 0]}>
+      <mesh position={[LEFT - 0.002, 0, 0]} material={mats.seam}>
         <boxGeometry args={[0.004, DOOR.h + 0.02, DOOR.d + 0.02]} />
-        <meshBasicMaterial color="#050506" />
       </mesh>
-      <mesh ref={glow} position={[LEFT - 0.004, 0, 0]}>
+      <mesh ref={glow} position={[LEFT - 0.004, 0, 0]} material={mats.glow}>
         <boxGeometry args={[0.004, DOOR.h - 0.02, DOOR.d - 0.02]} />
-        <meshStandardMaterial color="#000" emissive={AMBER} emissiveIntensity={0} />
       </mesh>
-      <mesh position={[LEFT - 0.007, -0.02, 0]}>
+      <mesh position={[LEFT - 0.007, -0.02, 0]} material={mats.bayInner}>
         <boxGeometry args={[0.004, DOOR.h - 0.14, DOOR.d - 0.1]} />
-        <meshPhysicalMaterial color="#232120" roughness={0.6} />
       </mesh>
       <pointLight ref={spillLight} position={[LEFT - 0.45, 0, 0.1]} color={AMBER} intensity={0} distance={2.6} decay={2} />
       <sprite ref={spillSprite} position={[LEFT - 0.12, 0, 0]} visible={false}>
@@ -301,16 +339,13 @@ export default function CameraModel({ rig }) {
 
       {/* The door, hinged on its front edge: pin, panel, latch */}
       <group ref={door} position={[LEFT - 0.006, 0, DOOR.d / 2]}>
-        <mesh>
-          <cylinderGeometry args={[0.016, 0.016, DOOR.h + 0.04, 16]} />
-          <meshStandardMaterial color="#7A7A82" metalness={1} roughness={0.3} />
+        <mesh material={mats.hinge}>
+          <cylinderGeometry args={[0.016, 0.016, DOOR.h + 0.04, 10]} />
         </mesh>
-        <RoundedBox args={[DOOR.t, DOOR.h, DOOR.d]} radius={0.012} smoothness={3} position={[-DOOR.t / 2, 0, -DOOR.d / 2]}>
-          {rubber}
-        </RoundedBox>
-        <mesh position={[-DOOR.t - 0.004, 0, -DOOR.d + 0.06]}>
+        <RoundedBox args={[DOOR.t, DOOR.h, DOOR.d]} radius={0.012} smoothness={2} bevelSegments={1}
+          position={[-DOOR.t / 2, 0, -DOOR.d / 2]} material={mats.rubber} />
+        <mesh position={[-DOOR.t - 0.004, 0, -DOOR.d + 0.06]} material={mats.latch}>
           <boxGeometry args={[0.01, 0.14, 0.05]} />
-          <meshPhysicalMaterial color="#2E2E34" roughness={0.4} />
         </mesh>
       </group>
     </group>

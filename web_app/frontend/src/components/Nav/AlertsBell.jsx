@@ -23,7 +23,7 @@ import { formatSmartDate } from '../../utils/dateUtils';
 const POLL_MS = 60000;          // the Node notification cron's own interval
 const EMERGENCY_TYPES = ['emergency', 'sos'];
 
-export default function AlertsBell() {
+export default function AlertsBell({ socket }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
@@ -41,8 +41,26 @@ export default function AlertsBell() {
     };
     read();
     const t = setInterval(read, POLL_MS);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+    // A resolved emergency must stop announcing itself at once rather than at
+    // the end of a 60-second poll -- the caregiver has just pressed
+    // "Acknowledge & Resolve" and is looking straight at the bell. The server
+    // marks the notification read; this is what makes the siren go out now.
+    const onResolved = () => read();
+    socket?.on('sos_resolved', onResolved);
+    // And the other direction: anything newly written for this person.
+    //
+    // Without it the bell was only ever as fresh as the 60-second poll, so a
+    // caregiver who sent a message from the family page watched nothing
+    // happen and reasonably concluded the send had failed. The server now
+    // emits notification:new into the recipient's room as it stores the row.
+    socket?.on('notification:new', onResolved);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      socket?.off('sos_resolved', onResolved);
+      socket?.off('notification:new', onResolved);
+    };
+  }, [socket]);
 
   // Close on outside click and on Escape: a popover that can only be closed by
   // hitting the same small button again is a trap on a touch screen.

@@ -40,7 +40,18 @@ export default function UserDashboard() {
     }
   }, [user, navigate]);
 
+  // homeLocation is deliberately NOT passed.
+  //
+  // It drove one thing on this page: the "Away / At home" pill in the header.
+  // That pill is a caregiver's reading of somebody else -- it answers "is the
+  // person I look after where I expect them to be". A normal user has no
+  // caregiver, so there is nobody for it to answer to, and telling someone
+  // standing in their own kitchen that they are "At home" is noise at best.
+  //
+  // Without the prop, `away` stays null and the pill does not render. The
+  // Location card below it was already caregiver-only (canAct), so nothing
+  // else on this page changes.
   return (
-    <DaySummary self name={user?.name} homeLocation={user?.home_location} />
+    <DaySummary self name={user?.name} />
   );
 }

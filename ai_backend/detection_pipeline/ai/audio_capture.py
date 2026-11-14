@@ -156,6 +156,109 @@ class AudioCapture:
             return min(self._written, self.capacity) / self.sample_rate
 
 
+
+class StreamAudioCapture(AudioCapture):
+    """The camera's own microphone, read from the stream it already publishes.
+
+    cv2.VideoCapture drops the audio track, so the conversation feature was
+    listening to whatever machine the pipeline runs on. On a laptop in another
+    room that means every window of a four-minute conversation measures as
+    silence -- which is exactly what happened: 23 windows, 23 below the gate,
+    nothing transcribed, and `transcripts` empty since the day it was written.
+
+    The microphone that is actually near the conversation is the one on the
+    wearer, and its audio has been arriving all along. It is in the same RTSP
+    stream the frames come from; nothing ever read it.
+
+    Everything below feed() is the parent's ring buffer, untouched: same
+    16 kHz mono float32, same silence gate, same read_window, still never
+    written to disk. The transcriber cannot tell the two sources apart.
+
+    ponytail: av (PyAV), ALREADY installed, rather than an ffmpeg subprocess
+    and a pipe to parse -- it links the same FFmpeg libraries, hands back
+    numpy with no copy, and needs no ffmpeg binary on PATH, of which this
+    machine has none. The parent's sounddevice path is kept as the fallback
+    for a deployment where the camera publishes no audio.
+    """
+
+    # Long enough for a stream that is up, short enough that a camera which is
+    # simply off does not hold pipeline startup.
+    OPEN_TIMEOUT = 8.0
+
+    def __init__(self, url: str, **kw):
+        super().__init__(**kw)
+        self.url = url
+        self._container = None
+        self._audio = None
+        self._resampler = None
+        self._thread = None
+        self._stop = threading.Event()
+
+    def start(self) -> bool:
+        """Open the stream's audio track. False, never an exception, when it
+        cannot -- including when the publisher sends video only."""
+        if self.available:
+            return True
+        try:
+            import av
+            # TCP, not UDP: a dropped packet is a hole in the transcript, and
+            # the words either side of it get stitched into one sentence.
+            self._container = av.open(self.url, timeout=self.OPEN_TIMEOUT,
+                                      options={"rtsp_transport": "tcp"})
+            self._audio = next((s for s in self._container.streams
+                                if s.type == "audio"), None)
+            if self._audio is None:
+                # Said plainly, because it is the one failure a user can fix:
+                # OBS and a GoPro both send audio by default, so a stream
+                # without it was configured that way.
+                self.last_error = "the camera stream carries no audio track"
+                self._close()
+                return False
+            self._resampler = av.AudioResampler(
+                format="flt", layout="mono", rate=self.sample_rate)
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self._close()
+            return False
+
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._pump, daemon=True,
+                                        name="stream-audio")
+        self._thread.start()
+        self.available = True
+        return True
+
+    def _pump(self) -> None:
+        """Decode the audio track into the ring buffer until told to stop."""
+        try:
+            for frame in self._container.decode(self._audio):
+                if self._stop.is_set():
+                    break
+                for out in self._resampler.resample(frame):
+                    a = out.to_ndarray()
+                    self.feed(a[0] if a.ndim > 1 else a)
+        except Exception as e:
+            # A stream that ends or drops is normal; the pipeline's own
+            # reconnect loop decides what to do about it.
+            self.last_error = f"{type(e).__name__}: {e}"
+        finally:
+            self.available = False
+
+    def _close(self) -> None:
+        c, self._container = self._container, None
+        self._audio = self._resampler = None
+        if c is not None:
+            try:
+                c.close()
+            except Exception:
+                pass
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._close()
+        self.available = False
+
+
 def is_silent(samples: np.ndarray, threshold: float = SILENCE_RMS) -> bool:
     """Whether a window holds nothing worth transcribing."""
     if samples is None or samples.size == 0:

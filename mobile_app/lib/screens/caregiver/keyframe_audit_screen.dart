@@ -47,7 +47,12 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       final results = await Future.wait([
         ApiService.getMedicationFrames(limit: 100, userId: _selectedUser),
         ApiService.getKeyframes(limit: 100, userId: _selectedUser),
-        ApiService.getEventLogKeyframes(type: 'unknown_face', limit: 40),
+        // The other two calls on this screen were already scoped; this one
+        // was not, so the unnamed faces belonged to the first person the
+        // caregiver monitors while everything above them belonged to the
+        // person actually selected.
+        ApiService.getEventLogKeyframes(
+            type: 'unknown_face', limit: 40, userId: _selectedUser),
       ]);
       if (mounted) {
         setState(() {
@@ -155,8 +160,8 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: service.selectedUser?['_id'],
-                    icon: const Icon(Icons.arrow_drop_down, color: Colors.black54),
-                    style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13),
+                    icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                    style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                     onChanged: (String? newValue) {
                       if (newValue != null) service.setSelectedUser(newValue);
                     },
@@ -177,7 +182,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           indicatorColor: AppColors.primary,
           labelColor: AppColors.primary,
           unselectedLabelColor: AppColors.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
           tabs: [
             Tab(
               icon: const Icon(Icons.shield_outlined, size: 22),
@@ -267,7 +272,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(8),
+            color: AppColors.shadow,
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -325,7 +330,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                         Text(
                           _formatTimestamp(ts),
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: 13,
                             color: AppColors.textMuted,
                           ),
                         ),
@@ -342,7 +347,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                     child: Text(
                       statusLabel,
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: 13,
                         fontWeight: FontWeight.w800,
                         color: statusColor,
                       ),
@@ -369,7 +374,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                     child: Column(
                       children: [
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           child: AspectRatio(
                             aspectRatio: 16 / 9,
                             child: evId.toString().isNotEmpty
@@ -395,7 +400,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 9,
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: _phaseColor(role),
                           ),
@@ -439,7 +444,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 child: Text(
                   _phaseLabel(role),
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: _phaseColor(role),
                   ),
@@ -454,7 +459,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                 child: Text(
                   'Score: ${(score * 100).toStringAsFixed(0)}%',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
@@ -489,7 +494,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           const SizedBox(height: 6),
           Text(
             'ID: ${evId.toString().length > 12 ? '${evId.toString().substring(0, 12)}...' : evId}',
-            style: TextStyle(fontSize: 9, color: AppColors.textMuted),
+            style: TextStyle(fontSize: 13, color: AppColors.textMuted),
           ),
         ],
       ),
@@ -524,7 +529,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
           ),
           child: Column(
@@ -535,7 +540,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                     _expandedEventId = isOpen ? null : 'kf_$kfId';
                   });
                 },
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
@@ -545,7 +550,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                         height: 48,
                         decoration: BoxDecoration(
                           color: AppColors.borderLight,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           image: DecorationImage(
                             image: NetworkImage(
                               '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
@@ -574,14 +579,14 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                                   : 'Unknown time',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
-                                fontSize: 12,
+                                fontSize: 13,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               '${kf['width'] ?? 0}x${kf['height'] ?? 0}',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 13,
                                 color: AppColors.textMuted,
                               ),
                             ),
@@ -622,7 +627,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         child: Image.network(
                           '${ApiService.baseUrl}/detection/keyframes/$kfId/image',
                           headers: ApiService.imageHeaders,
@@ -637,21 +642,21 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           Text(
                             'ID: ${kfId.substring(0, 8)}...',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 13,
                               color: AppColors.textSecondary,
                             ),
                           ),
                           Text(
                             'Blur: ${blurScore.toStringAsFixed(1)}',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 13,
                               color: AppColors.textSecondary,
                             ),
                           ),
                           Text(
                             'Motion: ${motionScore.toStringAsFixed(1)}',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 13,
                               color: AppColors.textSecondary,
                             ),
                           ),
@@ -690,7 +695,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
           ),
           child: Column(
@@ -742,12 +747,12 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(color: AppColors.borderLight, borderRadius: BorderRadius.circular(12)),
-                            child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                           ),
                           if (ev['pending_notification'] == true && ApiService.userRole == 'caregiver')
                             Padding(
                               padding: const EdgeInsets.only(left: 8),
-                              child: Text('Pending user acknowledgement', style: TextStyle(color: AppColors.warning, fontSize: 12)),
+                              child: Text('Pending user acknowledgement', style: TextStyle(color: AppColors.warning, fontSize: 13)),
                             ),
                         ],
                       ),
@@ -832,7 +837,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            const Icon(Icons.warning_amber_rounded, color: AppColors.warning),
             const SizedBox(width: 8),
             const Expanded(child: Text('Duplicate Name Detected', style: TextStyle(fontSize: 18))),
           ],
@@ -878,7 +883,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, side: const BorderSide(color: Colors.grey)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.surface, foregroundColor: AppColors.textPrimary, side: const BorderSide(color: AppColors.border)),
             onPressed: () {
               Navigator.pop(context);
               _submitFaceConfirm(eventId, personName, relationshipType, true, null);
@@ -955,7 +960,7 @@ class _KeyframeAuditScreenState extends State<KeyframeAuditScreen>
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 9,
+          fontSize: 13,
           color: color,
           fontWeight: FontWeight.w700,
         ),

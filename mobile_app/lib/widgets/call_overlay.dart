@@ -83,7 +83,7 @@ class _CallOverlayState extends State<CallOverlay> {
           const SizedBox(height: 6),
           Text(label,
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: labelColor)),
         ],
@@ -122,7 +122,35 @@ class _CallOverlayState extends State<CallOverlay> {
     // it buried the emergency panel's buttons, and splitting the height
     // squeezed the page -- and both failed for the same reason: to the person
     // on the call, the call is not decoration on a page, it is the page.
-    if (live || s == CallState.ringing) return _fullScreen(s, sos);
+    //
+    // THIS IS WHY THE EMERGENCY ENDED WHEN THE CALL DID.
+    //
+    // It used to `return _fullScreen(...)` on its own, leaving widget.child
+    // out of the tree entirely. Flutter disposes what is not in the tree, so
+    // starting a call destroyed every screen under this one and ending the
+    // call built them again from scratch. HomeScreen keeps _isEmergencyActive
+    // in its own State, set when the wearer raises an SOS and cleared only by
+    // a resolution -- so a fresh HomeScreen came back with it false and the
+    // red panel was simply gone. The server never resolved anything:
+    // emergency_status stays true through a hang-up and through a dropped
+    // socket. Only the screen forgot.
+    //
+    // The call still covers the whole screen -- _fullScreen is an opaque
+    // Material, so this looks identical -- but the page behind it stays
+    // mounted and keeps its state. It is held inert while it is hidden:
+    // no tickers, no focus, nothing for a screen reader to find.
+    if (live || s == CallState.ringing) {
+      return Stack(
+        children: [
+          ExcludeSemantics(
+            child: ExcludeFocus(
+              child: TickerMode(enabled: false, child: widget.child),
+            ),
+          ),
+          Positioned.fill(child: _fullScreen(s, sos)),
+        ],
+      );
+    }
 
     // Once it is over, the small panel is right again: the call is finished
     // and the page behind it is what they want back.
@@ -135,12 +163,12 @@ class _CallOverlayState extends State<CallOverlay> {
             top: false,
             child: Material(
               elevation: 12,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(16),
               color: AppColors.surface,
               child: Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                   // An emergency call is outlined in red so it is not mistaken
                   // for an ordinary one at a glance.
                   border: Border.all(
@@ -162,7 +190,7 @@ class _CallOverlayState extends State<CallOverlay> {
                               style: TextStyle(
                                   color: AppColors.danger,
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 12,
+                                  fontSize: 13,
                                   letterSpacing: 0.6)),
                         ]),
                       ),
@@ -180,7 +208,7 @@ class _CallOverlayState extends State<CallOverlay> {
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text('Speaking directly, not through the server.',
-                            style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                            style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                       ),
                     const SizedBox(height: 16),
                     Row(

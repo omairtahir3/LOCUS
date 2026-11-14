@@ -81,13 +81,41 @@ router.post('/me/emergency', auth, async (req, res) => {
     req.user.last_emergency_time = new Date();
     await req.user.save();
 
-    // Prepare payload
-    const { lat, lng } = req.body;
+    // Prepare payload.
+    //
+    // The caregiver's screen opens a map on this location, so a payload of
+    // { lat: undefined, lng: undefined } gives them an emergency with nowhere
+    // to look -- which is what happened whenever the phone had no fresh fix,
+    // and always for a fall-detected SOS, which sends no coordinates at all.
+    //
+    // The phone has been POSTing fixes to /location every 10 metres all along,
+    // so there is almost always a recent one on record. It is used when the
+    // request carries none, with its age, so the screen can say "last known
+    // position, 8 minutes ago" rather than implying it is live.
+    let { lat, lng } = req.body;
+    let fixAt = null;
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      const LocationLog = require('../models/LocationLog');
+      const last = await LocationLog.findOne({ user_id: req.user._id })
+        .sort({ timestamp: -1 }).lean().catch(() => null);
+      if (last) {
+        lat = last.lat;
+        lng = last.lng;
+        fixAt = last.timestamp;
+        console.log(`[Emergency] ${req.user.name} sent no fix; using the last `
+          + `known position from ${new Date(last.timestamp).toISOString()}`);
+      } else {
+        console.warn(`[Emergency] ${req.user.name} sent no fix and has no `
+          + `location history -- the alert goes out without a position`);
+      }
+    }
     const payload = {
       user_id: req.user._id,
       user_name: req.user.name,
       timestamp: new Date(),
-      location: { lat, lng }
+      location: (typeof lat === 'number' && typeof lng === 'number')
+        ? { lat, lng, at: fixAt, stale: !!fixAt }
+        : null,
     };
 
     // Broadcast to all linked caregivers. Every live socket event goes out
@@ -138,6 +166,15 @@ router.delete('/me/emergency', auth, async (req, res) => {
 
     req.user.emergency_status = false;
     await req.user.save();
+    // Logged because an emergency ending is a decision somebody made, and
+    // until now nothing recorded who. A report that "the emergency ended by
+    // itself" cannot be confirmed or refuted without this line.
+    console.log('[Emergency] RESOLVED by the wearer themselves: '
+      + req.user.name + ' (' + req.user._id + ') via DELETE /users/me/emergency');
+    // Before the broadcast, not after: the clients re-read their alerts when
+    // sos_resolved arrives, and a read that overtakes this write would show
+    // the siren again.
+    await clearEmergencyAlerts(req.user._id);
 
     // Broadcast resolution to caregivers, marked as resolved by user
     const io = getIO();
@@ -176,6 +213,10 @@ router.delete('/:id/emergency', auth, async (req, res) => {
 
     elderlyUser.emergency_status = false;
     await elderlyUser.save();
+    console.log('[Emergency] RESOLVED by caregiver '
+      + req.user.name + ' (' + req.user._id + ') for '
+      + elderlyUser.name + ' (' + elderlyUser._id + ') via DELETE /users/:id/emergency');
+    await clearEmergencyAlerts(elderlyUser._id);
 
     // Broadcast resolution to ALL caregivers of this user, marked as resolved by caregiver
     const io = getIO();
@@ -228,6 +269,34 @@ router.put('/me/home_location', auth, async (req, res) => {
 // The rooms the scene classifier can actually name. Offering a room it cannot
 // recognise would be a switch that silently does nothing, which on a privacy
 // control is worse than not offering it: see ai/scene.py SCENE_WEIGHTS.
+/**
+ * Mark the emergency notifications about one person as read.
+ *
+ * The dock's alert bell shows a siren while an UNREAD notification of type
+ * 'emergency' exists. That is the right test while an emergency is running
+ * and the wrong one the moment it ends: resolving cleared emergency_status
+ * and told every caregiver over the socket, but left the notification unread,
+ * so the siren stayed lit until somebody happened to open the notifications
+ * page and mark it by hand. An emergency that is over must stop announcing
+ * itself, and it must still be over after a reload -- which is why this is
+ * written to the database rather than only cleared in the browser.
+ *
+ * Read, not deleted: the alert is the record that it happened.
+ */
+async function clearEmergencyAlerts(subjectUserId) {
+  const Notification = require('../models/Notification');
+  try {
+    await Notification.updateMany(
+      { subject_user_id: subjectUserId, type: 'emergency', is_read: false },
+      { $set: { is_read: true, read_at: new Date() } }
+    );
+  } catch (err) {
+    // Never let this fail the resolve itself: the emergency being marked over
+    // matters more than the bell being tidy.
+    console.error('[Emergency] Could not clear emergency alerts:', err.message);
+  }
+}
+
 const KNOWN_ROOMS = ['bathroom', 'bedroom', 'kitchen', 'living', 'dining', 'office'];
 const PRIVACY_MODES = ['off', 'blur', 'paused'];
 

@@ -32,3 +32,47 @@ sounddevice>=0.5.0
 # still starts but records no faces and therefore no conversations. 0.7.3 is
 # the release the buffalo_l pack this code names is built against.
 insightface>=0.7.3
+# The detector and the two embedding backbones. The third omission of the same
+# kind as sounddevice and insightface above: all four are imported lazily,
+# inside the function that needs them, so a missing one does not crash the
+# pipeline -- it disables a feature quietly, which is the failure that takes
+# longest to notice.
+#
+#   ultralytics  YOLO, loaded by plugins/medication.py, item_indexer.py and
+#                plugins/egocentric_activity.py. Without it nothing is
+#                detected at all and every frame looks empty.
+#   torch        required by both backbones below; also sets the process-wide
+#                thread count that governs ultralytics as well (verifier.py).
+#   torchvision  MobileNetV3-Small/Large, the item embedding backbone
+#                (embedding_backbone.py), selected by ITEM_BACKBONE.
+#   timm         DINOv2, the verifier gallery that adjudicates a relaxed
+#                identity match (verifier.py). Without it the 0.55 bar can
+#                never be granted, because the licence is withdrawn when the
+#                verifier does not actually run.
+#
+# NOTE the comment on faster-whisper above: THAT package deliberately avoids
+# torch (it runs on ctranslate2). These four are a separate requirement, and
+# listing torch here does not put it in the speech path.
+#
+# CPU wheels are the intended install. Nothing here requests a GPU, and the
+# CPU-only claim in the entry rests on the ONNX sessions being pinned and on
+# no GPU being asked for -- not on these two being pinned, which they are not:
+#   pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu
+torch>=2.10.0
+torchvision>=0.25.0
+ultralytics>=8.4.14
+timm>=1.0.29
+# Pillow, for the one place the verifier hands a crop to DINOv2
+# (verifier.py: `from PIL import Image`). Satisfied transitively today by
+# several of the packages above, which is why it has never been noticed.
+pillow>=10.0.0
+# PyAV, and the reason it is named here rather than left transitive.
+#
+# ai/audio_capture.py imports it DIRECTLY now: StreamAudioCapture decodes the
+# audio track out of the camera's own RTSP stream, because that is the only
+# microphone allowed to hear a conversation -- cv2.VideoCapture drops the
+# audio, and the host's microphone belongs to emergency calls. faster-whisper
+# happens to pull av in, so it works today without being listed, which is
+# precisely the arrangement that left sounddevice and insightface undeclared.
+# A load-bearing import gets its own line.
+av>=18.0.0

@@ -1,4 +1,5 @@
 const express = require('express');
+const { scopedUserId } = require('../utils/scope');
 const router = express.Router();
 const EventLog = require('../models/EventLog');
 const { protect: auth } = require('../middleware/auth');
@@ -14,17 +15,9 @@ const { protect: auth } = require('../middleware/auth');
 router.post('/ask', auth, async (req, res) => {
   try {
     let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) {
-        userId = req.query.userId;
-      } else {
-        const User = require('../models/User');
-        const caregiver = await User.findById(req.user.id);
-        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
-          userId = caregiver.monitoring_users[0];
-        }
-      }
-    }
+    // See utils/scope.js: the id is checked against who they actually
+    // look after, instead of being taken on trust from the query string.
+    userId = await scopedUserId(req);
     // A caregiver reading about someone else must not be told "you put your
     // keys down". The subject's name is looked up only when it is NOT the
     // person asking, so the ordinary case costs no extra query.
@@ -48,17 +41,9 @@ router.get('/memory-search', auth, async (req, res) => {
   try {
     let userId = req.user.id;
     // If caregiver, they view logs for their connected elderly user
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) {
-        userId = req.query.userId;
-      } else {
-        const User = require('../models/User');
-        const caregiver = await User.findById(req.user.id);
-        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
-          userId = caregiver.monitoring_users[0];
-        }
-      }
-    }
+    // See utils/scope.js: the id is checked against who they actually
+    // look after, instead of being taken on trust from the query string.
+    userId = await scopedUserId(req);
 
     const { type, limit, date, person, item } = req.query;
 
@@ -336,14 +321,7 @@ function conversationFields(convo) {
 router.get('/timeline', auth, async (req, res) => {
   try {
     let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) userId = req.query.userId;
-      else {
-        const User = require('../models/User');
-        const cg = await User.findById(req.user.id);
-        if (cg?.monitoring_users?.length) userId = cg.monitoring_users[0];
-      }
-    }
+    userId = await scopedUserId(req);
 
     const day = req.query.date ? new Date(req.query.date) : new Date();
     if (Number.isNaN(day.getTime())) return res.status(400).json({ error: 'invalid date' });
@@ -568,13 +546,9 @@ router.get('/timeline', auth, async (req, res) => {
  * are the most private thing this system records, so the answer is computed
  * here and never taken from the request.
  */
-async function scopedUserId(req) {
-  if (req.user.role !== 'caregiver') return req.user.id;
-  if (req.query.userId) return req.query.userId;
-  const User = require('../models/User');
-  const cg = await User.findById(req.user.id);
-  return cg?.monitoring_users?.length ? cg.monitoring_users[0] : req.user.id;
-}
+// Moved to utils/scope.js, which every route on this file now shares -- and
+// which, unlike this version, refuses an id the caregiver does not look
+// after instead of fetching whatever was asked for.
 
 function idFormsOf(userId) {
   const mongoose = require('mongoose');
@@ -676,14 +650,9 @@ router.get('/conversations/:id/transcript', auth, async (req, res) => {
 // For Keyframe Audit screen (includes unknown_face and medication_intake)
 router.get('/keyframes', auth, async (req, res) => {
   try {
-    let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      const User = require('../models/User');
-      const caregiver = await User.findById(req.user.id);
-      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-        userId = caregiver.monitoring_users[0];
-      }
-    }
+    // Was hard-wired to the first person monitored, so the Keyframe Audit
+    // screen's own person-picker changed the heading and nothing else.
+    const userId = await scopedUserId(req);
 
     const { type, limit = 50 } = req.query;
 

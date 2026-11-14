@@ -93,8 +93,19 @@ function Scene({ state, cards, cardEls, lite }) {
     };
   }, [gl, invalidate]);
 
-  // Card sizes change once the web fonts arrive; place them again then.
-  useEffect(() => { document.fonts?.ready.then(() => invalidate()); }, [invalidate]);
+  // Card sizes change when the web fonts arrive and when the panel resizes,
+  // and at no other time, so they are measured then and cached. Reading them
+  // per frame instead forced a layout flush on every frame of the scroll.
+  // size is the canvas size from useThree, so this re-runs on a resize too.
+  const sizes = useRef([]);
+  useEffect(() => {
+    const measure = () => {
+      sizes.current = cardEls.current.map(el => (el ? [el.offsetWidth, el.offsetHeight] : [0, 0]));
+      invalidate();
+    };
+    measure();
+    document.fonts?.ready.then(measure);
+  }, [cardEls, invalidate, size]);
   const rigGroup = useRef();
   const rig = useRef({ door: 0, spill: 0 });
   const v = useRef(new Vector3());
@@ -146,8 +157,7 @@ function Scene({ state, cards, cardEls, lite }) {
     // panel. Then pull apart any two that overlap (narrow panels), sideways
     // first, then down, so no card covers another.
     const T = cards.map((card, i) => {
-      const el = cardEls.current[i];
-      const cw = el?.offsetWidth || 0, ch = el?.offsetHeight || 0;
+      const [cw, ch] = sizes.current[i] || [0, 0];
       const rx = Math.max(0, Math.min(cx, s.width - cx) - cw / 2 - 12);
       const ry = Math.max(0, cy - ch / 2 - 16);
       const ang = (angles[i] * Math.PI) / 180;
@@ -192,7 +202,7 @@ function Scene({ state, cards, cardEls, lite }) {
   return (
     <>
       {/* Bright, neutral studio: soft boxes for reflections on the black body */}
-      <Environment resolution={lite ? 64 : 256} frames={1}>
+      <Environment resolution={lite ? 48 : 128} frames={1}>
         <color attach="background" args={['#E8E3DA']} />
         <Lightformer form="rect" intensity={3} position={[0, 5, 2]} scale={[8, 4, 1]} rotation-x={Math.PI / 2} />
         <Lightformer form="rect" intensity={2} position={[-5, 1, 2]} scale={[2, 5, 1]} rotation-y={Math.PI / 2} />
@@ -205,11 +215,11 @@ function Scene({ state, cards, cardEls, lite }) {
       {!lite && <directionalLight position={[0, 2, -4]} intensity={1.2} />}
 
       <group ref={rigGroup}>
-        <CameraModel rig={rig} />
+        <CameraModel rig={rig} lite={lite} />
       </group>
 
       <ContactShadows position={[0, -0.76, 0]} opacity={0.42} scale={5} blur={2.4} far={1.4}
-        resolution={lite ? 256 : 512} color="#2B2219" />
+        resolution={lite ? 128 : 256} color="#2B2219" />
     </>
   );
 }
@@ -226,7 +236,7 @@ export default function HeroScene({ state, cards, lite, scroll, trackRef, copyRe
         className="hero-canvas"
         flat
         frameloop="demand"
-        dpr={lite ? [1, 1.5] : [1, 2]}
+        dpr={lite ? [1, 1.25] : [1, 1.5]}
         camera={{ fov: FOV, near: 0.1, far: 60, position: [0, 0, 8] }}
         gl={{ antialias: true, powerPreference: lite ? 'low-power' : 'high-performance' }}
       >

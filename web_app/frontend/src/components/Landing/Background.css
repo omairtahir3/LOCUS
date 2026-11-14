@@ -22,7 +22,9 @@ body:has(.bg) { background: var(--lc-bg); }
 .bg-blob {
   position: absolute;
   transform: translate3d(0, calc(sin(calc(var(--sy, 0) * var(--f) * 1rad)) * var(--amp)), 0);
-  will-change: transform;
+  /* No will-change here. These are the largest elements on the page, and
+     pinning five layers of ~1200x1080 cost more in GPU memory than the
+     promotion saved -- mix-blend-mode defeats cheap compositing anyway. */
   mix-blend-mode: multiply;
 }
 .bg-blob > i {
@@ -65,9 +67,7 @@ body:has(.bg) { background: var(--lc-bg); }
   height: 64px;
   border-radius: 20px;
   color: var(--cap);
-  background: rgb(255 255 255 / 0.72);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  background: rgb(255 255 255 / 0.86);
   border: 1px solid rgb(255 255 255 / 0.85);
   box-shadow:
     inset 0 1px 0 #FFF,
@@ -75,9 +75,14 @@ body:has(.bg) { background: var(--lc-bg); }
   animation: bg-bob 7s ease-in-out var(--d, 0s) infinite alternate;
 }
 
-/* Tiles fade out while the landing hero is on screen (data-tiles). */
-.bg-tile { transition: opacity 0.5s var(--lc-ease-out); }
-.bg[data-tiles="off"] .bg-tile { opacity: 0; }
+/* Tiles fade out while the landing hero is on screen (data-tiles).
+   visibility, not opacity alone: an element at opacity 0 is still painted
+   and still animated, so these went on costing for the whole hero. The
+   visibility transition is discrete, so it holds until the fade finishes. */
+.bg-tile {
+  transition: opacity 0.5s var(--lc-ease-out), visibility 0.5s var(--lc-ease-out);
+}
+.bg[data-tiles="off"] .bg-tile { opacity: 0; visibility: hidden; }
 
 /* Hero notification chips: small frosted pills with a capability-coloured
    icon around the camera, like moments arriving in a live feed. Hero only,
@@ -178,7 +183,8 @@ body:has(.bg) { background: var(--lc-bg); }
 /* Film grain at about 3%. */
 .bg-grain {
   position: absolute;
-  inset: -50%;
+  /* inset was -50%: four viewports of a 200px tile that simply repeats. */
+  inset: 0;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .35 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   opacity: 0.09;
 }
@@ -186,6 +192,18 @@ body:has(.bg) { background: var(--lc-bg); }
 @media (prefers-reduced-motion: reduce) {
   .bg-blob { transform: none; }
   .bg-blob > i { animation: none; }
+}
+
+/* Past the first screen the aurora becomes a still colour field. The drift is
+   a 14-22s loop, and from further down the page nobody is watching it -- but
+   it went on re-rasterising five 1200px elements and re-blending them through
+   multiply on every frame of every scroll, which is most of what made this
+   page lag on the way down. Paused, the blend is composited once and scroll
+   is just scroll. The rings stop for the same reason. */
+.bg[data-drift="off"] .bg-blob > i,
+.bg[data-drift="off"] .bg-ring > i,
+.bg[data-drift="off"] .bg-tile > i {
+  animation-play-state: paused;
 }
 
 /* ── Section tones and wave tops ───────────────────────────────────────────

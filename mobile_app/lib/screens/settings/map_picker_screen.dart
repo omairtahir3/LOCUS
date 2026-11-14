@@ -99,10 +99,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withAlpha(25), blurRadius: 10, spreadRadius: 2)
+                        BoxShadow(color: AppColors.shadow, blurRadius: 10, spreadRadius: 2)
                       ],
                     ),
                     child: const Text(

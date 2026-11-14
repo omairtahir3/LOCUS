@@ -72,7 +72,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 20),
               if (picture != null && picture.isNotEmpty)
                 ClipOval(
@@ -143,7 +143,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.grey[100],
+                color: isSelected ? AppColors.primary.withOpacity(0.15) : AppColors.surface2,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: isSelected ? AppColors.primary : AppColors.textSecondary, size: 24),
@@ -155,7 +155,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 children: [
                   Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: isSelected ? AppColors.primaryDark : AppColors.textPrimary)),
                   const SizedBox(height: 2),
-                  Text(desc, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  Text(desc, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -211,7 +211,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 24),
 
               // Role selector
-              Text('I AM A', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 1)),
+              Text('I AM A', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 1)),
               const SizedBox(height: 8),
               ...(_roles.map((r) => _roleOption(r))),
 
@@ -256,11 +256,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: _loading ? null : _handleGoogleSignIn,
-                  icon: const Icon(Icons.g_mobiledata, size: 28, color: Colors.red),
-                  label: const Text('Continue with Google', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+                  icon: const Icon(Icons.g_mobiledata, size: 28, color: AppColors.danger),
+                  label: const Text('Continue with Google', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: const BorderSide(color: Colors.grey),
+                    side: const BorderSide(color: AppColors.border),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
@@ -294,7 +294,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primaryLight : Colors.white,
           border: Border.all(color: isSelected ? AppColors.primary : AppColors.border, width: isSelected ? 2 : 1),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: isSelected ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))] : null,
         ),
         child: Row(
@@ -306,7 +306,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(role['label'] as String, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: isSelected ? AppColors.primaryDark : AppColors.textPrimary)),
-                  Text(role['desc'] as String, style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  Text(role['desc'] as String, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -321,7 +321,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,

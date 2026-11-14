@@ -32,7 +32,7 @@ import AlertsBell from './AlertsBell';
  * It shrinks and gains contrast; it never hides. A navigation that disappears
  * makes a reader hunt for it, and this audience should never have to.
  */
-export default function TopDock() {
+export default function TopDock({ socket }) {
   const { user } = useAuth();
   const [shrunk, setShrunk] = useState(false);
   const reduce = useReducedMotion();
@@ -98,7 +98,7 @@ export default function TopDock() {
 
       <div className="dock-right">
         <CommandPalette />
-        <AlertsBell />
+        <AlertsBell socket={socket} />
         <ProfileMenu />
       </div>
     </header>

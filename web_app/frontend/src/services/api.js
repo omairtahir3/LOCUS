@@ -86,6 +86,24 @@ export const ensureFrameToken = async () => {
   return frameTokenInFlight;
 };
 
+/**
+ * Drop the cached image token.
+ *
+ * MUST run whenever the signed-in account changes. The frame token is a
+ * separate credential in its own localStorage key, and the server reads the
+ * VIEWER'S IDENTITY out of it alone (frameAccess.viewerIdFrom returns its
+ * `sub`), independent of whatever session token the request carries. So a
+ * token minted for one account and left behind by the next one does not merely
+ * go stale -- it silently answers "who is looking at this frame?" with the
+ * wrong person. A wearer's leftover token makes a caregiver look like that
+ * wearer, and `mayView` then refuses every frame the wearer does not own, which
+ * surfaces as a 403 on thumbnails and nowhere else, because every other
+ * request still uses the correct Authorization header.
+ */
+export const clearFrameToken = () => {
+  try { localStorage.removeItem(FRAME_TOKEN_KEY); } catch { /* private mode */ }
+};
+
 /** Appends the held token. Synchronous, because it is called from render. */
 const withFrameToken = (url) => {
   const held = readFrameToken();
@@ -224,7 +242,11 @@ export const eventLogsAPI = {
 // phone, where it capped at five photographs and produced galleries too thin to
 // recognise anything.
 export const userItemsAPI = {
-  getAll:  ()        => api.get('/user-items'),
+  // userId is set when a caregiver is viewing somebody else, exactly as it is
+  // for lastSeenAll below. Without it the server falls back to their FIRST
+  // monitored person, which is the right answer only when they look after one.
+  getAll:  (userId)  => api.get('/user-items'
+    + (userId ? `?userId=${encodeURIComponent(userId)}` : '')),
   get:     (id)      => api.get(`/user-items/${id}`),
   lastSeen:(id)      => api.get(`/user-items/${id}/last-seen`),
   // Every belonging's last sighting with its GPS fix, in one call, for the map
@@ -239,7 +261,10 @@ export const userItemsAPI = {
 
 // ── Relationships ────────────────────────────────────────────────────────────
 export const relationshipsAPI = {
-  getAll: () => api.get('/relationships'),
+  // userId when a caregiver is viewing somebody else; without it the server
+  // answers about the first person they monitor.
+  getAll: (userId) => api.get('/relationships'
+    + (userId ? `?userId=${encodeURIComponent(userId)}` : '')),
   getInteractions: (id) => api.get(`/relationships/${id}/interactions`),
   merge: (data) => api.post('/relationships/merge', data),
   confirmFace: (data) => api.post('/relationships/confirm', data),

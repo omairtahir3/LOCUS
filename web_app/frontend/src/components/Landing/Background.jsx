@@ -93,13 +93,20 @@ export default function Background({ variant = 'landing', tilesAfter }) {
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let raf = 0;
+    // Looked up once: this ran querySelector on every scroll frame.
+    const gate = tilesAfter ? document.querySelector(tilesAfter) : null;
     const tick = () => {
       raf = 0;
-      ref.current?.style.setProperty('--sy', String(Math.round(window.scrollY)));
+      const el = ref.current;
+      if (!el) return;
+      el.style.setProperty('--sy', String(Math.round(window.scrollY)));
+      // The decorative loops run only while the first screen is in view; see
+      // the data-drift rules in Background.css for why.
+      el.dataset.drift = window.scrollY < window.innerHeight * 1.2 ? 'on' : 'off';
       // Tiles stay hidden until the element they wait for has mostly scrolled by.
-      const gate = tilesAfter && document.querySelector(tilesAfter);
-      if (gate && ref.current) {
-        ref.current.dataset.tiles = gate.getBoundingClientRect().bottom < window.innerHeight * 0.5 ? 'on' : 'off';
+      if (gate) {
+        el.dataset.tiles =
+          gate.getBoundingClientRect().bottom < window.innerHeight * 0.5 ? 'on' : 'off';
       }
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(tick); };
@@ -112,7 +119,8 @@ export default function Background({ variant = 'landing', tilesAfter }) {
   }, [tilesAfter]);
 
   return (
-    <div ref={ref} className="bg" data-tiles={tilesAfter ? 'off' : 'on'} aria-hidden="true">
+    <div ref={ref} className="bg" data-tiles={tilesAfter ? 'off' : 'on'} data-drift="on"
+      aria-hidden="true">
       {BLOBS.map(b => (
         <div key={b.cls} className={`bg-blob ${b.cls}`} style={float(b.f, b.amp)}><i /></div>
       ))}

@@ -500,7 +500,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.primaryLight,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,7 +546,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
                     child: Text('Tap the photo to see the spot.',
-                        style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                        style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                   ),
               ],
             ),
@@ -566,7 +566,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.black87,
+        backgroundColor: Color(0xE61C1A17),
         insetPadding: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Column(
@@ -599,7 +599,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => Container(
                   padding: const EdgeInsets.all(32),
-                  color: Colors.grey.shade900,
+                  color: AppColors.textPrimary,
                   child: const Center(
                     child: Text('Failed to load image', style: TextStyle(color: Colors.white70)),
                   ),
@@ -739,7 +739,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
           title: 'Parse Error: $e',
           time: '-',
           icon: Icons.error,
-          color: Colors.red,
+          color: AppColors.danger,
           group: 'Errors',
           category: 'All',
         );
@@ -788,23 +788,23 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                         return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade300),
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               isDense: true,
                               value: service.selectedUser?['_id'],
-                              icon: const Icon(Icons.arrow_drop_down, color: Colors.black54, size: 18),
-                              style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                              icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary, size: 18),
+                              style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                               onChanged: (String? newValue) {
                                 if (newValue != null) service.setSelectedUser(newValue);
                               },
                               items: service.monitoringUsers.map<DropdownMenuItem<String>>((dynamic u) {
                                 return DropdownMenuItem<String>(
                                   value: u['_id'],
-                                  child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 12)),
+                                  child: Text(u['name'] ?? 'Unknown', style: const TextStyle(fontSize: 13)),
                                 );
                               }).toList(),
                             ),
@@ -872,7 +872,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: Text(_date == null ? 'By day' : 'All days',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
@@ -889,7 +889,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                         hintText: 'Search, or ask where you left something...',
                         prefixIcon: const Icon(Icons.search, size: 20),
                         contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                   ),
@@ -907,7 +907,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                       color: _listening
                           ? AppColors.danger
                           : (_speechReady ? AppColors.primary : AppColors.textMuted),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: IconButton(
                       onPressed: _asking ? null : _listen,
@@ -945,7 +945,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                             ? Icon(icon, size: 14, color: isSelected ? Colors.white : AppColors.textSecondary)
                             : null,
                         label: Text('$f ($count)', style: TextStyle(
-                          fontSize: 11, 
+                          fontSize: 13, 
                           fontWeight: FontWeight.w600,
                           color: isSelected ? Colors.white : AppColors.textSecondary,
                         )),
@@ -987,7 +987,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                             const SizedBox(height: 4),
                             Text('When the AI camera detects items or events, they will appear here.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
                           ],
                         ),
                       ),
@@ -1024,7 +1024,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
               ),
               GestureDetector(
                 onTap: () => setState(() => _activeFilter = 'Objects'),
-                child: const Text('View All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF4F46E5))),
+                child: const Text('View All', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF4F46E5))),
               ),
             ],
           ),
@@ -1049,12 +1049,12 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                     width: 120,
                     margin: const EdgeInsets.only(right: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.black.withAlpha(15)),
+                      border: Border.all(color: AppColors.border),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withAlpha(8),
+                          color: AppColors.shadow,
                           blurRadius: 4,
                           offset: const Offset(0, 2),
                         ),
@@ -1090,13 +1090,13 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                             children: [
                               Text(
                                 displayName,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
                                 obj.time,
-                                style: TextStyle(color: AppColors.textSecondary, fontSize: 9),
+                                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                               ),
                             ],
                           ),
@@ -1136,7 +1136,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
           children: [
             if (showHeader) Padding(
               padding: EdgeInsets.only(top: i == 0 && !showObjectsCarousel ? 0 : 16, bottom: 8),
-              child: Text(m.group, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+              child: Text(m.group, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                   color: AppColors.textMuted, letterSpacing: 0.5)),
             ),
             Card(
@@ -1202,7 +1202,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                           child: Text(
                             name,
                             style: const TextStyle(
-                              fontSize: 10,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: Color(0xFF4F46E5),
                             ),
@@ -1213,7 +1213,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                     const SizedBox(height: 3),
                     Row(
                       children: [
-                        Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                        Text(m.time, style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                         if (m.location != null) ...[
                           const SizedBox(width: 6),
                           Tooltip(
@@ -1234,7 +1234,7 @@ class _MemoryScreenState extends State<MemoryScreen> with WidgetsBindingObserver
                                     Icon(Icons.location_on, size: 10, color: Color(0xFF4F46E5)),
                                     SizedBox(width: 2),
                                     Text('Location Logged', style: TextStyle(
-                                      fontSize: 9, 
+                                      fontSize: 13, 
                                       fontWeight: FontWeight.w700, 
                                       color: Color(0xFF4F46E5)
                                     )),

@@ -310,7 +310,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                       child: Text(
                         '$count / $maxPhotos photos ${count >= minPhotos ? '✓' : '(need $minPhotos)'}',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: count >= minPhotos ? AppColors.success : AppColors.warning,
                         ),
@@ -385,7 +385,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 10,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
                                 maxLines: 1,
@@ -402,7 +402,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                               child: Container(
                                 padding: const EdgeInsets.all(4),
                                 decoration: const BoxDecoration(
-                                  color: Colors.black54,
+                                  color: AppColors.textSecondary,
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.close, size: 14, color: Colors.white),
@@ -482,7 +482,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
           // Loading overlay
           if (_isSubmitting)
             Container(
-              color: Colors.black45,
+              color: AppColors.textMuted,
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.all(28),
@@ -504,7 +504,7 @@ class _ItemEnrollScreenState extends State<ItemEnrollScreen> {
                       Text(
                         'Extracting 576-D MobileNetV3 visual features from your item photos...',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                       ),
                     ],
                   ),

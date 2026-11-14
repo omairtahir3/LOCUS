@@ -4,7 +4,6 @@ import { useAuth } from '../../context/AuthContext';
 import TopDock from '../Nav/TopDock';
 import BottomTabs from '../Nav/BottomTabs';
 import { useKeyframeSync } from '../../hooks/useKeyframeSync';
-import { useLocationTracker } from '../../hooks/useLocationTracker';
 import { useSocketSOS } from '../../hooks/useSocketSOS';
 import ChatPanel from '../Chat/ChatPanel';
 import VoiceCall from '../Call/VoiceCall';
@@ -16,8 +15,14 @@ export default function AppLayout() {
 
   // Start syncing keyframes in the background
   useKeyframeSync();
-  // Start tracking location for monitored users (elderly/normal_user)
-  useLocationTracker();
+  // The browser does NOT broadcast location. Position comes from the phone and
+  // only from the phone: mobile_app/lib/services/location_service.dart holds a
+  // geolocator stream with a 10 m distanceFilter and POSTs each fix to the same
+  // /api/location route, which is the wearable's real whereabouts rather than
+  // wherever a dashboard happens to be open. Calling useLocationTracker() here
+  // made every logged-in wearer's browser raise a permission prompt and then
+  // write fixes for a laptop sitting at home, competing with the phone for the
+  // newest row in location_logs. The hook is kept in hooks/ but unused.
   // Listen for SOS events (for caregivers)
   const { socket, activeSOS, setActiveSOS } = useSocketSOS();
 
@@ -39,7 +44,7 @@ export default function AppLayout() {
           mounted; CSS decides which one is on screen, so there is no
           viewport-width state in React to get out of step with the layout. */}
       <div className="app-shell">
-        <TopDock />
+        <TopDock socket={socket} />
         <BottomTabs />
 
         <main className="main-content">

@@ -57,12 +57,20 @@ export default function landingMotion(root) {
       flag(caps, 'caps--h');
       const cards = [...track.children];
       const span = () => Math.max(0, track.offsetWidth - document.documentElement.clientWidth);
+      // Read every position first, then write every value. Interleaved, the
+      // setProperty on one card invalidated layout and the next card's
+      // getBoundingClientRect forced it to be recomputed -- one synchronous
+      // layout per card, on every frame of the pin, while gsap was moving
+      // the track underneath.
       const scale = () => {
         const mid = window.innerWidth / 2;
-        cards.forEach(c => {
+        const w = window.innerWidth;
+        const offsets = cards.map(c => {
           const r = c.getBoundingClientRect();
-          const d = Math.min(1, Math.abs(r.left + r.width / 2 - mid) / window.innerWidth);
-          c.style.setProperty('--s', (1 - d * 0.16).toFixed(3));
+          return Math.min(1, Math.abs(r.left + r.width / 2 - mid) / w);
+        });
+        cards.forEach((c, i) => {
+          c.style.setProperty('--s', (1 - offsets[i] * 0.16).toFixed(3));
         });
       };
       gsap.to(track, {

@@ -203,7 +203,8 @@
   .hero-visual { position: relative; flex: 1; min-height: 0; }
 }
 
-/* Still hero (reduced motion, or no WebGL): nothing sticks or scrubs. */
+/* Still hero (a phone, reduced motion, or no WebGL): nothing sticks or
+   scrubs, and the 440vh track above collapses to the content's own height. */
 .hero--still .hero-stage { height: auto; min-height: 640px; }
 .hero--still .hero-visual { min-height: 560px; }
 @media (max-width: 899px) {

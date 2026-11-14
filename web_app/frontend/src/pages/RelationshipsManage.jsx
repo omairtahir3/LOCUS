@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { relationshipsAPI } from '../services/api';
 import { Merge, Trash2, AlertTriangle, Search } from 'lucide-react';
 import PageHeader from '../components/Layout/PageHeader';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import { useAuth } from '../context/AuthContext';
+import { isCaregiver } from '../components/Nav/navItems';
 
 export default function RelationshipsManage() {
   const [relationships, setRelationships] = useState([]);
@@ -15,9 +18,16 @@ export default function RelationshipsManage() {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Faces belong to one household. A caregiver reads the person the dock has
+  // selected; without the id the server answers about the first person they
+  // monitor, which is the wrong family as soon as they look after two.
+  const { user } = useAuth();
+  const { selectedUser } = useSelectedUser() || {};
+  const scopeId = isCaregiver(user) ? selectedUser?._id : undefined;
+
   const fetchRelationships = async () => {
     try {
-      const res = await relationshipsAPI.getAll();
+      const res = await relationshipsAPI.getAll(scopeId);
       setRelationships(res.data || []);
     } catch (err) {
       console.error(err);
@@ -27,9 +37,12 @@ export default function RelationshipsManage() {
     }
   };
 
+  // Refetches when the caregiver switches person, which an empty dependency
+  // list did not: the dock changed and the list below it did not.
   useEffect(() => {
     fetchRelationships();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeId]);
 
   const handleMerge = async () => {
     if (!sourceId || !targetId || sourceId === targetId) {

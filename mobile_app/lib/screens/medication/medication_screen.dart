@@ -111,7 +111,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
             Text('Go to the "Add Medicine" tab to add your medications',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
           ],
         ),
       );
@@ -250,7 +250,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                   const SizedBox(height: 3),
                   Text('${dose['dosage'] ?? ''} • ${dose['scheduled_time'] ?? ''}',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                 ],
               ),
             ),
@@ -259,13 +259,13 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                 // Elderly: caregiver decides
                 ? Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(10)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
                         const SizedBox(width: 4),
-                        Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
+                        Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.w800)),
                       ],
                     ),
                   )
@@ -302,13 +302,13 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
             else
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(10)),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(statusIcon, size: 14, color: statusColor),
                     const SizedBox(width: 4),
-                    Text(status.replaceAll('_', ' ').toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                    Text(status.replaceAll('_', ' ').toUpperCase(), style: TextStyle(color: statusColor, fontSize: 13, fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -321,10 +321,10 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
   Widget _actionBtn(IconData icon, Color color, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(10)),
         child: Icon(icon, size: 18, color: color),
       ),
     );
@@ -395,7 +395,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                         children: [
                           Text('Add New Medicine', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                           SizedBox(height: 2),
-                          Text('Set name, dosage, times & frequency', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                          Text('Set name, dosage, times & frequency', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                         ],
                       ),
                     ),
@@ -418,7 +418,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                     Text('No medicines added yet', style: TextStyle(color: AppColors.textSecondary)),
                     const SizedBox(height: 4),
                     Text('Tap the button above to add your first medicine',
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
                   ],
                 ),
               ),
@@ -455,11 +455,11 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                               const SizedBox(height: 3),
                               Text('${med['dosage'] ?? ''} • $freq',
-                                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                               if (timesStr.isNotEmpty) ...[
                                 const SizedBox(height: 2),
                                 Text('⏰ $timesStr',
-                                    style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                                    style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
                               ],
                             ],
                           ),
@@ -579,7 +579,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                   children: ['daily', 'weekly', 'as_needed'].map((f) =>
                     ChoiceChip(
                       showCheckmark: false,
-                      label: Text(f.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      label: Text(f.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
                         color: frequency == f ? Colors.white : AppColors.textSecondary)),
                       selected: frequency == f,
                       onSelected: (_) => setSheetState(() => frequency = f),
@@ -604,7 +604,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                       {'label': 'Fri', 'value': 4}, {'label': 'Sat', 'value': 5},
                       {'label': 'Sun', 'value': 6},
                     ].map((d) => FilterChip(
-                      label: Text(d['label'] as String, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      label: Text(d['label'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
                         color: selectedDays.contains(d['value']) ? Colors.white : AppColors.textSecondary)),
                       selected: selectedDays.contains(d['value']),
                       onSelected: (sel) => setSheetState(() {
@@ -638,7 +638,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                         if (picked != null) setSheetState(() => times.add(picked));
                       },
                       icon: const Icon(Icons.add_alarm, size: 18),
-                      label: const Text('Add Time', style: TextStyle(fontSize: 12)),
+                      label: const Text('Add Time', style: TextStyle(fontSize: 13)),
                     ),
                   ],
                 ),
@@ -646,7 +646,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text('Tap "Add Time" to set when to take this medicine',
-                        style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                        style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                   )
                 else
                   Wrap(
@@ -763,7 +763,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
             Text('No history yet', style: TextStyle(color: AppColors.textSecondary)),
             const SizedBox(height: 4),
             Text('Taken and missed doses will appear here',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
           ],
         ),
       );
@@ -792,7 +792,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
             child: ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(10)),
                 child: Icon(icon, color: color, size: 18),
               ),
               title: Text(
@@ -801,7 +801,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
               ),
               subtitle: Text(
                 _formatDate(h['scheduled_time'] ?? h['createdAt'] ?? ''),
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
               ),
               trailing: (status == 'needs_verification' && !_isElderly)
                   ? Row(
@@ -817,7 +817,7 @@ class MedicationScreenState extends State<MedicationScreen> with SingleTickerPro
                       decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(6)),
                       child: Text(
                         status == 'needs_verification' ? 'AWAITING CAREGIVER' : status.replaceAll('_', ' ').toUpperCase(),
-                        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700),
+                        style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700),
                       ),
                     ),
             ),

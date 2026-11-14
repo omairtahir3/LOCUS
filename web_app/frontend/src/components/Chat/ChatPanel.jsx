@@ -16,6 +16,7 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
 
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
+  const [sendError, setSendError] = useState(null);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef(null);
 
@@ -63,10 +64,25 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
         });
       }
     };
+    // The server now refuses a message addressed to the sender themselves, or
+    // to someone they are not linked to. Without this the optimistic bubble
+    // would sit there for ever looking sent, which is the one outcome worse
+    // than an error: the caregiver believes the person has been told.
+    const handleChatError = (e) => {
+      setMessages((prev) => prev.filter((m) => !m.optimistic));
+      setSendError(
+        e?.reason === 'self'
+          ? 'That was addressed to your own account, so it was not sent.'
+          : 'You are not linked to this person, so the message was not sent.'
+      );
+    };
+
     socket.on('chat_message', handleNewMessage);
+    socket.on('chat_error', handleChatError);
 
     return () => {
       socket.off('chat_message', handleNewMessage);
+      socket.off('chat_error', handleChatError);
     };
   }, [activeRecipientId, socket]);
 
@@ -76,7 +92,8 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
 
   const handleSend = () => {
     if (!inputText.trim() || !socket || !activeRecipientId) return;
-    
+    setSendError(null);
+
     // Optimistic UI update so the sender sees their message instantly
     const optimisticMsg = {
       _id: Date.now().toString(),
@@ -120,7 +137,7 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
           {isEmergency && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
               <AlertCircle size={14} color="#EF4444" />
-              <span style={{ fontSize: '11px', fontWeight: '800', color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Emergency Active</span>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#EF4444' }}>Emergency Active</span>
             </div>
           )}
         </div>
@@ -189,6 +206,16 @@ const ChatPanel = ({ socket, recipientId, recipientName, isEmergency, onClose,
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {sendError && (
+        <div style={{
+          padding: '10px 16px', backgroundColor: 'var(--danger-light, #FEE2E2)',
+          color: 'var(--danger-text, #CE3A3A)', fontSize: '13px',
+          borderTop: '1px solid #E2E8F0',
+        }}>
+          {sendError}
+        </div>
+      )}
 
       {/* Input Area */}
       <div style={{ padding: '16px', backgroundColor: '#FFFFFF', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '12px' }}>

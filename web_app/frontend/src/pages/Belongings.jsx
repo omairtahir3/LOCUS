@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Package, Plus, Trash2, Upload, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { userItemsAPI } from '../services/api';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import { useAuth } from '../context/AuthContext';
+import { isCaregiver } from '../components/Nav/navItems';
 import Loading from '../components/Feedback/Loading';
 
 /**
@@ -76,10 +79,15 @@ export default function Belongings() {
   const [error, setError] = useState(null);
   const [adding, setAdding] = useState(false);
 
+  // A wearer reads their own; a caregiver reads whoever the dock has selected.
+  const { user } = useAuth();
+  const { selectedUser } = useSelectedUser() || {};
+  const scopeId = isCaregiver(user) ? selectedUser?._id : undefined;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await userItemsAPI.getAll();
+      const res = await userItemsAPI.getAll(scopeId);
       setItems(Array.isArray(res.data) ? res.data : (res.data?.items || []));
       setError(null);
     } catch (e) {
@@ -87,7 +95,7 @@ export default function Belongings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scopeId]);
 
   useEffect(() => { load(); }, [load]);
 

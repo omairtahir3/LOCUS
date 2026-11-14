@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/bento.dart';
+import '../../widgets/day_summary.dart';
+import '../../services/selected_user_service.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/voice_call_service.dart';
@@ -12,7 +15,8 @@ class CaregiverHomeScreen extends StatefulWidget {
   State<CaregiverHomeScreen> createState() => _CaregiverHomeScreenState();
 }
 
-class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
+class _CaregiverHomeScreenState extends State<CaregiverHomeScreen>
+    with WidgetsBindingObserver {
   List<dynamic> _users = [];
   Map<String, dynamic> _summaries = {};
   List<dynamic> _notifications = [];
@@ -40,6 +44,26 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
 
     SocketService().addSosAlertListener(_handleSosAlert);
     SocketService().addSosResolvedListener(_handleSosResolved);
+    // Anything that happened while the socket was down is read back on the
+    // way up, which is exactly when the two dashboards used to disagree.
+    SocketService().on('connect', _onSocketUp);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // See the note on the wearer's screen: the socket does not survive the
+    // phone sleeping, and a caregiver coming back to the app is exactly when
+    // it matters that it is up. _loadData then reconciles the emergency
+    // strips against the server, so anything missed while away is caught.
+    if (state == AppLifecycleState.resumed) {
+      SocketService().connect();
+      _loadData();
+    }
+  }
+
+  void _onSocketUp(dynamic _) {
+    if (mounted) _loadData();
   }
 
   void _handleSosAlert(Map<String, dynamic> data) {
@@ -96,6 +120,8 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
   void dispose() {
     SocketService().removeSosAlertListener(_handleSosAlert);
     SocketService().removeSosResolvedListener(_handleSosResolved);
+    SocketService().off('connect', _onSocketUp);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -113,6 +139,22 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
       try {
         notifs = await ApiService.getNotifications(limit: 5, unreadOnly: true);
       } catch (_) {}
+      // Reconcile the emergency strips against the server rather than
+      // trusting the socket events alone. An event missed while the app was
+      // backgrounded used to leave a strip up for a resolved emergency, or
+      // leave a live one entirely invisible.
+      for (final u in users) {
+        final id = u['_id']?.toString();
+        if (id == null) continue;
+        if (u['emergency_status'] == true) {
+          _activeSos.putIfAbsent(id, () => <String, dynamic>{
+                'user_id': id,
+                'user_name': u['name']?.toString() ?? 'Someone you care for',
+              });
+        } else {
+          _activeSos.remove(id);
+        }
+      }
       setState(() { _users = users; _summaries = summaries; _notifications = notifs; });
     } catch (_) {} finally {
       setState(() => _loading = false);
@@ -179,9 +221,9 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: AppColors.danger,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: () => _openSos(data),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -217,137 +259,96 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final userName = ApiService.user?['name']?.toString().split(' ').first ?? 'Caregiver';
 
     if (_loading && _users.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary));
     }
 
-    final totalUsers = _users.length;
-    final avg = _summaries.values.fold<double>(0, (sum, s) {
-      return sum + ((s?['today_adherence']?['adherence_percentage'] ?? 0) as num).toDouble();
-    }) / (totalUsers > 0 ? totalUsers : 1);
 
     return RefreshIndicator(
       onRefresh: _loadData,
       color: AppColors.primary,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Unresolved emergencies first, always. Anything below this can
             // wait; these cannot, and one raised while the caregiver was
             // reading another would otherwise be invisible.
+            // Unresolved emergencies first, always.
             ..._activeSos.values.map(_sosStrip),
-            Text('Hi, $userName! 👋', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-            const SizedBox(height: 4),
-            Text('Your care network is active.', style: TextStyle(color: AppColors.textSecondary, fontSize: 15)),
-            const SizedBox(height: 32),
 
-            // ── Premium Stats ──
-            Row(
-              children: [
-                _premiumStatCard('Adherence', '${avg.toStringAsFixed(0)}%', Icons.check_circle, AppColors.success, context),
-                const SizedBox(width: 16),
-                _premiumStatCard('Alerts', '${_notifications.length}', Icons.notifications_active, AppColors.warning, context),
-              ],
+            // The whole day for the person currently selected -- the same
+            // component the caregiver's web dashboard renders, with canAct so
+            // it carries the Location card. Family Status and Live Activity
+            // sit below it, exactly as they do on the web: that is the part
+            // of this page which is genuinely about everyone.
+            // Rebuilt when the selection lands, which is why this is
+            // wrapped rather than read once.
+            //
+            // SelectedUserService().initialize() is started in MainShell's
+            // initState and NOT awaited -- it fetches the monitored-users list
+            // over the network before it can pick anybody. This page builds
+            // long before that returns, so selectedUser was null here and
+            // DaySummary loaded with userId: null. With no id the endpoints
+            // answer for the CAREGIVER'S own account, and a caregiver has no
+            // doses, no rooms and no sightings of their own: every card came
+            // back legitimately empty. Next dose was simply the most obvious
+            // one, because the wearer's app showed the doses it could not.
+            //
+            // DaySummary.didUpdateWidget already reloads on a changed userId
+            // -- it had no way to hear about this one, because nothing rebuilt
+            // this page when the selection arrived. Listening to the service
+            // is what connects the two.
+            AnimatedBuilder(
+              animation: SelectedUserService(),
+              builder: (context, _) => DaySummary(
+                userId: SelectedUserService().selectedUser?['_id']?.toString(),
+                canAct: true,
+              ),
             ),
-            const SizedBox(height: 16),
-            _wideStatCard('Monitoring $totalUsers family members', Icons.people, AppColors.primary),
-            const SizedBox(height: 40),
+            const SizedBox(height: 14),
 
-            // ── Family grid ──
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Family Status', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                TextButton(
-                  onPressed: () {},
-                  child: const Text('See All', style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ],
+            BentoCard(
+              icon: Icons.family_restroom_outlined,
+              title: 'Family status',
+              child: _users.isEmpty
+                  ? const CardEmpty(
+                      icon: Icons.family_restroom_outlined,
+                      text: 'Nobody is linked to this account yet.')
+                  : Column(
+                      children: _users
+                          .asMap()
+                          .entries
+                          .map((e) => _memberCard(e.key, e.value))
+                          .toList(),
+                    ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
 
-            if (_users.isEmpty)
-              _emptyState(Icons.family_restroom, 'No family connected')
-            else
-              ..._users.asMap().entries.map((e) => _memberCard(e.key, e.value)),
-
-            const SizedBox(height: 40),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                if (_notifications.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: _clearRecentActivity,
-                    icon: const Icon(Icons.delete_sweep_outlined, size: 18, color: AppColors.danger),
-                    label: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.danger)),
-                  ),
-              ],
+            BentoCard(
+              icon: Icons.notifications_none,
+              title: 'Live activity',
+              actionLabel: _notifications.isEmpty ? null : 'Clear all',
+              onAction: _notifications.isEmpty ? null : _clearRecentActivity,
+              child: _notifications.isEmpty
+                  ? const CardEmpty(
+                      icon: Icons.notifications_none,
+                      text: 'Nothing has come in recently.')
+                  : Column(
+                      children:
+                          _notifications.map((n) => _notificationCard(n)).toList(),
+                    ),
             ),
-            const SizedBox(height: 16),
-
-            if (_notifications.isEmpty)
-              _emptyState(Icons.notifications_none, 'No recent activity')
-            else
-              ..._notifications.map((n) => _notificationCard(n)),
           ],
         ),
       ),
     );
   }
 
-  Widget _premiumStatCard(String label, String value, IconData icon, Color color, BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: AppColors.border),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(height: 20),
-            Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -1)),
-            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary, letterSpacing: 0.5)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _wideStatCard(String label, IconData icon, Color color) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: color.withValues(alpha: 0.1)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 12),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14)),
-        ],
-      ),
-    );
-  }
-
-  Widget _memberCard(int i, dynamic u) {
+      Widget _memberCard(int i, dynamic u) {
     final s = _summaries[u['_id']];
     final adh = (s?['today_adherence']?['adherence_percentage'] ?? 0) as num;
     final colors = [AppColors.primary, AppColors.accent, const Color(0xFFEC4899), const Color(0xFFF59E0B)];
@@ -356,7 +357,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: AppColors.border),
       ),
@@ -375,7 +376,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
               children: [
                 Text(u['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                 const SizedBox(height: 2),
-                Text(u['email'] ?? '', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                Text(u['email'] ?? '', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
               ],
             ),
           ),
@@ -384,7 +385,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
             children: [
               Text('${adh.toStringAsFixed(0)}%', 
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: adh >= 80 ? AppColors.success : AppColors.warning)),
-              const Text('Adherence', style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w700)),
+              const Text('Adherence', style: TextStyle(fontSize: 13, color: AppColors.textMuted, fontWeight: FontWeight.w700)),
             ],
           ),
         ],
@@ -421,7 +422,7 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
               children: [
                 Text(n['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(n['message'] ?? '', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4)),
+                Text(n['message'] ?? '', style: TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4)),
               ],
             ),
           ),
@@ -430,18 +431,4 @@ class _CaregiverHomeScreenState extends State<CaregiverHomeScreen> {
     );
   }
 
-  Widget _emptyState(IconData icon, String text) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(40),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: AppColors.border)),
-      child: Column(
-        children: [
-          Icon(icon, size: 40, color: AppColors.textMuted.withValues(alpha: 0.5)),
-          const SizedBox(height: 16),
-          Text(text, style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-        ],
-      ),
-    );
   }
-}

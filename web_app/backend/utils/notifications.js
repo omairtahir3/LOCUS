@@ -495,6 +495,29 @@ const createNotification = async ({
     await Notification.findByIdAndUpdate(notification._id, { $set: updates });
   }
 
+  // ── Tell the person NOW, not at their next refresh ────────────────────
+  //
+  // Every notification this system writes -- a caregiver's message, a status
+  // check, a missed dose -- was stored and then simply waited. Nothing was
+  // emitted, and no client polls, so "send message" on the family page
+  // genuinely did nothing visible until the recipient happened to reopen
+  // their alerts. It looked like the send had failed; it had not, it had
+  // just never been delivered.
+  //
+  // The room is the recipient's user id, which every socket joins at connect,
+  // so this reaches each device they are signed in on at once -- the phone
+  // and the browser tab together, the same way sos_alert already does.
+  //
+  // Required lazily: utils/socket.js requires THIS module for
+  // createNotification, so a top-level require here would be a cycle.
+  try {
+    const { getIO } = require('./socket');
+    getIO().to(String(recipientId)).emit('notification:new', notification);
+  } catch {
+    // No socket server at all (a script, a test run), or it has not started
+    // yet. The row is stored either way and the client sees it on next load.
+  }
+
   return notification;
 };
 

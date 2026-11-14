@@ -79,6 +79,28 @@ export default function Routine() {
         description={`Today's pattern, and what LOCUS has learned about ${who === 'you' ? 'your' : `${who}'s`} normal`}
       />
 
+      {/* Whose routine this is, said plainly and first.
+          
+          Every figure below -- the findings, the baseline measures, today's
+          pattern -- is about ONE person, and the page named them only in the
+          middle of the description sentence. A caregiver who looks after more
+          than one person could read this whole screen without registering
+          which of them it described, and the two readings are not
+          interchangeable: "nothing unusual" about the wrong person is worse
+          than no answer. The PersonSwitcher in the dock sets this; the banner
+          states it. */}
+      {isCaregiver(user) && (
+        <div className={`routine-subject${selectedUser ? '' : ' is-empty'}`}>
+          <span className="routine-subject-avatar" aria-hidden="true">
+            {(selectedUser?.name || '?').trim().charAt(0).toUpperCase()}
+          </span>
+          <div className="routine-subject-text">
+            <span className="routine-subject-label">Routine being monitored</span>
+            <strong>{selectedUser?.name || 'No family member selected'}</strong>
+          </div>
+        </div>
+      )}
+
       {/* ── What has been learned ───────────────────────────────────────── */}
       <section className="card mb-4">
         <div className="card-header">

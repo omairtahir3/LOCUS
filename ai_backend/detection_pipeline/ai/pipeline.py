@@ -240,13 +240,18 @@ class MedicationDetectionPipeline:
                                                allowed=_audio_allowed)
                 self.transcriber.ensure_ttl_index()
                 self.audio_context = AudioContext(self.transcriber)
-                if self.transcriber.start():
-                    print("[Pipeline] Audio capture on, transcribing locally "
-                          f"({self.transcriber.model_size})")
-                else:
-                    print(f"[Pipeline] Audio capture unavailable: {self.transcriber.last_error}")
-                    self.transcriber = None
-                    self.audio_context = None
+                # Deliberately NOT started here.
+                #
+                # A conversation is transcribed from the CAMERA\'s microphone
+                # and from no other. The camera is not known until
+                # run_on_video, so starting capture here would open this
+                # machine\'s default input instead -- and when the pipeline
+                # runs on a laptop while the wearer is in another room, every
+                # window of a real four-minute conversation measures as
+                # silence. That is not a hypothetical: it is what the first
+                # Onais conversation recorded, 23 windows and not one word.
+                print("[Pipeline] Audio ready; waiting for the camera\'s "
+                      f"microphone ({self.transcriber.model_size})")
             except Exception as e:
                 # Audio is an addition to the pipeline, never a requirement.
                 print(f"[Pipeline] Audio capture disabled: {type(e).__name__}: {e}")
@@ -557,7 +562,12 @@ class MedicationDetectionPipeline:
             # was said the first time. If the wearer later names them it becomes
             # that relationship's first interaction; if they dismiss the face,
             # the transcript and summary go with it.
-            if event_type in ("social_interaction", "unknown_face") and self.transcriber is not None:
+            # `listening` and not merely "exists": a transcriber whose
+            # capture never opened would write a row marked 'collecting' that
+            # nothing can fill, which is how a conversation comes to sit
+            # half-recorded for ever.
+            if event_type in ("social_interaction", "unknown_face") \
+                    and self.transcriber is not None and self.transcriber.listening:
                 try:
                     # A CONVERSATION, not a glance at one.
                     #
@@ -643,7 +653,34 @@ class MedicationDetectionPipeline:
             print(f"[Pipeline] [DB-Log] Error logging face event: {e}")
             traceback.print_exc()
 
-    def close_stale_conversation(self) -> bool:
+    def _attach_camera_audio(self, source, quiet: bool = False) -> bool:
+        """Point the transcriber at the camera's microphone. Retryable.
+
+        THE CAMERA IS THE ONLY MICROPHONE ALLOWED TO HEAR A CONVERSATION. This
+        machine\'s input and the phone\'s belong to emergency calls, which are
+        a different act with a different consent. So this never falls back to
+        a local device -- it either attaches the stream\'s audio or leaves the
+        transcriber deaf, and `Transcriber.listening` is what the face path
+        checks before opening a conversation.
+        """
+        t = self.transcriber
+        if t is None:
+            return False
+        if t.listening:
+            return True
+        live = isinstance(source, str) and "://" in source
+        if live and t.use_stream_audio(source) and t.start():
+            print("[Pipeline] [Audio] Listening to the camera's microphone")
+            return True
+        if not quiet:
+            why = ("this source carries no audio track" if not live
+                   else (t.last_error or "the camera sent no audio"))
+            print(f"[Pipeline] [Audio] No camera microphone ({why}). "
+                  "Conversations will not be transcribed until the stream "
+                  "brings audio; emergency calls are unaffected.")
+        return False
+
+    def close_stale_conversation(self, force: bool = False) -> bool:
         """End a conversation whose person has been out of view long enough.
 
         Called from the capture loop, which is the only thing guaranteed to
@@ -666,7 +703,9 @@ class MedicationDetectionPipeline:
             last = s["last_seen"] if s else None
         if last is None:
             return False
-        if (datetime.now(timezone.utc) - last).total_seconds() < gap:
+        # force skips the gap: on shutdown there is no "later" in which the
+        # person could come back, so waiting for the gap means never closing.
+        if not force and (datetime.now(timezone.utc) - last).total_seconds() < gap:
             return False
 
         done = t.end_session()
@@ -2430,6 +2469,18 @@ class MedicationDetectionPipeline:
         scheduled_times: list of "HH:MM" strings for when meds are expected.
         """
         print(f"Starting medication detection pipeline on source: {source}")
+
+        # The camera's microphone, or no transcription at all.
+        #
+        # This is the one decision that makes the privacy claim true. The
+        # microphones on this machine and on the phone are for emergency
+        # calls; a social interaction is only ever heard by the camera the
+        # wearer chose to put on. If the camera publishes no audio there is
+        # nothing this is entitled to listen to, so transcription is switched
+        # off and said out loud, rather than quietly falling back to whatever
+        # microphone is nearest and transcribing the wrong room.
+        self._attach_camera_audio(source)
+
         if scheduled_times:
             print(f"Schedule-aware mode: active near {scheduled_times}")
         self.is_running = True
@@ -2470,7 +2521,16 @@ class MedicationDetectionPipeline:
                         pass # Silently retry
                     continue
                 else:
+                    was_offline = not self.camera_online
                     self.camera_online = True
+                    # The audio rides on the same stream as the frames, so a
+                    # stream that just came back is the moment to ask for it
+                    # again. Without this the swap happened once at startup
+                    # and a single transient RTSP failure -- an 8-second open
+                    # timeout under load is enough -- left the whole session
+                    # with no microphone at all, silently.
+                    if was_offline or frame_count % 900 == 0:
+                        self._attach_camera_audio(source, quiet=True)
 
                 frame_count += 1
                 if frame_count % 30 == 0:
@@ -2987,6 +3047,21 @@ class MedicationDetectionPipeline:
 
     def stop(self):
         self.is_running = False
+        # A conversation still open when the camera stops was a conversation
+        # that was HAPPENING, and the words are already transcribed and
+        # stored. Only the link is missing: end_session() is what copies the
+        # text onto its event row, and nothing called it when the stream
+        # dropped mid-conversation. The row then sits as 'collecting' for
+        # ever -- which is precisely the state the summariser is told to leave
+        # alone -- while the text sits in the transcripts collection with
+        # nothing pointing at it.
+        # Flushed here, before the transcriber goes away, because after
+        # that the session is gone and the text is unrecoverable.
+        try:
+            if self.close_stale_conversation(force=True):
+                print("[Pipeline] [Audio] Flushed an open conversation on shutdown")
+        except Exception as e:
+            print(f"[Pipeline] [Audio] Could not flush the open conversation: {e}")
         # Before anything else: a live InputStream holds the microphone open
         # for as long as the process lives, whatever else goes wrong below.
         try:

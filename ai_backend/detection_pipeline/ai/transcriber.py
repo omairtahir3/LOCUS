@@ -445,6 +445,46 @@ class Transcriber:
             "last_error": self.last_error,
         }
 
+    def use_stream_audio(self, url: str) -> bool:
+        """Take the conversation audio from the camera stream, and only there.
+
+        THE CAMERA\'S MICROPHONE IS THE ONLY ONE ALLOWED TO HEAR A SOCIAL
+        INTERACTION. It is the microphone in the room where the conversation is
+        actually happening, and it is the one the wearer consented to by
+        putting the camera on. The microphones on this machine and on the
+        phone belong to emergency CALLS, which are a different act with a
+        different consent: someone deliberately ringing for help, not a
+        conversation picked up in passing.
+
+        So there is no fallback here. False means the stream carries no audio,
+        and the caller must leave transcription OFF rather than listen to
+        whatever microphone happens to be nearest -- which, when the pipeline
+        runs on a laptop and the wearer is in another room, is a recording of
+        the wrong room entirely.
+        """
+        from .audio_capture import StreamAudioCapture
+        cap = StreamAudioCapture(url)
+        if not cap.start():
+            self.last_error = cap.last_error
+            return False
+        old, self.capture = self.capture, cap
+        # The placeholder this replaces was never started, so this only
+        # matters when the stream is re-opened on a reconnect.
+        old.stop()
+        return True
+
+    @property
+    def listening(self) -> bool:
+        """Whether there is live audio to transcribe from.
+
+        Asked before a conversation session is opened. A session opened
+        without this writes a row marked \'collecting\' that nothing can ever
+        fill, because the summariser is told to leave that state alone -- an
+        interaction stuck half-recorded for ever is worse than one the system
+        admits it could not hear.
+        """
+        return self.capture.available
+
     def session_open(self) -> bool:
         with self._session_lock:
             return self._session is not None
