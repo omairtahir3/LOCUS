@@ -586,6 +586,10 @@ async function checkHabitualItems(user, profile, now = new Date()) {
 // the pipeline, which owns the transcript, always gets first refusal.
 const CONVERSATION_GAP_MS = 180 * 1000;
 
+// The same clock the keyframes run on, and the same environment variable the
+// Python side reads, so the words and the picture they belong to go together.
+const TRANSCRIPT_TTL_HOURS = Number(process.env.KEYFRAME_TTL_HOURS || 36);
+
 /**
  * Close conversations the pipeline never got to finish.
  *
@@ -664,6 +668,48 @@ async function summarisePendingConversations(user, limit = 5) {
       (r.reason ? ` (${r.reason})` : ''));
   }
   return done;
+}
+
+/**
+ * Make "the transcript expires on the keyframe clock" true.
+ *
+ * It was documented in three places and implemented in none. The transcripts
+ * COLLECTION has a TTL index, so the per-window rows do age out -- but the
+ * stitched text of a whole conversation is written onto the event row by
+ * pipeline.close_stale_conversation, and an eventlog has no TTL. So the
+ * verbatim words of every conversation the camera has ever heard were sitting
+ * on those rows indefinitely, which is the opposite of what this file, the
+ * transcriber and routes/relationships all promise.
+ *
+ * The summary stays: it is the memory of the conversation. Only the recording
+ * of the words goes.
+ *
+ * Nothing is expired before it has been summarised -- 'collecting' and
+ * 'pending' are excluded -- because deleting the transcript out from under the
+ * summariser would leave a conversation that can never be summarised and whose
+ * words are gone too.
+ */
+async function expireConversationTranscripts(user, now = new Date()) {
+  const cutoff = hoursAgo(TRANSCRIPT_TTL_HOURS, now);
+  const res = await EventLog.updateMany({
+    user_id: { $in: idForms(user._id) },
+    'details.conversation.transcript': { $exists: true, $ne: '' },
+    'details.conversation.summary_status': { $nin: ['collecting', 'pending'] },
+    timestamp: { $lte: cutoff },
+  }, {
+    $set: {
+      'details.conversation.transcript': '',
+      // Recorded rather than left silent, so a reader can tell "expired" from
+      // "there was nothing to hear" -- the UI says different things about them.
+      'details.conversation.transcript_expired_at': now,
+      updatedAt: now,
+    },
+  });
+  if (res.modifiedCount) {
+    console.log(`[RoutineMonitor] expired ${res.modifiedCount} conversation transcript(s) ` +
+      `older than ${TRANSCRIPT_TTL_HOURS}h`);
+  }
+  return res.modifiedCount || 0;
 }
 
 async function checkOutdoorItemLost(user, now = new Date()) {
@@ -792,6 +838,7 @@ async function runOnce(now = new Date()) {
       // Not a finding and never an alert: it only fills in the summary of a
       // conversation that was already heard and stored.
       await summarisePendingConversations(user);
+      await expireConversationTranscripts(user, now);
     } catch (e) {
       console.error(`[RoutineMonitor] ${user.name}: ${e.message}`);
     }
@@ -833,6 +880,7 @@ function init() {
 module.exports = {
   summarisePendingConversations,
   closeStaleConversations,
+  expireConversationTranscripts,
   init, runOnce,
   checkMedicationGap, checkInactivityAndCamera, checkIdleCheckIn, checkDeviation, checkLeftBehind, checkHabitualItems,
   checkOutdoorItemLost, escalateUnacknowledgedItemLoss,

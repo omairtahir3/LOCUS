@@ -5,13 +5,13 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 ## Project Scope & Modules
 
 ### 1. Core Module: Real-Time Video Analysis & Keyframe Extraction
-* **Dynamic Keyframe Capture:** Captures keyframes (up to 10 FPS) dynamically, increasing capture rate during motion and reducing during inactivity to save bandwidth.
+* **Dynamic Keyframe Capture:** Captures keyframes (up to 5 FPS) dynamically, increasing capture rate during motion and reducing during inactivity to save bandwidth.
 * **Intelligent Event Segmentation:** Detects scene changes and action boundaries to cleanly split video streams into meaningful events (e.g., picking up keys, taking medication).
-* **Rolling Buffer:** Maintains a 5-10 second rolling buffer around events to capture the full action context rather than a single isolated frame.
+* **Rolling Buffer:** Maintains a 30 second rolling buffer around events to capture the full action context rather than a single isolated frame.
 * **Complex Activity Recognition:** Recognizes multi-frame activities such as medication intake, doorway item-checks, and social interactions.
 * **Plugin-Based Architecture:** Easily extensible AI detection pipeline allowing new detection capabilities to be added without rebuilding the core.
 * **Confidence Scoring:** Analyzes full frame buffers to score confidence, reducing single-frame false positives. Auto-logs events at ≥85%, requests user confirmation at 70-84%, and discards below 70%.
-* **Smart Storage Management:** Auto-deletes stored keyframes after 72 hours unless explicitly flagged by the user or caregiver.
+* **Smart Storage Management:** Auto-deletes stored keyframes after 36 hours unless explicitly flagged by the user or caregiver.
 * **Unified Cloud Records:** Generates and uploads structured JSON event records containing timestamps, action types, confidence scores, GPS coordinates, and keyframe IDs.
 * **Adaptive AI Learning:** Learns individual user detection patterns over time, adjusting confidence thresholds to maximize accuracy. 
 * **Outdoor Contextual Awareness:** Automatically loosens confidence thresholds when outdoors to adapt to variable lighting and busy backgrounds. Tracks items exiting the house and alerts users/caregivers if items disappear.
@@ -34,7 +34,7 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 
 ### 5. Supporting Module D: Location Safety & Emergency Response
 * **Continuous Tracking:** Safely streams GPS location to the cloud for item tracking and emergency use.
-* **'I'm Lost' Emergency Mode:** Activated via voice command or panic button, providing real-time voice-guided navigation back home.
+* **'I'm Lost' Emergency Mode:** Activated hands-free by saying "I'm lost" or via panic button, with a cancellable countdown before caregivers are alerted.
 * **Caregiver Escalation:** Instantly shares live location and opens two-way voice communication with caregivers during emergencies.
 
 ### 6. Module 6: Activity Summary & Monitoring
@@ -68,8 +68,8 @@ LOCUS is a comprehensive, AI-powered ambient intelligence ecosystem designed to 
 
 ## Architecture
 
-* **Web App (React + Node.js/Express):** Handles dashboards, RBAC, settings sync, and API routing.
-* **AI Backend (FastAPI + OpenCV + Gemini):** Executes the heavy computer vision pipeline, dynamic keyframe extraction, and anomaly detection over RTSP/WebRTC streams via MediaMTX.
+* **Web App (React + Node.js/Express):** Handles dashboards, RBAC, settings sync, API routing, and LLM-phrased notifications (Groq primary, OpenRouter failover).
+* **AI Backend (FastAPI + OpenCV + MediaPipe + ONNX Runtime):** Executes the heavy computer vision pipeline, dynamic keyframe extraction, and anomaly detection over RTSP/WebRTC streams via MediaMTX.
 * **Mobile App (Flutter):** Provides the portable companion experience, push notifications (FCM), location tracking, and emergency response capabilities.
 
 ## Getting Started

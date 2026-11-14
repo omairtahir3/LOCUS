@@ -1,4 +1,5 @@
 const express = require('express');
+const { scopedUserId } = require('../utils/scope');
 const router = express.Router();
 const EventLog = require('../models/EventLog');
 const Relationship = require('../models/Relationship');
@@ -8,13 +9,10 @@ const { protect: auth } = require('../middleware/auth');
 // GET /api/relationships
 router.get('/', auth, async (req, res) => {
   try {
-    let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      const caregiver = await User.findById(req.user.id);
-      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-        userId = caregiver.monitoring_users[0];
-      }
-    }
+    // Faces belong to one household. This ignored ?userId and always read
+    // the first person monitored, so People showed the wrong person's
+    // relatives whenever a caregiver looked after more than one.
+    const userId = await scopedUserId(req);
     const relationships = await Relationship.find({ user_id: userId }).sort({ createdAt: -1 });
     res.json(relationships);
   } catch (error) {
@@ -103,13 +101,10 @@ router.post('/confirm', auth, async (req, res) => {
     }
 
     // Determine user_id
-    let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      const caregiver = await User.findById(req.user.id);
-      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-        userId = caregiver.monitoring_users[0];
-      }
-    }
+    // Faces belong to one household. This ignored ?userId and always read
+    // the first person monitored, so People showed the wrong person's
+    // relatives whenever a caregiver looked after more than one.
+    const userId = await scopedUserId(req);
 
     if (merge_into) {
       const rel = await Relationship.findById(merge_into);

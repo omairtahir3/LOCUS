@@ -82,3 +82,16 @@ FEATURE_AUDIT.md
 PRESENTATION_60.md
 # Untouched Vite scaffold text; said nothing about this project.
 web_app/frontend/README.md
+
+# ==================== Credentials, by shape ====================
+# The exact path above already covers today's Admin SDK key. These catch the
+# next one: a key saved under a different name, or in another service's
+# folder, would otherwise be ignored by nothing at all.
+firebase-service-account.json
+**/firebase-service-account.json
+*-service-account.json
+serviceAccountKey.json
+*.pem
+*.p12
+*.jks
+*.keystore

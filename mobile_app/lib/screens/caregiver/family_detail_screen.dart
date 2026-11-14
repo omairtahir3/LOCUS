@@ -100,7 +100,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
-                          Text(email, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                          Text(email, style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                         ],
                       ),
                     ),
@@ -116,7 +116,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () => _showSendMessageSheet(context),
                       icon: const Icon(Icons.message_outlined, size: 16),
-                      label: const Text('Send Message', style: TextStyle(fontSize: 12)),
+                      label: const Text('Send Message', style: TextStyle(fontSize: 13)),
                       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                     ),
                   ),
@@ -125,7 +125,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                     child: ElevatedButton.icon(
                       onPressed: () => _requestStatusCheck(context),
                       icon: const Icon(Icons.phone_callback_outlined, size: 16),
-                      label: const Text('Status Check', style: TextStyle(fontSize: 12)),
+                      label: const Text('Status Check', style: TextStyle(fontSize: 13)),
                       style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                     ),
                   ),
@@ -231,7 +231,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Row(
@@ -248,14 +248,14 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
               children: [
                 Text(a['title'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color)),
                 const SizedBox(height: 2),
-                Text(a['message'] ?? '', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                Text(a['message'] ?? '', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
               ],
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
-            child: Text(severity.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color)),
+            child: Text(severity.toUpperCase(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
           ),
         ],
       ),
@@ -297,7 +297,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
         color: classification == 'auto_verified'
             ? AppColors.successLight
             : AppColors.dangerLight,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
@@ -319,7 +319,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                 Text(ev['medication_name'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 Text(
                   '${ev['dosage'] ?? ''} • ${_formatTime(ev['scheduled_time'])}',
-                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                 ),
               ],
             ),
@@ -331,10 +331,10 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(color: classColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
-                child: Text(classLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: classColor)),
+                child: Text(classLabel, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: classColor)),
               ),
               const SizedBox(height: 4),
-              Text(actionLabel, style: TextStyle(fontSize: 9, color: AppColors.textMuted)),
+              Text(actionLabel, style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ],
           ),
         ],
@@ -356,7 +356,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
             child: const Icon(Icons.warning_amber, size: 16, color: AppColors.danger),
           ),
           const SizedBox(width: 12),
@@ -365,8 +365,8 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(a['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                Text(a['message'] ?? '', style: TextStyle(fontSize: 11, color: AppColors.textSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
-                Text(_formatTime(a['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                Text(a['message'] ?? '', style: TextStyle(fontSize: 13, color: AppColors.textSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(_formatTime(a['createdAt']), style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
               ],
             ),
           ),
@@ -390,7 +390,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(10)),
                 child: Icon(Icons.medication, size: 18, color: AppColors.primary),
               ),
               const SizedBox(width: 14),
@@ -399,7 +399,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(s['medication_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    Text('${s['dosage'] ?? ''} • ${s['scheduled_time'] ?? ''}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                    Text('${s['dosage'] ?? ''} • ${s['scheduled_time'] ?? ''}', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                   ],
                 ),
               ),
@@ -416,11 +416,11 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                     child: ElevatedButton.icon(
                       onPressed: () => _caregiverMarkTaken(s),
                       icon: const Icon(Icons.check_circle, size: 14),
-                      label: const Text('Mark Taken', style: TextStyle(fontSize: 11)),
+                      label: const Text('Mark Taken', style: TextStyle(fontSize: 13)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.success,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                       ),
                     ),
@@ -434,12 +434,12 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                       child: OutlinedButton.icon(
                         onPressed: () => _caregiverReschedule(s),
                         icon: const Icon(Icons.schedule, size: 14),
-                        label: const Text('Reschedule', style: TextStyle(fontSize: 11)),
+                        label: const Text('Reschedule', style: TextStyle(fontSize: 13)),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF92400E),
                           side: const BorderSide(color: Color(0xFFFDE68A)),
                           backgroundColor: const Color(0xFFFEF3C7),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
                       ),
@@ -523,14 +523,14 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
                   h['medication_name'] ?? (h['medication_id'] is Map ? h['medication_id']['name'] : null) ?? '—',
                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                 ),
-                Text(_formatTime(h['scheduled_time'] ?? h['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                Text(_formatTime(h['scheduled_time'] ?? h['createdAt']), style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
               ],
             ),
           ),
           if (confidence != null)
             Padding(
               padding: const EdgeInsets.only(right: 10),
-              child: Text('${((confidence as num) * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              child: Text('${((confidence as num) * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ),
           _statusChip(h['status'] ?? 'scheduled'),
         ],
@@ -571,18 +571,18 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          const Text('Configure your camera (e.g. OBS/GoPro) to stream to:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          const Text('Configure your camera (e.g. OBS/GoPro) to stream to:', style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
                 Expanded(
-                  child: Text(rtmpUrl, style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace')),
+                  child: Text(rtmpUrl, style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'monospace')),
                 ),
                 GestureDetector(
                   onTap: () {
@@ -604,7 +604,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        Text(subtitle ?? '', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+        Text(subtitle ?? '', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
       ],
     );
   }
@@ -675,7 +675,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
         child: Column(
           children: [
             Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
-            Text(label, style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+            Text(label, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           ],
         ),
       ),
@@ -688,7 +688,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(color: c.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-      child: Text(status.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c)),
+      child: Text(status.toUpperCase(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c)),
     );
   }
 
@@ -696,7 +696,7 @@ class _FamilyDetailScreenState extends State<FamilyDetailScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
       child: Column(
         children: [
           Icon(icon, size: 36, color: AppColors.textMuted),

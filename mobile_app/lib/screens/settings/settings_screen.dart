@@ -54,7 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Text(
                 'The computer running LOCUS, on this wifi. Find it with ipconfig. '
                 'It changes whenever the router hands out a new lease.',
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -68,7 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text(
                     status!,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: status!.startsWith('Reachable') ? AppColors.success : AppColors.danger,
                     ),
@@ -151,14 +151,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                      Text(email, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                      Text(email, style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                         decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(20)),
                         child: Text(
                           role == 'caregiver' ? 'Family Member' : role == 'elderly' ? 'Elderly User' : 'Normal User',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.primaryDark),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.primaryDark),
                         ),
                       ),
                     ],
@@ -224,7 +224,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: const Icon(Icons.dns_outlined, color: AppColors.primary),
               title: const Text('Server address', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(ApiService.baseUrl, style: const TextStyle(fontSize: 12)),
+              subtitle: Text(ApiService.baseUrl, style: const TextStyle(fontSize: 13)),
               trailing: const Icon(Icons.chevron_right),
               onTap: _editServer,
             ),
@@ -238,7 +238,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: const Icon(Icons.inventory_2_outlined, color: AppColors.primary),
               title: const Text('Personal Belongings', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Enroll & manage items for AI visual tracking', style: TextStyle(fontSize: 12)),
+              subtitle: const Text('Enroll & manage items for AI visual tracking', style: TextStyle(fontSize: 13)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.pushNamed(context, '/my-items');
@@ -253,7 +253,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: ListTile(
                 leading: const Icon(Icons.people, color: AppColors.primary),
                 title: const Text('Manage Relationships', style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text('Merge duplicates or review faces', style: TextStyle(fontSize: 12)),
+                subtitle: const Text('Merge duplicates or review faces', style: TextStyle(fontSize: 13)),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pushNamed(context, '/relationships-manage');
@@ -281,7 +281,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     user?['home_location'] != null 
                       ? 'Saved Location: ${user!['home_location']['lat'].toStringAsFixed(4)}, ${user!['home_location']['lng'].toStringAsFixed(4)}'
                       : 'No home location saved. Needed for "Take Me Home" feature.',
-                    style: TextStyle(fontSize: 12, color: AppColors.textMuted)
+                    style: TextStyle(fontSize: 13, color: AppColors.textMuted)
                   ),
                   const SizedBox(height: 14),
                   SizedBox(
@@ -369,7 +369,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                Text(desc, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                Text(desc, style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
               ],
             ),
           ),
@@ -437,7 +437,7 @@ class _LinkCaregiverSectionState extends State<_LinkCaregiverSection> {
             const Text('Link a Caregiver', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
           ]),
           const SizedBox(height: 8),
-          Text('Enter your family member\'s email to let them monitor your medication and activities.', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          Text('Enter your family member\'s email to let them monitor your medication and activities.', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -462,9 +462,9 @@ class _LinkCaregiverSectionState extends State<_LinkCaregiverSection> {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: _success ? AppColors.success.withValues(alpha: 0.1) : AppColors.danger.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(_message!, style: TextStyle(fontSize: 12, color: _success ? AppColors.success : AppColors.danger)),
+              child: Text(_message!, style: TextStyle(fontSize: 13, color: _success ? AppColors.success : AppColors.danger)),
             ),
           ],
         ],

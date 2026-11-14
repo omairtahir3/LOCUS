@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -44,21 +45,44 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void initState() {
     super.initState();
     _loadNotifs();
+    // Live, rather than only when this screen is opened or dragged down.
+    //
+    // This list was read once in initState and then never again, and the
+    // server emitted nothing, so a message a caregiver sent from the family
+    // page arrived in the database and stopped there. From the sender's side
+    // it looked like the send had failed. The server now emits
+    // notification:new into the recipient's room as it writes the row.
+    SocketService().on('notification:new', _onIncoming);
+  }
+
+  @override
+  void dispose() {
+    SocketService().off('notification:new', _onIncoming);
+    super.dispose();
+  }
+
+  /// Registered through SocketService rather than on the socket object, so it
+  /// survives the socket being rebuilt when the address or the account
+  /// changes. See the handler registry in socket_service.dart.
+  void _onIncoming(dynamic _) {
+    if (mounted) _loadNotifs();
   }
 
   Future<void> _loadNotifs() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final data = await ApiService.getNotificationsData(
         limit: 50,
         unreadOnly: _filter == 'unread',
       );
+      if (!mounted) return;
       setState(() {
         _notifications = data['notifications'] ?? [];
         _unreadCount = data['unread_count'] ?? 0;
       });
     } catch (_) {} finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -167,7 +191,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   runSpacing: 4,
                   children: [
                     InkWell(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       onTap: () async {
                         await ApiService.markAllNotificationsRead();
                         _loadNotifs();
@@ -176,34 +200,34 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                         decoration: BoxDecoration(
                           color: AppColors.primary.withAlpha(20),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: const [
                             Icon(Icons.done_all, size: 14, color: AppColors.primary),
                             SizedBox(width: 4),
-                            Text('Mark Read', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                            Text('Mark Read', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
                           ],
                         ),
                       ),
                     ),
                     if (_notifications.isNotEmpty)
                       InkWell(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         onTap: _clearAllNotifs,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                           decoration: BoxDecoration(
                             color: AppColors.danger.withAlpha(20),
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: const [
                               Icon(Icons.delete_sweep_outlined, size: 14, color: AppColors.danger),
                               SizedBox(width: 4),
-                              Text('Clear All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.danger)),
+                              Text('Clear All', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.danger)),
                             ],
                           ),
                         ),
@@ -232,7 +256,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       },
                       selectedColor: AppColors.primaryLight,
                       labelStyle: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: isSelected ? AppColors.primary : AppColors.textSecondary,
                       ),
@@ -256,7 +280,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   const SizedBox(height: 12),
                   Text('No notifications', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
-                  Text("You're all caught up!", style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  Text("You're all caught up!", style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                 ]),
               )
             else
@@ -298,15 +322,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: (cfg['bg'] as Color),
-                                      borderRadius: BorderRadius.circular(8),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
-                                    child: Text(cfg['label'] as String, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: cfg['color'] as Color)),
+                                    child: Text(cfg['label'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cfg['color'] as Color)),
                                   ),
                                 ]),
                                 const SizedBox(height: 4),
-                                Text(n['message'] ?? '', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                Text(n['message'] ?? '', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                                 const SizedBox(height: 4),
-                                Text(_formatTime(n['createdAt']), style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                                Text(_formatTime(n['createdAt']), style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                                 if (n['escalated'] == true) ...[
                                   const SizedBox(height: 4),
                                   Container(
@@ -317,7 +341,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                       children: [
                                         Icon(Icons.warning_amber_rounded, size: 12, color: Colors.white),
                                         SizedBox(width: 4),
-                                        Text('ESCALATED', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+                                        Text('ESCALATED', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                                       ],
                                     ),
                                   ),
@@ -335,7 +359,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                             _loadNotifs();
                                           },
                                           icon: const Icon(Icons.check_circle, size: 12),
-                                          label: const Text('Take', style: TextStyle(fontSize: 10)),
+                                          label: const Text('Take', style: TextStyle(fontSize: 13)),
                                           style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(60, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
                                         ),
                                       OutlinedButton.icon(
@@ -344,7 +368,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                           _loadNotifs();
                                         },
                                         icon: const Icon(Icons.snooze, size: 12),
-                                        label: const Text('Snooze 10m', style: TextStyle(fontSize: 10)),
+                                        label: const Text('Snooze 10m', style: TextStyle(fontSize: 13)),
                                         style: OutlinedButton.styleFrom(minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
                                       ),
                                     ],
@@ -362,7 +386,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                           _loadNotifs();
                                         },
                                         icon: const Icon(Icons.thumb_up_alt_outlined, size: 12),
-                                        label: const Text("I'm Okay", style: TextStyle(fontSize: 10)),
+                                        label: const Text("I'm Okay", style: TextStyle(fontSize: 13)),
                                         style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
                                       ),
                                       OutlinedButton.icon(
@@ -371,7 +395,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                           _loadNotifs();
                                         },
                                         icon: const Icon(Icons.phone_outlined, size: 12),
-                                        label: const Text("Please Call Me", style: TextStyle(fontSize: 10)),
+                                        label: const Text("Please Call Me", style: TextStyle(fontSize: 13)),
                                         style: OutlinedButton.styleFrom(minimumSize: const Size(70, 26), padding: const EdgeInsets.symmetric(horizontal: 8)),
                                       ),
                                     ],
@@ -405,7 +429,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     minimumSize: Size.zero,
                                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
-                                  child: const Text('Ack', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
+                                  child: const Text('Ack', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                                 ),
                               IconButton(
                                 icon: Icon(Icons.delete_outline, size: 16, color: AppColors.textMuted),

@@ -3,16 +3,18 @@ import { notificationAPI, userAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Bell, Pill, AlertTriangle, CheckCircle, Check, Trash2, Filter, Clock, MessageSquare, Mail, ThumbsUp, Phone } from 'lucide-react';
 import { formatSmartDate } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
 
 const typeConfig = {
-  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger)',  label: 'Missed Dose' },
+  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger-text)',  label: 'Missed Dose' },
   camera_off_alert:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706',        label: 'Camera Off' },
   skipped_medicine:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706',        label: 'Camera Off' },
-  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success)', label: 'Dose Confirmed' },
+  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success-text)', label: 'Dose Confirmed' },
   dose_reminder:     { icon: Bell,  bg: 'var(--info-light)',    color: 'var(--info)',    label: 'Reminder' },
-  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning)', label: 'Emergency' },
+  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning-text)', label: 'Emergency' },
   status_check:      { icon: Bell,  bg: 'var(--accent-light)',  color: 'var(--accent)',  label: 'Status Check' },
-  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary)', label: 'Message' },
+  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary-text)', label: 'Message' },
   system:            { icon: Bell,  bg: 'var(--surface-hover)', color: 'var(--text-secondary)', label: 'System' },
 };
 
@@ -76,17 +78,15 @@ export default function Notifications() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">Notifications</h2>
-          <p className="page-description">{unreadCount} unread notifications</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <PageHeader
+        title="Notifications"
+        description={`${unreadCount} unread`}
+        actions={
           <button className="btn btn-secondary btn-sm" onClick={markAllRead}>
             <Check size={14} /> Mark All Read
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Filter tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -110,7 +110,7 @@ export default function Notifications() {
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
-          <div className="empty-state"><p>Loading notifications...</p></div>
+          <Loading rows={4} label="Loading notifications" />
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <Bell size={48} />

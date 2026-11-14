@@ -67,12 +67,19 @@ class ApiService {
       if (!RegExp(r':\d+').hasMatch(v.split('//').last)) v = '$v:5000';
       if (!v.endsWith('/api')) v = '$v/api';
     }
+    final moved = _serverOverride != (v.isEmpty ? null : v);
     _serverOverride = v.isEmpty ? null : v;
     if (v.isEmpty) {
       await _prefs.remove('locus_server_url');
     } else {
       await _prefs.setString('locus_server_url', v);
     }
+    // HTTP picks the new address up by itself, because every request reads
+    // baseUrl again. The socket does not: it was built against the old one and
+    // keeps trying it forever. Telling it here is what makes discovery -- which
+    // runs in the background, after the home screen already opened a socket --
+    // actually repair chats and calls rather than only the screens.
+    if (moved) SocketService().rebindIfMoved();
   }
 
   /// Does this address actually answer? Used by the settings screen so somebody
@@ -862,9 +869,65 @@ class ApiService {
     return null;
   }
 
-  static Future<List<dynamic>> getEventLogKeyframes({int limit = 50, String type = ''}) async {
+  /// Where each belonging was last seen, in one call.
+  ///
+  /// GET /user-items/last-seen, the same endpoint the web dashboard's
+  /// Belongings card reads. /user-items alone returns the enrolment list,
+  /// which cannot answer "where is it now".
+  static Future<List<dynamic>> getItemsLastSeen({String? userId}) async {
     final res = await http.get(
-      Uri.parse('$baseUrl/event-logs/keyframes?limit=$limit&type=$type'),
+      Uri.parse('$baseUrl/user-items/last-seen'
+          '${userId == null ? '' : '?user_id=$userId'}'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data is Map && data['items'] is List) return data['items'] as List;
+      if (data is List) return data;
+    }
+    return [];
+  }
+
+  /// What the camera heard today, summarised.
+  ///
+  /// Its own request rather than read off the timeline, for the reason the
+  /// web gives: the card needs each conversation's event id to be able to ask
+  /// for the words.
+  static Future<List<dynamic>> getConversations({String? userId}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/event-logs/conversations'
+          '${userId == null ? '' : '?userId=$userId'}'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data is Map && data['conversations'] is List) {
+        return data['conversations'] as List;
+      }
+      if (data is List) return data;
+    }
+    return [];
+  }
+
+  /// The last GPS fix. Used for the Home/Away pill and the caregiver's
+  /// Location card.
+  static Future<Map<String, dynamic>?> getLatestLocation({String? userId}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/location/latest'
+          '${userId == null ? '' : '?user_id=$userId'}'),
+      headers: _headers,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data is Map<String, dynamic> ? data : null;
+    }
+    return null;
+  }
+
+  static Future<List<dynamic>> getEventLogKeyframes({int limit = 50, String type = '', String? userId}) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/event-logs/keyframes?limit=$limit&type=$type'
+          '${userId != null ? '&userId=$userId' : ''}'),
       headers: _headers,
     );
     if (res.statusCode == 200) {
@@ -910,8 +973,9 @@ class ApiService {
     return {'statusCode': res.statusCode, 'data': jsonDecode(res.body)};
   }
 
-  static Future<Map<String, dynamic>> getAllRelationships() async {
-    final res = await http.get(Uri.parse('$baseUrl/relationships'), headers: _headers);
+  static Future<Map<String, dynamic>> getAllRelationships({String? userId}) async {
+    final query = userId != null ? '?userId=$userId' : '';
+    final res = await http.get(Uri.parse('$baseUrl/relationships$query'), headers: _headers);
     if (res.statusCode == 200) {
       return {'statusCode': 200, 'data': jsonDecode(res.body)};
     }
@@ -992,9 +1056,38 @@ class ApiService {
 
   // ── User Items / Exemplar Gallery ─────────────────────────────────────────
 
-  static Future<List<dynamic>> getUserItems() async {
+  /// Re-read this account from the server and keep the cached copy in step.
+  ///
+  /// The stored user is written once at sign-in and then never refreshed, so
+  /// every field on it ages -- including emergency_status, which decides
+  /// whether the wearer's screen is showing a red EMERGENCY ACTIVE panel.
+  /// Returns null if the request fails, so a caller can tell "no answer"
+  /// apart from "answered false".
+  static Future<Map<String, dynamic>?> refreshMe() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/user-items'), headers: _headers);
+      final res = await http
+          .get(Uri.parse('$baseUrl/auth/me'), headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final body = jsonDecode(res.body);
+      final me = body['user'] is Map
+          ? Map<String, dynamic>.from(body['user'])
+          : Map<String, dynamic>.from(body);
+      _user = me;
+      await _prefs.setString('locus_user', jsonEncode(me));
+      return me;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<List<dynamic>> getUserItems({String? userId}) async {
+    try {
+      // Scoped like every sibling call. Without the id the server fell back to
+      // the caregiver's FIRST monitored person, so the belongings card could
+      // describe someone other than the person whose day was on screen.
+      final query = userId != null ? '?userId=$userId' : '';
+      final res = await http.get(Uri.parse('$baseUrl/user-items$query'), headers: _headers);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return data is List ? data : [];

@@ -78,6 +78,37 @@ module.exports = {
           
           if (!recipient_id || !text) return;
 
+          // The same gate the call path has always had, and chat never did.
+          //
+          // Two bugs lived in its absence. A message addressed to the sender
+          // themselves was stored and then delivered TWICE to the one client
+          // -- once through the recipient's room, once as the sender's
+          // confirmation -- which is why every message appeared in the thread
+          // twice and looked as though it had come from the other side.
+          // canSpeakTo refuses an id equal to the sender's, so that cannot be
+          // stored at all now.
+          //
+          // The second was quieter: any signed-in account could write a
+          // message into any other account's thread, because nothing here
+          // checked that the two were linked. The call path refuses an
+          // unlinked pair; there was no reason chat should not.
+          if (!(await canSpeakTo(socket.user, String(recipient_id)))) {
+            console.warn(
+              `[Socket] chat refused: ${socket.user.name} (${socket.user._id}, ` +
+              `role=${socket.user.role}) -> ${recipient_id}` +
+              (String(socket.user._id) === String(recipient_id)
+                ? ' (addressed to themselves)' : ' (not linked)')
+            );
+            // Said out loud rather than dropped, so the client can show it.
+            // A message that silently never arrives is the worst of the three
+            // outcomes here.
+            return socket.emit('chat_error', {
+              recipient_id: String(recipient_id),
+              reason: String(socket.user._id) === String(recipient_id)
+                ? 'self' : 'not_permitted',
+            });
+          }
+
           // Save to database
           const message = new Message({
             sender_id: socket.user._id,
@@ -98,7 +129,13 @@ module.exports = {
             await createNotification({
               recipientId: recipient_id,
               subjectUserId: socket.user._id,
-              type: is_emergency_related ? 'escalated' : 'caregiver_message',
+              // 'emergency', not 'escalated'. The latter is not in the
+              // Notification type enum, so every urgent message sent during an
+              // SOS threw a validation error inside the socket handler and the
+              // caregiver was never told. The chat message itself still went
+              // out over the socket, which is why this looked like nothing
+              // rather than like a failure.
+              type: is_emergency_related ? 'emergency' : 'caregiver_message',
               title: is_emergency_related 
                 ? `URGENT MESSAGE from ${socket.user.name}` 
                 : `New Message from ${socket.user.name}`,

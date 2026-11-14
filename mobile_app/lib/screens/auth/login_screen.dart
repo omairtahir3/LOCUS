@@ -70,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 20),
               if (picture != null && picture.isNotEmpty)
                 ClipOval(
@@ -141,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.grey[100],
+                color: isSelected ? AppColors.primary.withOpacity(0.15) : AppColors.surface2,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: isSelected ? AppColors.primary : AppColors.textSecondary, size: 24),
@@ -153,7 +153,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: isSelected ? AppColors.primaryDark : AppColors.textPrimary)),
                   const SizedBox(height: 2),
-                  Text(desc, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  Text(desc, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -220,12 +220,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.green)),
+                      decoration: BoxDecoration(color: AppColors.successLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.success)),
                       child: Row(
                         children: [
-                          const Icon(Icons.check_circle_outline, color: Colors.green, size: 20),
+                          const Icon(Icons.check_circle_outline, color: AppColors.success, size: 20),
                           const SizedBox(width: 8),
-                          Expanded(child: Text(forgotMsg!, style: const TextStyle(color: Colors.green, fontSize: 13))),
+                          Expanded(child: Text(forgotMsg!, style: const TextStyle(color: AppColors.success, fontSize: 13))),
                         ],
                       ),
                     ),
@@ -363,11 +363,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: _loading ? null : _handleGoogleSignIn,
-                    icon: const Icon(Icons.g_mobiledata, size: 28, color: Colors.red),
-                    label: const Text('Continue with Google', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+                    icon: const Icon(Icons.g_mobiledata, size: 28, color: AppColors.danger),
+                    label: const Text('Continue with Google', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: Colors.grey),
+                      side: const BorderSide(color: AppColors.border),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),

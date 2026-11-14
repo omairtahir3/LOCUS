@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/day_summary.dart';
 import '../chat/chat_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
@@ -13,7 +14,6 @@ import '../../services/location_service.dart';
 import '../../services/step_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/voice_call_service.dart';
-import '../caregiver/location_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   /// Whether this is the tab the person is actually looking at. The shell
@@ -28,9 +28,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  Map<String, dynamic>? _summary;
-  List<dynamic> _schedule = [];
-  bool _loading = true;
   bool _isEmergencyActive = false;
 
   Timer? _refreshTimer;
@@ -106,22 +103,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void reload() => _loadData();
 
-  String _formatTime12h(String? timeStr) {
-    if (timeStr == null || timeStr.isEmpty) return '';
-    try {
-      final parts = timeStr.split(':');
-      if (parts.length < 2) return timeStr;
-      int hour = int.parse(parts[0]);
-      int minute = int.parse(parts[1]);
-      final ampm = hour >= 12 ? 'PM' : 'AM';
-      if (hour == 0) hour = 12;
-      else if (hour > 12) hour -= 12;
-      return '$hour:${minute.toString().padLeft(2, '0')} $ampm';
-    } catch (_) {
-      return timeStr;
-    }
-  }
-
   @override
   void dispose() {
     _refreshTimer?.cancel();
@@ -140,6 +121,23 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // screen, and not one anybody agreed to.
     if (state == AppLifecycleState.resumed) {
       if (_voiceArmed) _listenForSos();
+      // And put the socket back up.
+      //
+      // Android suspends an app's network while the screen is off, so the
+      // socket dies in the background -- the device log shows exactly that:
+      // "[Socket] Could not connect: timeout", repeatedly, and then nothing.
+      // socket_io_client does retry, but it backs off, so a phone that has
+      // been asleep for a while can come back to a connection that will not
+      // be re-attempted for a long time. By then calls do not ring and the
+      // live map does not move, while anything fetched over plain HTTP still
+      // works -- which is why this reads as "messages arrive but calls do
+      // not" rather than as a network problem.
+      //
+      // connect() goes through init(), which is idempotent and rebuilds only
+      // if the token or the address has changed, so this is cheap when the
+      // socket is already healthy.
+      SocketService().connect();
+      _loadData();
     } else {
       _speech.stop();
       if (mounted) setState(() => _hearing = false);
@@ -285,17 +283,36 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _raiseEmergency() async {
     // One path for both ways of asking for help, so the spoken route cannot
     // drift from the button route.
+    //
+    // THE ALERT GOES OUT WHETHER OR NOT THERE IS A FIX. This used to return
+    // early when getCurrentPosition() came back null -- indoors, with a cold
+    // GPS, or with location switched off -- so pressing "I'm lost" raised
+    // nothing at all and showed a toast to the one person who already knew
+    // they were lost. Nobody was told. A position is what the caregiver wants
+    // second; being told at all is what they need first, and the server fills
+    // the position in from the last fix the phone reported.
     try {
-      final pos = await LocationService().getCurrentPosition();
-      if (pos == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not acquire location')));
+      double? lat, lng;
+      try {
+        final pos = await LocationService().getCurrentPosition();
+        if (pos != null) {
+          lat = pos.latitude;
+          lng = pos.longitude;
         }
-        return;
+      } catch (_) {
+        // A location failure must not take the emergency with it.
       }
-      await ApiService.triggerEmergency(pos.latitude, pos.longitude);
-      if (mounted) setState(() => _isEmergencyActive = true);
+      await ApiService.triggerEmergencySos(lat: lat, lng: lng);
+      if (mounted) {
+        setState(() => _isEmergencyActive = true);
+        if (lat == null) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Help has been called. Your last known position '
+                'was sent, because there is no GPS signal right now.'),
+            duration: Duration(seconds: 6),
+          ));
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -319,105 +336,52 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Refreshing this screen means refreshing the day, which DaySummary owns.
+  /// The ten-second timer and the pull-to-refresh both come through here, so
+  /// there is one path to a reload rather than two that can disagree.
   Future<void> _loadData() async {
-    try {
-      final results = await Future.wait([
-        ApiService.getAdherenceSummary(),
-        ApiService.getSchedule(),
-      ]);
-      if (mounted) {
-        setState(() {
-          _summary = results[0] as Map<String, dynamic>;
-          _schedule = results[1] as List<dynamic>;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
+    await _bento.currentState?.load();
+
+    // And whether this person is actually in an emergency.
+    //
+    // _isEmergencyActive was set when they pressed the button and cleared only
+    // by the sos_resolved event. A client that missed that event -- backgrounded,
+    // socket down, app restarted -- kept the red panel up forever, saying
+    // EMERGENCY ACTIVE about an emergency a caregiver had already resolved.
+    // This runs on the same ten-second refresh the rest of the page uses, so a
+    // missed event now costs ten seconds instead of the whole session.
+    //
+    // Only ever used to CLEAR a stale flag, never to raise one: a raise is a
+    // decision the person makes here, and _raiseEmergency owns it.
+    final me = await ApiService.refreshMe();
+    if (!mounted || me == null) return;
+    if (_isEmergencyActive && me['emergency_status'] != true) {
+      setState(() => _isEmergencyActive = false);
     }
   }
 
+  /// The day, from the shared widget both dashboards use. The camera banner
+  /// and the SOS control are slotted in above the cards: they are the two
+  /// things on a wearer's screen that cannot wait behind a scroll.
+  final GlobalKey<DaySummaryState> _bento = GlobalKey<DaySummaryState>();
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final greeting = now.hour < 12 ? 'Good Morning' : now.hour < 17 ? 'Good Afternoon' : 'Good Evening';
-    final firstName = (ApiService.user?['name'] ?? '').toString().split(' ').first;
-    final greetingText = firstName.isNotEmpty ? '$greeting $firstName' : greeting;
-
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: () async {
+        await _loadData();
+        await _bento.currentState?.load();
+      },
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Greeting
-            Text(greetingText, style: TextStyle(fontSize: 14, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 2),
-            Text('Dashboard', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 24),
-
-            // AI Camera Banner
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        child: DaySummary(
+          key: _bento,
+          isElderly: _isElderly,
+          isMonitoredUser: _isMonitoredUser,
+          beforeCards: [
             _buildRtmpBanner(),
-            const SizedBox(height: 20),
-            
-            if (_isElderly)
-              _buildSOSSection(),
-            if (_isElderly)
-              const SizedBox(height: 20),
-
-            if (!_isMonitoredUser)
-              _buildCaregiverLocationCard(),
-            if (!_isMonitoredUser)
-              const SizedBox(height: 20),
-
-            // Stats cards
-            _buildStatCards(),
-            const SizedBox(height: 20),
-
-            // Upcoming dose
-            _buildUpcomingDose(),
-            const SizedBox(height: 20),
-
-            // Today's schedule
-            _buildScheduleSection(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCaregiverLocationCard() {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const LocationMapScreen()));
-      },
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.primary.withAlpha(50)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppColors.primary.withAlpha(25), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.map, color: AppColors.primary, size: 28),
-            ),
-            const SizedBox(width: 16),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Live Location Map', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  Text('Track family member location', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            if (_isElderly) _buildSOSSection(),
           ],
         ),
       ),
@@ -603,14 +567,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Row(
       children: [
         Icon(_hearing ? Icons.mic : Icons.mic_none,
-            size: 20, color: _hearing ? AppColors.danger : Colors.black54),
+            size: 20, color: _hearing ? AppColors.danger : AppColors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
           child: Text(label,
               style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: _hearing ? AppColors.danger : Colors.black54)),
+                  color: _hearing ? AppColors.danger : AppColors.textSecondary)),
         ),
         Switch(
           value: _voiceArmed,
@@ -651,18 +615,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 12),
-          const Text('Configure your camera (e.g. OBS/GoPro) to stream to:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          const Text('Configure your camera (e.g. OBS/GoPro) to stream to:', style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
                 Expanded(
-                  child: Text(rtmpUrl, style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace')),
+                  child: Text(rtmpUrl, style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'monospace')),
                 ),
                 GestureDetector(
                   onTap: () {
@@ -679,341 +643,4 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildStatCards() {
-    final taken = _summary?['taken'] ?? _summary?['counts']?['taken'] ?? 0;
-    final missed = _summary?['missed'] ?? _summary?['counts']?['missed'] ?? 0;
-    final skipped = _summary?['skipped'] ?? _summary?['counts']?['skipped'] ?? 0;
-    final adherence = _summary?['adherence_percentage'] ?? 0;
-
-    return Row(
-      children: [
-        _statCard('Taken', '$taken', AppColors.success, Icons.check_circle_outline),
-        const SizedBox(width: 6),
-        _statCard('Missed', '$missed', AppColors.danger, Icons.cancel_outlined),
-        const SizedBox(width: 6),
-        _statCard('Skipped', '$skipped', AppColors.warning, Icons.warning_amber_outlined),
-        const SizedBox(width: 6),
-        _statCard('Target', '${adherence is num ? adherence.toStringAsFixed(0) : adherence}%', AppColors.primary, Icons.analytics_outlined),
-      ],
-    );
-  }
-
-  Widget _statCard(String label, String value, Color color, IconData icon) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withAlpha(25),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, size: 18, color: color),
-            ),
-            const SizedBox(height: 10),
-            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            Text(label, style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUpcomingDose() {
-    final upcoming = _schedule.where((s) => s['status'] == 'scheduled' || s['status'] == 'pending').toList();
-
-    if (upcoming.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryDark]),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.white, size: 32),
-            SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("You're all caught up!", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
-                  Text('No pending medications', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final next = upcoming.first;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryDark]),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.white.withAlpha(40), borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.medication_outlined, color: Colors.white, size: 28),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Next Dose', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(next['medication_name'] ?? 'Medication', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 17))),
-                FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('${next['dosage'] ?? ''} • ${_formatTime12h(next['scheduled_time'] as String?)}', style: const TextStyle(color: Colors.white70, fontSize: 13))),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-            child: Text(_formatTime12h(next['scheduled_time'] as String?), style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 14)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScheduleSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Today's Schedule", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 12),
-        if (_loading)
-          const Center(child: CircularProgressIndicator())
-        else if (_schedule.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: AppColors.surface, borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.medication_outlined, size: 40, color: AppColors.textMuted),
-                const SizedBox(height: 8),
-                Text('No medications today', style: TextStyle(color: AppColors.textSecondary)),
-              ],
-            ),
-          )
-        else
-          ...List.generate(_schedule.length, (i) {
-            final dose = _schedule[i];
-            return _doseCard(dose);
-          }),
-      ],
-    );
-  }
-
-  Widget _doseCard(Map<String, dynamic> dose) {
-    final status = dose['status'] ?? 'scheduled';
-    Color statusColor;
-    IconData statusIcon;
-    switch (status) {
-      case 'taken':   statusColor = AppColors.success; statusIcon = Icons.check_circle; break;
-      case 'missed':  statusColor = AppColors.danger; statusIcon = Icons.cancel; break;
-      case 'snoozed': statusColor = AppColors.warning; statusIcon = Icons.snooze; break;
-      default:        statusColor = AppColors.textMuted; statusIcon = Icons.schedule; break;
-    }
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-            child: Icon(Icons.medication_outlined, color: statusColor, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          dose['medication_name'] ?? 'Medication', 
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (status == 'needs_verification')
-                      _isMonitoredUser
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
-                                const SizedBox(width: 4),
-                                Text('AWAITING CAREGIVER', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w800)),
-                              ],
-                            ),
-                          )
-                        : Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              GestureDetector(
-                                onTap: () => _logDose(dose, 'taken'),
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                                  child: const Icon(Icons.check, color: AppColors.success, size: 16),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: () => _logDose(dose, 'scheduled'),
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(color: AppColors.danger.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                                  child: const Icon(Icons.close, color: AppColors.danger, size: 16),
-                                ),
-                              ),
-                            ],
-                          )
-                    else if (status == 'scheduled' || status == 'pending' || status == 'snoozed')
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (!_isMonitoredUser) ...[
-                            GestureDetector(
-                              onTap: () => _logDose(dose, 'taken'),
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(color: AppColors.success.withAlpha(25), borderRadius: BorderRadius.circular(6)),
-                                child: const Icon(Icons.check, color: AppColors.success, size: 16),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                          ],
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(6)),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(statusIcon, size: 12, color: statusColor),
-                                const SizedBox(width: 4),
-                                Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () async {
-                              try {
-                                final logId = dose['_id'] ?? dose['id'];
-                                if (logId != null) {
-                                  await ApiService.snoozeLog(logId.toString(), minutes: 10);
-                                  _loadData();
-                                }
-                              } catch (_) {
-                                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to snooze')));
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(color: AppColors.warning.withAlpha(25), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppColors.warning.withAlpha(80))),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.snooze, size: 12, color: AppColors.warning),
-                                  const SizedBox(width: 4),
-                                  Text('SNOOZE', style: TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.w700)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    else
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: statusColor.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon, size: 14, color: statusColor),
-                            const SizedBox(width: 4),
-                            Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${dose['dosage'] ?? ''} • ${_formatTime12h(dose['scheduled_time'] as String?)}', 
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500)
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _logDose(Map<String, dynamic> dose, String status) async {
-    try {
-      final timeParts = (dose['scheduled_time'] as String).split(':');
-      final now = DateTime.now();
-      final dt = DateTime(now.year, now.month, now.day, int.parse(timeParts[0]), int.parse(timeParts[1]));
-      
-      await ApiService.recordDose(
-        dose['medication_id'] ?? dose['_id'], 
-        status,
-        dt.toIso8601String()
-      );
-      _loadData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Dose marked as $status'), backgroundColor: AppColors.primary),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger),
-        );
-      }
-    }
-  }
 }

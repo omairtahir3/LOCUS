@@ -1,0 +1,219 @@
+/* Sign-in, sign-up and reset pages. Light theme, landing tokens: the same
+   aurora background, Space Grotesk headings, DM Sans body, teal actions.
+   Inputs are 56px tall with 17px text; focus is a 3px teal ring. */
+
+.auth {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  color: var(--lc-text);
+  font-family: var(--lc-font-body);
+  font-size: 1.07rem;
+  line-height: 1.5;
+}
+.auth > main { position: relative; z-index: 1; }
+.auth :focus-visible { outline: 3px solid var(--lc-focus); outline-offset: 3px; }
+
+.auth-logo { display: inline-flex; min-height: var(--lc-tap); align-items: center; margin-bottom: 20px; border-radius: 8px; }
+.auth-logo img { height: 30px; }
+
+/* ── Card ──────────────────────────────────────────────────────────────── */
+.auth-card {
+  width: 100%;
+  max-width: 460px;
+  padding: clamp(24px, 5vw, 44px);
+  border-radius: 28px;
+  text-align: left;
+  /* No backdrop-filter here: it would make the card the containing block
+     for the fixed dialogs inside it, shrinking their overlay to the card. */
+  background: rgb(255 255 255 / 0.9);
+  border: 1px solid rgb(255 255 255 / 0.9);
+  box-shadow:
+    inset 0 1px 0 #FFF,
+    0 40px 80px -40px color-mix(in srgb, var(--lc-primary) 45%, transparent),
+    var(--lc-shadow-2);
+}
+.auth-card--wide { max-width: 520px; }
+
+.auth-title {
+  font-family: var(--lc-font-display);
+  font-size: clamp(2rem, 1.6rem + 1.4vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.auth-subtitle { margin-top: 8px; margin-bottom: 28px; color: var(--lc-text-2); }
+.auth-center { text-align: center; }
+
+/* ── Fields ────────────────────────────────────────────────────────────── */
+.auth-field { margin-bottom: 18px; }
+.auth-label { display: block; margin-bottom: 8px; font-weight: 700; font-size: 0.95rem; color: var(--lc-text); }
+.auth-input-wrap { position: relative; }
+.auth-input-icon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--lc-text-2);
+  pointer-events: none;
+}
+.auth-input {
+  width: 100%;
+  min-height: 56px;
+  padding: 14px 16px 14px 48px;
+  border-radius: 16px;
+  border: 1.5px solid var(--lc-border);
+  background: #FFF;
+  color: var(--lc-text);
+  font: inherit;
+  font-size: 1.07rem;
+  transition: border-color var(--lc-dur-fast), box-shadow var(--lc-dur-fast);
+}
+.auth-input::placeholder { color: var(--lc-text-muted); }
+.auth-input:hover { border-color: #C9BEAD; }
+.auth-input:focus { outline: none; border-color: var(--lc-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc-primary) 35%, transparent); }
+.auth-input:focus-visible { outline: none; }
+
+.auth-link-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--lc-primary);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.auth-link-btn:hover { text-decoration: underline; }
+.auth-forgot { display: flex; justify-content: flex-end; }
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.auth-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 56px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: var(--lc-radius-pill);
+  background: var(--lc-primary);
+  color: #FFF;
+  font: inherit;
+  font-size: 1.07rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 16px 30px -16px color-mix(in srgb, var(--lc-primary) 70%, transparent);
+  transition: background-color var(--lc-dur-fast), transform var(--lc-dur-fast) var(--lc-ease-out);
+}
+.auth-submit:hover:not(:disabled) { background: var(--lc-primary-hover); transform: translateY(-1px); }
+.auth-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.auth-divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 16px; color: var(--lc-text-2); font-size: 0.92rem; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--lc-border); }
+.auth-google { display: flex; justify-content: center; min-height: 44px; }
+.auth-footer { margin-top: 20px; text-align: center; color: var(--lc-text-2); }
+.auth-footer a { color: var(--lc-primary); font-weight: 700; }
+
+/* ── Messages (form-level, where they always were) ────────────────────── */
+.auth-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 0.97rem;
+}
+.auth-alert svg { flex: none; margin-top: 2px; }
+.auth-alert--error { background: var(--lc-danger-bg); color: var(--lc-danger); }
+.auth-alert--ok { background: var(--lc-taken-bg); color: var(--lc-taken); }
+.auth-success { text-align: center; padding: 8px 0 4px; }
+.auth-success h3 { margin: 12px 0 6px; font-family: var(--lc-font-display); font-size: 1.35rem; color: var(--lc-taken); }
+.auth-success p { color: var(--lc-text-2); }
+.auth-status-icon { display: block; margin: 0 auto 12px; }
+
+/* ── Role choice (sign-up form and Google dialog) ──────────────────────── */
+.auth-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.auth-roles--stack { grid-template-columns: 1fr; text-align: left; }
+.auth-role {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 48px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 2px solid var(--lc-border);
+  background: #FFF;
+  color: var(--lc-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--lc-dur-fast), background-color var(--lc-dur-fast);
+}
+.auth-role:hover { border-color: #C9BEAD; }
+.auth-role.is-active { border-color: var(--lc-primary); background: color-mix(in srgb, var(--lc-primary) 7%, #FFF); }
+.auth-role h4, .auth-role-title { display: flex; align-items: center; gap: 8px; font-family: var(--lc-font-display); font-size: 1.05rem; font-weight: 700; }
+.auth-role.is-active h4, .auth-role.is-active .auth-role-title { color: var(--lc-primary); }
+.auth-role p, .auth-role-text { color: var(--lc-text-2); font-size: 0.92rem; line-height: 1.35; }
+@media (max-width: 420px) { .auth-roles { grid-template-columns: 1fr; } }
+
+/* ── Dialogs (forgot password, Google role) ─────────────────────────────── */
+.forgot-modal-overlay, .auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--lc-text) 45%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.auth-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  padding: clamp(24px, 5vw, 36px);
+  border-radius: 24px;
+  background: #FFF;
+  box-shadow: var(--lc-shadow-3);
+  color: var(--lc-text);
+  font-family: var(--lc-font-body);
+  text-align: left;
+}
+.auth-dialog.auth-center { text-align: center; }
+.auth-dialog.auth-center .auth-roles { text-align: left; }
+.auth-dialog h2, .auth-dialog h3 { font-family: var(--lc-font-display); font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }
+.auth-dialog > p { margin: 8px 0 22px; color: var(--lc-text-2); }
+.auth-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--lc-text-2);
+  cursor: pointer;
+}
+.auth-close:hover { background: var(--lc-surface-2); color: var(--lc-text); }
+.auth-avatar { width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 50%; object-fit: cover; border: 3px solid var(--lc-primary); }

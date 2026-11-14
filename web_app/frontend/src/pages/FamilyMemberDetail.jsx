@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
+import AdherenceStrip from '../components/Adherence/AdherenceStrip';
 import { useParams, Link } from 'react-router-dom';
-import { caregiverAPI, medicationAPI, detectionAPI, authAPI } from '../services/api';
+import { caregiverAPI, medicationAPI, authAPI } from '../services/api';
 import {
   ArrowLeft, Pill, CheckCircle, XCircle, Clock, AlertTriangle,
   MessageSquare, PhoneCall, Send, Shield, Eye, TrendingDown, Zap, Bell, Camera
 } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
+import Loading from '../components/Feedback/Loading';
+import { doseLabel } from '../utils/doseStatus';
+import PageHeader from '../components/Layout/PageHeader';
+import DaySummary from '../components/Today/DaySummary';
 
 export default function FamilyMemberDetail() {
   const { userId } = useParams();
@@ -21,9 +26,8 @@ export default function FamilyMemberDetail() {
   
   // AI Config State
   const [configModal, setConfigModal] = useState(false);
-  const [cameraUrl, setCameraUrl] = useState('');
-  const [savingConfig, setSavingConfig] = useState(false);
   const [rtmpHost, setRtmpHost] = useState('');
+  const [doseHistory, setDoseHistory] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -40,41 +44,24 @@ export default function FamilyMemberDetail() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [sumRes, schRes, verRes, anomRes] = await Promise.all([
+      const [sumRes, schRes, verRes, anomRes, histRes] = await Promise.all([
         caregiverAPI.getUserSummary(userId),
         medicationAPI.getSchedule(userId),
         caregiverAPI.getVerificationEvents(userId, { limit: 10 }).catch(() => ({ data: [] })),
         caregiverAPI.getAnomalies(userId).catch(() => ({ data: [] })),
+        // A month of doses, so the strip can show the shape of the habit rather
+        // than today's number. Non-fatal: the rest of the page stands without it.
+        medicationAPI.getHistory({ userId, limit: 200 }).catch(() => ({ data: [] })),
       ]);
       setSummary(sumRes.data);
       setSchedule(schRes.data || []);
       setVerificationEvents(verRes.data || []);
       setAnomalies(anomRes.data || []);
+      setDoseHistory(Array.isArray(histRes.data) ? histRes.data : (histRes.data?.logs || []));
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const saveCameraConfig = async () => {
-    setSavingConfig(true);
-    try {
-      let finalUrl = cameraUrl.replace('rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/', '');
-      if (finalUrl && !finalUrl.startsWith('rtsp')) {
-        finalUrl = `rtsp://locus_ai:LocusRead2026@127.0.0.1:8554/live/${finalUrl}`;
-      }
-
-      await detectionAPI.configure({
-        user_id: userId,
-        camera_stream_url: finalUrl
-      });
-      setConfigModal(false);
-      loadData();
-    } catch (err) {
-      alert('Failed to save AI configuration');
-    } finally {
-      setSavingConfig(false);
     }
   };
 
@@ -87,7 +74,7 @@ export default function FamilyMemberDetail() {
       setMsgTitle('');
       setMsgBody('');
       loadData();
-    } catch (err) {
+    } catch {
       alert('Failed to send message');
     } finally {
       setSending(false);
@@ -98,24 +85,23 @@ export default function FamilyMemberDetail() {
     try {
       await caregiverAPI.statusCheck(userId);
       alert('Status check request sent!');
-    } catch (err) {
+    } catch {
       alert('Failed to send status check');
     }
   };
 
   if (loading) {
-    return <div className="empty-state"><p>Loading family member data...</p></div>;
+    return <Loading rows={5} label="Loading family member data" />;
   }
 
   const user = summary?.user;
-  const adherence = summary?.today_adherence;
   const alerts = summary?.pending_alerts || [];
 
   const statusIcon = (s) => {
     switch (s) {
-      case 'taken': return <CheckCircle size={16} style={{ color: 'var(--success)' }} />;
-      case 'missed': return <XCircle size={16} style={{ color: 'var(--danger)' }} />;
-      case 'snoozed': return <Clock size={16} style={{ color: 'var(--warning)' }} />;
+      case 'taken': return <CheckCircle size={16} style={{ color: 'var(--success-text)' }} />;
+      case 'missed': return <XCircle size={16} style={{ color: 'var(--danger-text)' }} />;
+      case 'snoozed': return <Clock size={16} style={{ color: 'var(--warning-text)' }} />;
       default: return <Clock size={16} style={{ color: 'var(--text-muted)' }} />;
     }
   };
@@ -127,20 +113,21 @@ export default function FamilyMemberDetail() {
   };
 
   const anomalySeverityStyle = (severity) => {
-    if (severity === 'critical') return { bg: 'var(--danger-light)', color: 'var(--danger)', icon: <AlertTriangle size={18} /> };
-    if (severity === 'warning') return { bg: 'var(--warning-light)', color: 'var(--warning)', icon: <TrendingDown size={18} /> };
-    return { bg: 'var(--info-light)', color: 'var(--info)', icon: <Eye size={18} /> };
+    if (severity === 'critical') return { bg: 'var(--danger-light)', color: 'var(--danger-text)', icon: <AlertTriangle size={18} /> };
+    if (severity === 'warning') return { bg: 'var(--warning-light)', color: 'var(--warning-text)', icon: <TrendingDown size={18} /> };
+    return { bg: 'var(--info-light)', color: 'var(--info-text)', icon: <Eye size={18} /> };
   };
 
   return (
     <div>
-      {/* Back + Header */}
-      <Link to="/family" className="btn btn-ghost btn-sm mb-4" style={{ marginLeft: -8 }}>
-        <ArrowLeft size={16} /> Back to Family Members
+      <Link to="/family" className="page-back">
+        <ArrowLeft size={16} aria-hidden="true" /> All family members
       </Link>
 
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap' }}>
-        {(user?.picture || user?.profile_picture) ? (
+      <PageHeader
+        title={
+          <span className="person-title">
+            {(user?.picture || user?.profile_picture) ? (
           <img 
             src={user.picture || user.profile_picture} 
             alt="" 
@@ -150,37 +137,29 @@ export default function FamilyMemberDetail() {
             style={{ objectFit: 'cover', borderRadius: '50%', border: '2px solid var(--primary)', width: 56, height: 56 }} 
             onError={(e) => { e.target.style.display = 'none'; }}
           />
-        ) : (
-          <div className="avatar avatar-lg" style={{ background: '#0D9488', fontSize: '1.4rem' }}>
-            {user?.name?.charAt(0)?.toUpperCase()}
-          </div>
-        )}
-        <div style={{ flex: 1 }}>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>{user?.name}</h2>
-          <p className="text-muted text-sm">{user?.email} • {user?.phone || 'No phone'}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+            ) : (
+              <span className="avatar avatar-lg" style={{ background: 'var(--primary)', fontSize: '1.3rem' }}>
+                {user?.name?.charAt(0)?.toUpperCase()}
+              </span>
+            )}
+            {user?.name}
+          </span>
+        }
+        description={[user?.email, user?.phone].filter(Boolean).join(' · ') || 'No contact details'}
+        actions={<>
           <button 
             className="btn btn-outline-primary btn-sm" 
-            onClick={() => {
-              const url = user?.camera_stream_url || '';
-              if (url.includes('127.0.0.1:8554/live/')) {
-                setCameraUrl(url.split('/live/')[1]);
-              } else {
-                setCameraUrl(url);
-              }
-              setConfigModal(true);
-            }}>
+            onClick={() => setConfigModal(true)}>
             <Camera size={16} /> AI Camera
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setMsgModal(true)}>
             <MessageSquare size={16} /> Send Message
           </button>
           <button className="btn btn-primary btn-sm" onClick={requestStatusCheck}>
-            <PhoneCall size={16} /> Status Check
+            <PhoneCall size={16} /> Status check
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Behavioral Anomaly Alerts */}
       {anomalies.length > 0 && (
@@ -207,7 +186,8 @@ export default function FamilyMemberDetail() {
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>{a.message}</div>
                 </div>
                 <span className={`badge ${a.severity === 'critical' ? 'badge-danger' : a.severity === 'warning' ? 'badge-warning' : 'badge-info'}`}>
-                  {a.severity}
+                  {a.severity === 'critical' ? 'Needs attention now'
+                    : a.severity === 'warning' ? 'Worth a look' : 'For information'}
                 </span>
               </div>
             );
@@ -215,39 +195,28 @@ export default function FamilyMemberDetail() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-icon success"><CheckCircle size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.taken || 0}</div>
-            <div className="stat-label">Taken</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon danger"><XCircle size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.missed || 0}</div>
-            <div className="stat-label">Missed</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon warning"><Clock size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.snoozed || 0}</div>
-            <div className="stat-label">Snoozed</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon primary"><Pill size={18} /></div>
-          <div>
-            <div className="stat-value">{adherence?.adherence_percentage?.toFixed(0) || 0}%</div>
-            <div className="stat-label">Adherence</div>
-          </div>
-        </div>
+      {/* This person's whole day, not four dose counters. Scoped by the route
+          param rather than the dock's selection, because the caregiver asked
+          for THIS person by opening their page. */}
+      <DaySummary
+        userId={userId}
+        name={user?.name}
+        homeLocation={user?.home_location}
+        canAct
+      />
+
+      {/* The 30-day strip is a WIDE object -- thirty day cells and a legend --
+          and it was the first of THREE children in a two-column grid. So it
+          was squeezed into half the width, where the cells wrapped onto a
+          second line, and the third child (Pending Alerts) started a new row
+          on its own and left the bottom-right quarter of the page empty.
+          Full width here: the strip gets its single row back, and the two
+          cards below pair off evenly with no hole after them. */}
+      <div style={{ marginBottom: 20 }}>
+        <AdherenceStrip logs={doseHistory} days={30} name={summary?.user?.name} />
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'flex-start' }}>
+      <div className="grid-2">
         {/* Today's Schedule */}
         <div className="card">
           <div className="card-header">
@@ -290,7 +259,7 @@ export default function FamilyMemberDetail() {
                               displayStatus === 'missed' ? 'badge-danger' :
                               displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
                             }`}>
-                              {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+                              {statusIcon(displayStatus)} {doseLabel(displayStatus)}
                             </span>
                           );
                         })()}
@@ -317,7 +286,10 @@ export default function FamilyMemberDetail() {
             </div>
           </div>
           {alerts.length === 0 ? (
-            <div className="empty-state">
+            /* is-inset: already inside a bordered card, so the dashed box and
+               its 44px of padding drew a box inside a box and made "nothing to
+               report" the tallest thing on the page. */
+            <div className="empty-state is-inset">
               <CheckCircle size={36} />
               <p>No pending alerts for this family member</p>
             </div>
@@ -325,14 +297,14 @@ export default function FamilyMemberDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {alerts.map((a) => {
                 const typeConfig = {
-                  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger)' },
+                  missed_dose:       { icon: Pill,  bg: 'var(--danger-light)',  color: 'var(--danger-text)' },
                   camera_off_alert:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
                   skipped_medicine:  { icon: AlertTriangle, bg: '#FEF3C7',      color: '#D97706' },
-                  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success)' },
+                  dose_confirmed:    { icon: CheckCircle, bg: 'var(--success-light)', color: 'var(--success-text)' },
                   dose_reminder:     { icon: Bell,  bg: 'var(--info-light)',    color: 'var(--info)' },
-                  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning)' },
+                  emergency:         { icon: AlertTriangle, bg: 'var(--warning-light)', color: 'var(--warning-text)' },
                   status_check:      { icon: Bell,  bg: 'var(--accent-light)',  color: 'var(--accent)' },
-                  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary)' },
+                  caregiver_message: { icon: Bell,  bg: 'var(--primary-light)', color: 'var(--primary-text)' },
                   system:            { icon: Bell,  bg: 'var(--surface-hover)', color: 'var(--text-secondary)' },
                 };
                 const cfg = typeConfig[a.type] || typeConfig.system;
@@ -372,47 +344,45 @@ export default function FamilyMemberDetail() {
         </div>
 
         {verificationEvents.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state is-inset">
             <Shield size={36} />
             <p>No AI verification events recorded yet</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {verificationEvents.map((ev) => (
-              <div key={ev._id} style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                padding: '12px 16px',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-light)',
-                background: ev.classification === 'auto_verified' ? 'var(--success-light)' : 'var(--danger-light)',
-                transition: 'all 0.15s',
-              }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 'var(--radius-md)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: ev.classification === 'auto_verified' ? 'var(--success)' : 'var(--danger)',
-                  color: 'white', fontWeight: 700, fontSize: '0.85rem',
-                }}>
-                  {(ev.confidence_score * 100).toFixed(0)}%
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ev.medication_name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                    {ev.scheduled_time ? formatSmartDate(ev.scheduled_time) : 'Unknown time'}
-                    {ev.dosage && <span> - {ev.dosage}</span>}
+          /* Every row was filled edge to edge with --success-light, so a
+             healthy week read as two solid green bars stacked under a white
+             card -- louder than the emergency banner, and unlike anything
+             else on the dashboard. The colour moves to the confidence chip,
+             which is the one part of the row that is actually a judgement;
+             the row itself returns to a surface with a hairline, the same
+             shape as a notification. Nothing is removed. */
+          <div className="verify-list">
+            {verificationEvents.map((ev) => {
+              const verified = ev.classification === 'auto_verified';
+              return (
+                <div key={ev._id} className={`verify-row ${verified ? 'is-verified' : 'is-unverified'}`}>
+                  <span className="verify-score">
+                    {(ev.confidence_score * 100).toFixed(0)}%
+                  </span>
+                  <div className="verify-main">
+                    <div className="verify-name">{ev.medication_name}</div>
+                    <div className="verify-when">
+                      {ev.scheduled_time ? formatSmartDate(ev.scheduled_time) : 'Unknown time'}
+                      {ev.dosage && <span> &middot; {ev.dosage}</span>}
+                    </div>
+                  </div>
+                  <div className="verify-side">
+                    <span className={`badge ${classificationBadge(ev.classification)}`}>
+                      {verified ? 'Auto Verified' : 'Unverified'}
+                    </span>
+                    <span className="verify-action">
+                      {ev.action === 'log_automatically' ? 'Logged automatically' :
+                       ev.action === 'request_user_confirmation' ? 'Awaiting confirmation' : 'Discarded'}
+                    </span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                  <span className={`badge ${classificationBadge(ev.classification)}`}>
-                    {ev.classification === 'auto_verified' ? 'Auto Verified' : 'Unverified'}
-                  </span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    {ev.action === 'log_automatically' ? 'Logged automatically' :
-                     ev.action === 'request_user_confirmation' ? 'Awaiting confirmation' : 'Discarded'}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -465,7 +435,7 @@ export default function FamilyMemberDetail() {
             </p>
             
             <div style={{ background: 'var(--surface-hover)', padding: '16px', borderRadius: '8px', marginBottom: 24, border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
                 Camera Configuration URL
               </div>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>

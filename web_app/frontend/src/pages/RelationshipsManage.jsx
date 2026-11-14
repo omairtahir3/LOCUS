@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { relationshipsAPI } from '../services/api';
-import { Users, Merge, Trash2, AlertTriangle, Search } from 'lucide-react';
+import { Merge, Trash2, AlertTriangle, Search } from 'lucide-react';
+import PageHeader from '../components/Layout/PageHeader';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import { useAuth } from '../context/AuthContext';
+import { isCaregiver } from '../components/Nav/navItems';
 
 export default function RelationshipsManage() {
   const [relationships, setRelationships] = useState([]);
@@ -14,9 +18,16 @@ export default function RelationshipsManage() {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Faces belong to one household. A caregiver reads the person the dock has
+  // selected; without the id the server answers about the first person they
+  // monitor, which is the wrong family as soon as they look after two.
+  const { user } = useAuth();
+  const { selectedUser } = useSelectedUser() || {};
+  const scopeId = isCaregiver(user) ? selectedUser?._id : undefined;
+
   const fetchRelationships = async () => {
     try {
-      const res = await relationshipsAPI.getAll();
+      const res = await relationshipsAPI.getAll(scopeId);
       setRelationships(res.data || []);
     } catch (err) {
       console.error(err);
@@ -26,9 +37,12 @@ export default function RelationshipsManage() {
     }
   };
 
+  // Refetches when the caregiver switches person, which an empty dependency
+  // list did not: the dock changed and the list below it did not.
   useEffect(() => {
     fetchRelationships();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeId]);
 
   const handleMerge = async () => {
     if (!sourceId || !targetId || sourceId === targetId) {
@@ -61,25 +75,19 @@ export default function RelationshipsManage() {
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: 'none' }}>
-        <div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Users color="var(--accent)" />
-            Manage Relationships
-          </h1>
-          <p className="page-subtitle" style={{ marginTop: 4 }}>
-            Merge duplicates or review confirmed faces.
-          </p>
-        </div>
-        <button 
-          onClick={() => setIsMerging(!isMerging)}
-          className={`btn ${isMerging ? 'btn-secondary' : 'btn-primary'}`}
-          style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-        >
-          <Merge size={18} />
-          {isMerging ? 'Cancel Merge' : 'Merge Duplicates'}
-        </button>
-      </div>
+      <PageHeader
+        title="Manage Relationships"
+        description="Merge duplicates or review confirmed faces."
+        actions={
+          <button
+            onClick={() => setIsMerging(!isMerging)}
+            className={`btn ${isMerging ? 'btn-secondary' : 'btn-primary'}`}
+          >
+            <Merge size={18} />
+            {isMerging ? 'Cancel Merge' : 'Merge Duplicates'}
+          </button>
+        }
+      />
 
       {error && (
         <div style={{ background: 'var(--danger-light)', color: '#991B1B', padding: 16, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #FCA5A5' }}>

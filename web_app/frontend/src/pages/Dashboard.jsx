@@ -2,17 +2,21 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { caregiverAPI, notificationAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useSelectedUser } from '../context/SelectedUserContext';
+import DaySummary from '../components/Today/DaySummary';
 import { formatClockTime } from '../utils/dateUtils';
+import { adherencePct, NO_DATA, NO_DATA_LABEL } from '../utils/adherence';
 import {
   Users, Pill, AlertTriangle, Bell, CheckCircle,
   Clock, ChevronRight, Activity, TrendingUp, Calendar,
-  ArrowUpRight, MoreHorizontal
+  ArrowUpRight, MoreHorizontal, XCircle, EyeOff
 } from 'lucide-react';
 
 const AVATAR_COLORS = ['#0D9488', '#6366F1', '#EC4899', '#F59E0B', '#10B981', '#3B82F6'];
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { selectedUser } = useSelectedUser() || {};
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [summaries, setSummaries] = useState({});
@@ -62,14 +66,9 @@ export default function Dashboard() {
     }
   };
 
-  const totalUsers = users.length;
-  const avgAdherence = users.length > 0 
-    ? Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.adherence_percentage || 0), 0) / users.length 
-    : 0;
-  const missedDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.missed || 0), 0);
-  const skippedDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.skipped || 0), 0);
-  const takenDoses = Object.values(summaries).reduce((sum, s) => sum + (s?.today_adherence?.taken || 0), 0);
-
+  // The dose aggregates that fed the old hero are gone with it. They summed
+  // today_adherence, which is labelled today and carries period '7_days', so
+  // every one of them stated a week's figure as a day's.
   const handleClearNotifications = async () => {
     try {
       await notificationAPI.markAllRead();
@@ -78,6 +77,7 @@ export default function Dashboard() {
       console.error('Error clearing notifications', err);
     }
   };
+
 
   if (loading && users.length === 0) {
     return (
@@ -100,76 +100,103 @@ export default function Dashboard() {
           to { opacity: 1; transform: translateY(0); }
         }
         
-        .welcome-section {
-          margin-bottom: 32px;
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        }
-        .welcome-text h1 {
-          font-size: 1.8rem;
-          font-weight: 800;
-          color: var(--text-primary);
-          margin-bottom: 4px;
-        }
-        .welcome-text p {
-          color: var(--text-secondary);
-          font-size: 0.95rem;
+        /* A 3px rail reading top-to-bottom: identity without tinting the card,
+           so the value keeps its ink token and stays legible. */
+
+        /* 4px is enough to feel alive; 4px of lift at 0.3s read as drifting. */
+
+        @media (prefers-reduced-motion: reduce) {
+          .dashboard-wrapper { animation: none; }
         }
 
-        .premium-stat-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 20px;
-          margin-bottom: 32px;
-        }
-
-        .p-stat-card {
-          background: var(--surface);
-          border-radius: 24px;
-          padding: 24px;
-          border: 1px solid var(--border);
+        /* ── Today ──────────────────────────────────────────────────────
+           One feature surface carrying the answer, then the figures. The depth
+           and the teal belong to this surface alone -- everything below it
+           stays flat, so the eye lands here first and only once. */
+        .today {
           position: relative;
           overflow: hidden;
-          transition: all 0.3s ease;
+          padding: 30px 34px 26px;
+          margin-bottom: 28px;
+          border-radius: var(--radius-xl);
+          color: #EAFBF7;
+          /* Every stop is dark enough that white clears 4.5:1 on it -- the
+             first attempt ran up to #0D9488, where white is 3.74:1 and the
+             labels failed outright. Darkest teal 7.4:1, lightest 4.9:1. */
+          background:
+            radial-gradient(118% 140% at 88% -18%, rgba(94, 234, 212, .22) 0%, rgba(94, 234, 212, 0) 58%),
+            linear-gradient(152deg, #085952 0%, #0a766d 52%, #0b7e74 100%);
+          box-shadow: var(--lift-3);
         }
-        .p-stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: var(--shadow-lg);
-          border-color: var(--primary-light);
+        /* A soft inner edge so the surface reads as lit rather than printed. */
+        .today::after {
+          content: '';
+          position: absolute; inset: 0;
+          border-radius: inherit;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.18), inset 0 0 0 1px rgba(255,255,255,.07);
+          pointer-events: none;
         }
-        .p-stat-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 16px;
-        }
-        .p-stat-value {
-          font-size: 2rem;
-          font-weight: 800;
-          color: var(--text-primary);
-          line-height: 1;
-          margin-bottom: 4px;
-        }
-        .p-stat-label {
-          font-size: 0.85rem;
+        .today-line {
+          position: relative;
+          font-size: clamp(1.5rem, 1.05rem + 1.7vw, 2.3rem);
+          line-height: 1.14;
+          letter-spacing: -0.025em;
           font-weight: 600;
-          color: var(--text-secondary);
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
+          color: #FFFFFF;
+          max-width: 22ch;
+          margin: 0 0 24px;
+          text-wrap: balance;
         }
-        .p-stat-trend {
-          position: absolute;
-          top: 24px;
-          right: 24px;
-          font-size: 0.75rem;
+        .today-figures {
+          position: relative;
+          display: flex; flex-wrap: wrap; margin: 0;
+          padding-top: 20px;
+          border-top: 1px solid rgba(255,255,255,.16);
+        }
+        .today-figures > div { padding-right: 30px; margin-right: 30px; border-right: 1px solid rgba(255,255,255,.13); }
+        .today-figures > div:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+        .today-figures dt {
+          font-size: var(--text-sm);
+          color: rgba(233, 252, 248, .88);  /* 6.0:1 on the mid stop */
+          margin-bottom: 6px;
+        }
+        .today-figures dd {
+          margin: 0;
+          font-size: var(--text-2xl);
           font-weight: 700;
-          display: flex;
-          align-items: center;
-          gap: 4px;
+          line-height: 1;
+          color: #FFFFFF;
+          font-variant-numeric: tabular-nums;
+          font-feature-settings: 'tnum' 1;
+        }
+        /* Light enough to clear the teal: the danger token is a text colour for
+           white surfaces and would sink into this one. */
+                /* No red here. Any red pale enough to sit on this teal falls under
+           4.5:1, and tinting the number would make colour the only signal.
+           The figure stays white and a mark beside it carries the state --
+           the same rule the strip follows. */
+        .today-figures .is-bad { color: #FFFFFF; }
+        .today-figures .is-bad::after {
+          content: '';
+          display: inline-block;
+          width: 7px; height: 7px;
+          margin-left: 8px;
+          vertical-align: 0.34em;
+          border-radius: var(--radius-full);
+          background: #FF8A8A;
+          box-shadow: 0 0 0 3px rgba(255, 138, 138, .22);
+        }
+        .today-figures .unit { font-size: var(--text-lg); font-weight: 500; color: rgba(233,252,248,.8); }
+        .today-scope {
+          position: relative;
+          margin: 20px 0 0;
+          font-size: var(--text-sm);
+          color: rgba(233, 252, 248, .82);  /* 5.4:1 */
+          max-width: 62ch;
+        }
+        @media (max-width: 640px) {
+          .today { padding: 24px 22px 20px; }
+          .today-figures > div { padding-right: 18px; margin-right: 18px; }
         }
 
         .dashboard-grid {
@@ -187,8 +214,6 @@ export default function Dashboard() {
           gap: 20px;
         }
         @media (max-width: 768px) {
-          .welcome-section { flex-direction: column; align-items: flex-start; gap: 16px; }
-          .premium-stat-grid { grid-template-columns: 1fr; }
           .family-grid { grid-template-columns: 1fr; }
         }
         .member-card {
@@ -202,7 +227,7 @@ export default function Dashboard() {
           gap: 16px;
         }
         .member-card:hover {
-          border-color: var(--primary);
+          border-color: var(--primary-text);
           box-shadow: var(--shadow-md);
         }
         .member-header {
@@ -255,65 +280,17 @@ export default function Dashboard() {
         }
       `}</style>
 
-      <div className="welcome-section">
-        <div className="welcome-text">
-          <h1>Welcome, {user?.name?.split(' ')[0]}!</h1>
-          <p>Here's how your family is doing today.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <div className="badge badge-neutral" style={{ padding: '8px 16px', borderRadius: '12px' }}>
-            <Calendar size={14} style={{ marginRight: 8 }} />
-            {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
-          </div>
-        </div>
-      </div>
+      {/* The whole day for the selected person: rooms, activities, people,
+          belongings, routine findings, location and alerts, with medication as
+          one small card. The family roster stays below -- that is the part of
+          this page that is genuinely about everyone. */}
+      <DaySummary
+        userId={selectedUser?._id}
+        name={selectedUser?.name}
+        homeLocation={summaries[selectedUser?._id]?.user?.home_location}
+        canAct
+      />
 
-      <div className="premium-stat-grid">
-        <div className="p-stat-card">
-          <div className="p-stat-icon" style={{ background: 'rgba(13, 148, 136, 0.1)', color: 'var(--primary)' }}>
-            <Users size={24} />
-          </div>
-          <div className="p-stat-value">{totalUsers}</div>
-          <div className="p-stat-label">Active Members</div>
-          <div className="p-stat-trend" style={{ color: 'var(--success)' }}>
-            <TrendingUp size={12} /> Live
-          </div>
-        </div>
-
-        <div className="p-stat-card">
-          <div className="p-stat-icon" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--accent)' }}>
-            <CheckCircle size={24} />
-          </div>
-          <div className="p-stat-value">{avgAdherence.toFixed(0)}%</div>
-          <div className="p-stat-label">Daily Adherence</div>
-          <div className="p-stat-trend" style={{ color: avgAdherence >= 80 ? 'var(--success)' : 'var(--warning)' }}>
-            {avgAdherence >= 80 ? 'Stable' : 'Needs attention'}
-          </div>
-        </div>
-
-        <div className="p-stat-card">
-          <div className="p-stat-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)' }}>
-            <AlertTriangle size={24} />
-          </div>
-          <div className="p-stat-value">{missedDoses}</div>
-          <div className="p-stat-label">Missed Doses</div>
-          {missedDoses > 0 && <div className="p-stat-trend" style={{ color: 'var(--danger)' }}>Critical</div>}
-        </div>
-        <div className="p-stat-card">
-          <div className="p-stat-icon" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}>
-            <AlertTriangle size={24} />
-          </div>
-          <div className="p-stat-value">{skippedDoses}</div>
-          <div className="p-stat-label">Camera Off (7d)</div>
-        </div>
-        <div className="p-stat-card">
-          <div className="p-stat-icon" style={{ background: 'var(--success-light)', color: 'var(--success)' }}>
-            <CheckCircle size={24} />
-          </div>
-          <div className="p-stat-value">{takenDoses}</div>
-          <div className="p-stat-label">Taken (7d)</div>
-        </div>
-      </div>
       <div className="dashboard-grid">
         <section>
           <div className="card-header" style={{ marginBottom: 20 }}>
@@ -331,7 +308,7 @@ export default function Dashboard() {
             ) : (
               users.map((u, i) => {
                 const summary = summaries[u._id];
-                const adherence = summary?.today_adherence?.adherence_percentage || 0;
+                const adherence = adherencePct(summary?.today_adherence);
                 return (
                   <div key={u._id} className="member-card">
                     <div className="member-header">
@@ -367,7 +344,9 @@ export default function Dashboard() {
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: 700 }}>
                         <span style={{ color: 'var(--text-secondary)' }}>Daily Adherence</span>
-                        <span style={{ color: adherence >= 80 ? 'var(--success)' : 'var(--warning)' }}>{adherence}%</span>
+                        {adherence === null
+                          ? <span style={{ color: 'var(--text-muted)' }} title={NO_DATA_LABEL}>{NO_DATA}</span>
+                          : <span style={{ color: adherence >= 80 ? 'var(--success-text)' : 'var(--warning-text)' }}>{adherence}%</span>}
                       </div>
                       <div className="adherence-bar-container">
                         <div 

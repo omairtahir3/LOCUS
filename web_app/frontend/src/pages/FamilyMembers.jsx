@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { caregiverAPI } from '../services/api';
 import { Users, ChevronRight, Search } from 'lucide-react';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
+import { adherencePct, NO_DATA, NO_DATA_LABEL } from '../utils/adherence';
 
 const AVATAR_COLORS = ['#0D9488', '#6366F1', '#EC4899', '#F59E0B', '#10B981', '#3B82F6'];
 
@@ -36,25 +39,25 @@ export default function FamilyMembers() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">Family Members</h2>
-          <p className="page-description">Family you're monitoring</p>
-        </div>
-        <div style={{ position: 'relative' }}>
-          <input
-            className="form-input"
-            placeholder="Search family members..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ paddingLeft: 36, width: 260 }}
-          />
-          <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-        </div>
-      </div>
+      <PageHeader
+        title="Family Members"
+        description="Family you're monitoring"
+        actions={
+          <div style={{ position: 'relative' }}>
+            <input
+              className="form-input"
+              placeholder="Search family members..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ paddingLeft: 36, width: 260 }}
+            />
+            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          </div>
+        }
+      />
 
       {loading ? (
-        <div className="empty-state"><p>Loading family members...</p></div>
+        <Loading rows={4} label="Loading family members" />
       ) : filtered.length === 0 ? (
         <div className="card">
           <div className="empty-state">
@@ -96,19 +99,23 @@ export default function FamilyMembers() {
                   {adh && (
                     <div style={{ display: 'flex', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border-light)' }}>
                       <div style={{ flex: 1, textAlign: 'center' }}>
-                        <div className="font-bold" style={{ color: 'var(--success)' }}>{adh.taken || 0}</div>
+                        <div className="font-bold" style={{ color: 'var(--success-text)' }}>{adh.taken || 0}</div>
                         <div className="text-xs text-muted">Taken</div>
                       </div>
                       <div style={{ flex: 1, textAlign: 'center' }}>
-                        <div className="font-bold" style={{ color: 'var(--danger)' }}>{adh.missed || 0}</div>
+                        <div className="font-bold" style={{ color: 'var(--danger-text)' }}>{adh.missed || 0}</div>
                         <div className="text-xs text-muted">Missed</div>
                       </div>
                       <div style={{ flex: 1, textAlign: 'center' }}>
-                        <div className="font-bold" style={{ color: 'var(--primary)' }}>{adh.adherence_percentage?.toFixed(0) || 0}%</div>
+                        <div className="font-bold" style={{ color: 'var(--primary-text)' }}>
+                          {adherencePct(adh) === null
+                            ? <span style={{ color: 'var(--text-muted)' }} title={NO_DATA_LABEL}>{NO_DATA}</span>
+                            : `${adherencePct(adh)}%`}
+                        </div>
                         <div className="text-xs text-muted">Adherence</div>
                       </div>
                       <div style={{ flex: 1, textAlign: 'center' }}>
-                        <div className="font-bold" style={{ color: 'var(--warning)' }}>{s?.pending_alerts?.length || 0}</div>
+                        <div className="font-bold" style={{ color: 'var(--warning-text)' }}>{s?.pending_alerts?.length || 0}</div>
                         <div className="text-xs text-muted">Alerts</div>
                       </div>
                     </div>

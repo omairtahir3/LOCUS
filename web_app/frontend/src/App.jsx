@@ -1,29 +1,54 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SelectedUserProvider } from './context/SelectedUserContext';
-import AppLayout from './components/Layout/AppLayout';
 import Landing from './pages/Landing';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ResetPassword from './pages/ResetPassword';
-import Dashboard from './pages/Dashboard';
-import FamilyMembers from './pages/FamilyMembers';
-import FamilyMemberDetail from './pages/FamilyMemberDetail';
-import Medications from './pages/Medications';
-import Notifications from './pages/Notifications';
-import LocationMap from './pages/LocationMap';
-import ActivityFeed from './pages/ActivityFeed';
-import PastInteractions from './pages/PastInteractions';
 
+// Every route but the landing page is split out.
+//
+// All twenty-two pages used to be imported here, so opening "/" downloaded the
+// whole application to show a marketing page: the dashboards, leaflet and
+// react-leaflet behind the location map, socket.io-client behind the SOS
+// listener and the chat, and every icon any page uses. None of it is reachable
+// from "/" without a sign-in, and the landing page is the one route a first
+// visitor is guaranteed to hit.
+//
+// Landing stays eager because it is what the first paint needs; splitting it
+// would only add a round trip before anything appears.
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const AppLayout = lazy(() => import('./components/Layout/AppLayout'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const FamilyMembers = lazy(() => import('./pages/FamilyMembers'));
+const FamilyMemberDetail = lazy(() => import('./pages/FamilyMemberDetail'));
+const Medications = lazy(() => import('./pages/Medications'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const LocationMap = lazy(() => import('./pages/LocationMap'));
+const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
+const PastInteractions = lazy(() => import('./pages/PastInteractions'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const KeyframeAudit = lazy(() => import('./pages/KeyframeAudit'));
+const UserDashboard = lazy(() => import('./pages/UserDashboard'));
+const UserMedications = lazy(() => import('./pages/UserMedications'));
+const UserHistory = lazy(() => import('./pages/UserHistory'));
+const MemorySearch = lazy(() => import('./pages/MemorySearch'));
+const Belongings = lazy(() => import('./pages/Belongings'));
+const RelationshipsManage = lazy(() => import('./pages/RelationshipsManage'));
+const Routine = lazy(() => import('./pages/Routine'));
 
-import SettingsPage from './pages/Settings';
-import KeyframeAudit from './pages/KeyframeAudit';
-import UserDashboard from './pages/UserDashboard';
-import UserMedications from './pages/UserMedications';
-import UserHistory from './pages/UserHistory';
-import MemorySearch from './pages/MemorySearch';
-import Belongings from './pages/Belongings';
-import RelationshipsManage from './pages/RelationshipsManage';
+// Plain markup, so the thing shown while a route arrives pulls in no
+// component and no icon of its own.
+function RouteFallback() {
+  return (
+    <div style={{
+      minHeight: '60vh', display: 'grid', placeItems: 'center',
+      color: 'var(--lc-text-muted, #6B645A)', font: '500 1rem/1.4 system-ui, sans-serif',
+    }}>
+      Loading...
+    </div>
+  );
+}
 
 function CaregiverOnlyRoute({ element }) {
   const { user } = useAuth();
@@ -46,6 +71,7 @@ function App() {
     <AuthProvider>
       <SelectedUserProvider>
         <Router>
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="login" element={<Login />} />
@@ -69,6 +95,7 @@ function App() {
               {/* Enrolling an item is 10 to 15 photographs, which is work on a
                   phone and easy at a desk where a folder can be dropped in. */}
               <Route path="belongings" element={<Belongings />} />
+              <Route path="routine" element={<Routine />} />
               {/* Shared, not caregiver-only. Both of these were reached from
                   pages every role can see -- "Saw <name>" in Memory Search and
                   "Manage relationships" in Settings -- but were gated to
@@ -90,6 +117,7 @@ function App() {
             {/* Catch-all */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </Router>
       </SelectedUserProvider>
     </AuthProvider>

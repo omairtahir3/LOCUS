@@ -35,6 +35,12 @@ const INTENTS = [
   'person_last_interaction',
   'medication_check',
   'activity_recall',
+  // "When did I last go to my bedroom?" had no intent, so it fell through to
+  // 'unknown' and the answer was a shrug -- even though scene_session events
+  // carry the room in details.scene and details.label and have done all
+  // along. The header below says object events carry no room, which is true
+  // and is about a different event type entirely.
+  'room_last_visit',
   'unknown',
 ];
 
@@ -76,6 +82,7 @@ intent is one of:
 - item_history: everywhere a belonging has been over a period. "Where has my phone been today?"
 - person_last_interaction: when they last saw or spoke to someone. "When did I last see Omair?"
 - medication_check: whether they took medicine. "Did I take my tablets?"
+- room_last_visit: when they were last in a named room. "When did I last go to my bedroom?"
 - activity_recall: what they were doing. "What did I do this morning?"
 - unknown: anything else, or anything you are unsure about.
 
@@ -186,7 +193,15 @@ function localParse(question, vocab) {
   else if (person && /\b(see|saw|seen|talk|talked|spoke|speak|conversation|met|meet)\b/.test(q)) intent = 'person_last_interaction';
   else if (item && /\b(been|everywhere|history|all day)\b/.test(q)) intent = 'item_history';
   else if (item) intent = 'item_last_location';
-  else if (/\bdo(ing)?\b|\bwhat did i\b/.test(q)) intent = 'activity_recall';
+  // A room, before the activity test: "when did I last go to my bedroom"
+  // names a place, and PLACE_WORDS already lists every room this system can
+  // recognise.
+  else if (PLACE_WORDS.test(q)) intent = 'room_last_visit';
+  // Widened. The old pair -- /\bdo(ing)?\b/ and /\bwhat did i\b/ -- missed
+  // "what was the last activity", "what have I been doing" and anything
+  // phrased with "activity", which is how people actually ask.
+  else if (/\bdo(ing)?\b|\bdid i\b|\bactivit(y|ies)\b|\bbeen up to\b|\bhappened\b/.test(q))
+    intent = 'activity_recall';
   return {
     intent,
     item: item ? item.name : 'none',
@@ -198,7 +213,7 @@ function localParse(question, vocab) {
 /** Phase 3: an intent the model produced is still untrusted input. A name that
  *  is not on the vocabulary list resolves to null and the caller asks rather
  *  than guessing which belonging was meant. */
-function resolve(parsed, vocab) {
+function resolve(parsed, vocab, question = '') {
   const pick = (list, raw) => {
     if (!raw || raw.toLowerCase() === 'none') return null;
     const want = raw.trim().toLowerCase();
@@ -211,6 +226,10 @@ function resolve(parsed, vocab) {
     item: pick(vocab.items, parsed.item),
     person: pick(vocab.people, parsed.person),
     window: resolveRange(parsed.range),
+    // Carried so room_last_visit can match the room the question named
+    // against the scene the session recorded. Nothing else reads it, and it
+    // never reaches the model: phrase() is handed the question separately.
+    question,
   };
 }
 
@@ -300,9 +319,27 @@ async function execute(r, userId) {
 
   if (r.intent === 'medication_check') {
     const db = mongoose.connection.db;
-    const w = r.window || resolveRange('today');
+    // resolveRange('all') returns null, meaning "put no bound on the query".
+    // Falling back to today turned that into the opposite: "when did I last
+    // take my medicine" searched only since midnight, found nothing but
+    // pending doses, and answered as though none had ever been taken. A
+    // question with no stated range keeps the null and searches everything
+    // retention still holds.
+    const w = r.window;
     const logs = await db.collection('medication_logs')
-      .find({ user_id: { $in: ids }, scheduled_time: { $gte: w.from, $lte: w.to } })
+      .find({
+        user_id: { $in: ids },
+        // Unbounded when the question stated no range, which is what
+        // "when did I last take my medicine" asks for. Written as a spread so
+        // a null window omits the clause instead of dereferencing it.
+        //
+        // Still capped at now either way. Unbounded, the query swept up doses
+        // scheduled for tomorrow and reported "1 of your 10 doses is recorded
+        // as taken" -- counting future doses as ones the person had failed to
+        // take, which is the opposite of reassuring.
+        ...(w ? { scheduled_time: { $gte: w.from, $lte: w.to } }
+              : { scheduled_time: { $lte: new Date() } }),
+      })
       .sort({ scheduled_time: -1 }).limit(10).toArray();
     const meds = await db.collection('medications').find({ user_id: { $in: ids } }).toArray();
     const nameOf = id => (meds.find(m => String(m._id) === String(id)) || {}).name || 'your medicine';
@@ -324,17 +361,46 @@ async function execute(r, userId) {
 
   if (r.intent === 'activity_recall') {
     // scene_change, camera_heartbeat and coverage are capture bookkeeping, not
-    // things the person did, and they outnumber real activities 860 to 10.
-    // Reporting them back would answer "what did I do" with "a scene changed".
+    // things the person did. Reporting them back would answer "what did I do"
+    // with "a scene changed".
+    //
+    // scene_session used to be excluded with them, which left nothing: the
+    // only action values this database holds are camera_heartbeat, coverage,
+    // item_seen, privacy_auto_would_fire, scene_change and scene_session, so
+    // after the exclusions the query could match nothing a person would call
+    // an activity. scene_session IS the activity record -- it carries the
+    // label, the room and how long it lasted.
     const rows = await EventLog.find({
       ...base,
       event_type: 'activity',
-      'details.action': { $nin: ['scene_change', 'camera_heartbeat', 'coverage', 'scene_session', 'activity_session', null] },
+      'details.action': 'scene_session',
     }).sort({ timestamp: -1 }).limit(10).lean();
     return { rows: rows.map(e => ({
       at: e.timestamp,
       keyframe_id: frameStillExists(e.timestamp, e.is_flagged) ? e.keyframe_id : null,
-      action: e.details && e.details.action,
+      action: (e.details && (e.details.label || e.details.description)) || 'activity',
+      room: (e.details && e.details.scene) || null,
+      seconds: e.details && e.details.duration_seconds,
+    })) };
+  }
+
+  if (r.intent === 'room_last_visit') {
+    // The room the question named, matched against the scene the session
+    // recorded. Unbounded unless the question stated a range: "when did I
+    // last go to my bedroom" is precisely a question about the past.
+    const named = (r.question || '').match(PLACE_WORDS);
+    const rows = await EventLog.find({
+      ...base,
+      event_type: 'activity',
+      'details.action': 'scene_session',
+      ...(named ? { 'details.scene': new RegExp(named[0].replace(/\s+/g, '.?'), 'i') } : {}),
+    }).sort({ timestamp: -1 }).limit(5).lean();
+    return { rows: rows.map(e => ({
+      at: e.timestamp,
+      keyframe_id: frameStillExists(e.timestamp, e.is_flagged) ? e.keyframe_id : null,
+      room: (e.details && e.details.scene) || null,
+      action: (e.details && (e.details.label || e.details.description)) || null,
+      seconds: e.details && e.details.duration_seconds,
     })) };
   }
 
@@ -380,11 +446,43 @@ function template(r, rows, need, subject) {
       if (x.status === 'scheduled') return `Your ${x.medicine} dose at ${timeWords(x.scheduled_at)} is not recorded as taken yet.`;
       return `Your ${x.medicine} dose at ${timeWords(x.scheduled_at)} is recorded as ${x.status}.`;
     }
-    const head = `${taken} of your ${rows.length} dose${rows.length === 1 ? '' : 's'} so far today ${taken === 1 ? 'is' : 'are'} recorded as taken.`;
+    // "so far today" only when the search was bounded to today. Unbounded,
+    // the same sentence claimed a month of doses happened since midnight.
+    const span = r.window ? ' so far today' : '';
+    const head = `${taken} of your ${rows.length} dose${rows.length === 1 ? '' : 's'}${span} ${taken === 1 ? 'is' : 'are'} recorded as taken.`;
     // The time it was TAKEN, which is what someone asking actually wants, and
     // which is minutes off the time it was due.
     const one = rows.find(x => x.status === 'taken' && x.taken_at);
     return one ? `${head} You took ${one.medicine} at ${timeWords(one.taken_at)}.` : head;
+  }
+  // Both of these fell through to the generic line below, which answers
+  // "what was the last activity?" with "I found 10 things in that period" --
+  // a count, not an answer, when the row already says what it was, which room
+  // it was in and how long it lasted.
+  if (r.intent === 'activity_recall' || r.intent === 'room_last_visit') {
+    const x = rows[0];
+    const howLong = n => (n == null ? null
+      : n < 60 ? `${Math.round(n)} seconds`
+      : n < 3600 ? `${Math.round(n / 60)} minute${Math.round(n / 60) === 1 ? '' : 's'}`
+      : `${(n / 3600).toFixed(1)} hours`);
+    const dur = howLong(x.seconds);
+    if (r.intent === 'room_last_visit') {
+      const head = x.room
+        ? `${they} were last in the ${x.room} on ${when(x.at)}`
+        : `The last recorded session was on ${when(x.at)}`;
+      return dur ? `${head}, for about ${dur}.` : `${head}.`;
+    }
+    const what = (x.action || 'something').toLowerCase();
+    // The label often already names the room ("Time in the bedroom"), and
+    // adding the room again produced "time in the bedroom, in the bedroom".
+    const needsRoom = x.room && !what.includes(String(x.room).toLowerCase());
+    const head = needsRoom
+      ? `The last thing recorded was ${what}, in the ${x.room}, on ${when(x.at)}`
+      : `The last thing recorded was ${what}, on ${when(x.at)}`;
+    const tail = rows.length > 1
+      ? ` There ${rows.length - 1 === 1 ? 'is' : 'are'} ${rows.length - 1} more before it.`
+      : '';
+    return dur ? `${head}, for about ${dur}.${tail}` : `${head}.${tail}`;
   }
   return `I found ${rows.length} thing${rows.length === 1 ? '' : 's'} in that period, most recently on ${when(rows[0].at)}.`;
 }
@@ -532,7 +630,7 @@ async function ask(question, userId, { subjectName = null } = {}) {
   // same shape, so resolve() still rejects anything not on the vocabulary list.
   const fromModel = await parse(q, vocab);
   const parsed = fromModel || localParse(q, vocab);
-  const r = resolve(parsed, vocab);
+  const r = resolve(parsed, vocab, q);
   const { rows, need } = await execute(r, userId);
   // Only a first name reaches the model: it is what a person is called, and a
   // full name in a one-line answer reads like a medical record.

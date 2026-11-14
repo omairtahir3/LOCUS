@@ -239,7 +239,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             // The commonest cause by far, and the one nothing else explains.
             const Text('Check the server address in Settings.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
             const SizedBox(height: 8),
             TextButton(onPressed: _load, child: const Text('Try again')),
           ],
@@ -292,7 +292,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary)),
                   Text(label,
-                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -316,7 +316,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             width: 70,
             child: Text(at == null ? '' : DateFormat('h:mm a').format(at.toLocal()),
                 style: TextStyle(
-                    fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
+                    fontSize: 13, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
           ),
           Column(
             children: [
@@ -348,7 +348,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   if ((item['detail']?.toString() ?? '').isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(item['detail'].toString(),
-                        style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                   ],
                 ],
               ),
@@ -378,7 +378,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                   if ((a['detail']?.toString() ?? '').isNotEmpty)
                     Text(a['detail'].toString(),
-                        style: const TextStyle(fontSize: 12)),
+                        style: const TextStyle(fontSize: 13)),
                 ],
               ),
             ),
@@ -386,9 +386,15 @@ class _ActivityScreenState extends State<ActivityScreen> {
         ),
       );
 
-  /// An insight carries a value from 0 to 1, or null when there was nothing to
-  /// measure. A null draws its reason instead of a 0% bar, which would read as
-  /// a bad day rather than a quiet one.
+  /// An insight carries a PERCENTAGE, 0 to 100, or null when there was
+  /// nothing to measure. A null draws its reason instead of a 0% bar, which
+  /// would read as a bad day rather than a quiet one.
+  ///
+  /// This used to read the value as a 0-to-1 fraction and then multiply by
+  /// 100. buildInsights() in routes/eventLogs.js returns whole percentages --
+  /// pct() is Math.round(n / d * 100) clamped to [0, 100] -- so every value
+  /// of 1 or more was clamped to 1.0 and printed as 100% with a full bar.
+  /// Routine adherence of 42% read as 100%; only a true zero escaped.
   Widget _insight(Map<String, dynamic> i) {
     final raw = i['value'];
     final label = i['label']?.toString() ?? '';
@@ -403,16 +409,18 @@ class _ActivityScreenState extends State<ActivityScreen> {
             Flexible(
               child: Text(detail.isEmpty ? 'No data' : detail,
                   textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
             ),
           ],
         ),
       );
     }
-    final value = (raw as num).toDouble().clamp(0.0, 1.0);
-    final color = value >= 0.75
+    // Percent for the label, a 0-to-1 fraction for the bar.
+    final percent = (raw as num).toDouble().clamp(0.0, 100.0);
+    final value = percent / 100.0;
+    final color = percent >= 75
         ? AppColors.success
-        : value >= 0.4
+        : percent >= 40
             ? AppColors.primary
             : AppColors.warning;
     return Padding(
@@ -423,7 +431,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-              Text('${(value * 100).toInt()}%',
+              Text('${percent.toInt()}%',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
             ],
           ),
@@ -443,7 +451,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(detail,
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                    style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
               ),
             ),
         ],

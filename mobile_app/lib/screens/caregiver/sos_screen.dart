@@ -58,7 +58,12 @@ class _SosScreenState extends State<SosScreen> {
     if (loc != null && loc['lat'] != null && loc['lng'] != null) {
       _where = LatLng(
           (loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
-      _fixAt = widget.raisedAt;
+      // The fix's OWN time when the server had to fall back to the last known
+      // position, which it does whenever the phone had no signal at the
+      // moment the button was pressed. Labelling a 20-minute-old fix with the
+      // time the alarm was raised would read as "they are here now".
+      final at = DateTime.tryParse((loc['at'] ?? '').toString());
+      _fixAt = at ?? widget.raisedAt;
     }
     SocketService().addLocationUpdateListener(_onLocation);
     SocketService().addSosResolvedListener(_onResolvedElsewhere);

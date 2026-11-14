@@ -1,4 +1,5 @@
 const express = require('express');
+const { scopedUserId } = require('../utils/scope');
 const router = express.Router();
 const EventLog = require('../models/EventLog');
 const { protect: auth } = require('../middleware/auth');
@@ -14,17 +15,9 @@ const { protect: auth } = require('../middleware/auth');
 router.post('/ask', auth, async (req, res) => {
   try {
     let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) {
-        userId = req.query.userId;
-      } else {
-        const User = require('../models/User');
-        const caregiver = await User.findById(req.user.id);
-        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
-          userId = caregiver.monitoring_users[0];
-        }
-      }
-    }
+    // See utils/scope.js: the id is checked against who they actually
+    // look after, instead of being taken on trust from the query string.
+    userId = await scopedUserId(req);
     // A caregiver reading about someone else must not be told "you put your
     // keys down". The subject's name is looked up only when it is NOT the
     // person asking, so the ordinary case costs no extra query.
@@ -48,17 +41,9 @@ router.get('/memory-search', auth, async (req, res) => {
   try {
     let userId = req.user.id;
     // If caregiver, they view logs for their connected elderly user
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) {
-        userId = req.query.userId;
-      } else {
-        const User = require('../models/User');
-        const caregiver = await User.findById(req.user.id);
-        if (caregiver?.monitoring_users && caregiver.monitoring_users.length > 0) {
-          userId = caregiver.monitoring_users[0];
-        }
-      }
-    }
+    // See utils/scope.js: the id is checked against who they actually
+    // look after, instead of being taken on trust from the query string.
+    userId = await scopedUserId(req);
 
     const { type, limit, date, person, item } = req.query;
 
@@ -299,17 +284,44 @@ async function buildInsights({ idForms, start, end, items, anomalies, steps, min
  * showed a plausible-looking day ("Met with neighbor Mrs. Johnson", "~2,400
  * steps") that came from nowhere and never changed.
  */
+/**
+ * The public shape of one conversation.
+ *
+ * A single definition because three readers need the same answer: the timeline
+ * item, the conversations list and the conversations card. Written to say what
+ * is true rather than what is convenient -- in particular there are three
+ * different reasons a conversation has no summary, and collapsing them into a
+ * blank would make a working conversation look broken.
+ *
+ *   collecting / pending  the person is still there, or it is queued
+ *   skipped_silent        the camera saw a face and heard nothing
+ *   skipped_thin          words, but too few or too repetitive to summarise
+ *   skipped_unconfigured  no LLM key is set on this deployment
+ *   failed                a guard in conversationAgent fired
+ *   done                  there is a summary
+ *
+ * has_transcript answers "can the words still be read", which is a question
+ * about TIME: the transcript expires on the keyframe clock while the summary
+ * does not, so this goes false 36 hours in and the UI stops offering it.
+ */
+function conversationFields(convo) {
+  if (!convo) return {};
+  return {
+    conversation: {
+      summary: convo.summary || null,
+      topics: convo.topics || null,
+      status: convo.summary_status || null,
+      heard_seconds: convo.heard_seconds || 0,
+      has_transcript: Boolean(convo.transcript),
+      transcript_expired: Boolean(convo.transcript_expired_at),
+    },
+  };
+}
+
 router.get('/timeline', auth, async (req, res) => {
   try {
     let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      if (req.query.userId) userId = req.query.userId;
-      else {
-        const User = require('../models/User');
-        const cg = await User.findById(req.user.id);
-        if (cg?.monitoring_users?.length) userId = cg.monitoring_users[0];
-      }
-    }
+    userId = await scopedUserId(req);
 
     const day = req.query.date ? new Date(req.query.date) : new Date();
     if (Number.isNaN(day.getTime())) return res.status(400).json({ error: 'invalid date' });
@@ -392,10 +404,15 @@ router.get('/timeline', auth, async (req, res) => {
             ? (rel ? `Your ${String(rel).toLowerCase()}` : 'A face you have named')
             : 'Recognised, but not yet named',
           person_name: name,
+          // What was SAID, which the pipeline has been transcribing and the
+          // summariser writing all along with nothing reading it back.
+          ...conversationFields(d.conversation),
           keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'unknown_face') {
         items.push({ at: e.timestamp, kind: 'social', title: 'An unfamiliar face',
-          detail: 'Not matched to anyone you know', keyframe_id: e.keyframe_id || null });
+          detail: 'Not matched to anyone you know',
+          ...conversationFields(d.conversation),
+          keyframe_id: e.keyframe_id || null });
       } else if (e.event_type === 'object' && d.action === 'item_seen') {
         // An item in the wearer's own hand is not a memory of where they left
         // something, it is just them holding their phone, and "Spotted phone"
@@ -521,18 +538,121 @@ router.get('/timeline', auth, async (req, res) => {
   }
 });
 
+/**
+ * Who this request is allowed to read.
+ *
+ * The same rule /timeline applies: a wearer reads themself, a caregiver reads
+ * the person named in the query or the first one they monitor. Conversations
+ * are the most private thing this system records, so the answer is computed
+ * here and never taken from the request.
+ */
+// Moved to utils/scope.js, which every route on this file now shares -- and
+// which, unlike this version, refuses an id the caregiver does not look
+// after instead of fetching whatever was asked for.
+
+function idFormsOf(userId) {
+  const mongoose = require('mongoose');
+  const forms = [userId, String(userId)];
+  if (mongoose.Types.ObjectId.isValid(userId)) forms.push(new mongoose.Types.ObjectId(String(userId)));
+  return forms;
+}
+
+// GET /api/event-logs/conversations
+//
+// One day of conversations the camera heard, newest first. Everything here has
+// existed in the database since the pipeline started transcribing; this is the
+// first thing that reads it back.
+router.get('/conversations', auth, async (req, res) => {
+  try {
+    const userId = await scopedUserId(req);
+    const day = req.query.date ? new Date(req.query.date) : new Date();
+    if (Number.isNaN(day.getTime())) return res.status(400).json({ error: 'invalid date' });
+    const start = new Date(day); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    const limit = Math.min(Number(req.query.limit) || 25, 100);
+
+    require('../models/Relationship');
+    const events = await EventLog.find({
+      user_id: { $in: idFormsOf(userId) },
+      event_type: { $in: ['social_interaction', 'unknown_face'] },
+      verification_status: { $ne: 'rejected' },
+      'details.conversation': { $exists: true },
+      timestamp: { $gte: start, $lt: end },
+    }).populate('person_id', 'person_name relationship_type')
+      .sort({ timestamp: -1 }).limit(limit).lean();
+
+    res.json({
+      date: start.toISOString().slice(0, 10),
+      conversations: events.map(e => {
+        const convo = e.details.conversation;
+        return {
+          id: String(e._id),
+          at: e.timestamp,
+          // The name lives on the relationship, not the event -- the same
+          // reason /timeline populates person_id.
+          person_name: e.person_id?.person_name || e.details.person_name || null,
+          relationship_type: e.person_id?.relationship_type || e.details.relationship_type || null,
+          keyframe_id: e.keyframe_id || null,
+          ...conversationFields(convo).conversation,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error('Error listing conversations:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/event-logs/conversations/:id/transcript
+//
+// The verbatim words, asked for deliberately rather than served beside the
+// summary. They are only here for KEYFRAME_TTL_HOURS; after that the summary
+// is all that is left, which is the documented intent of the whole feature.
+router.get('/conversations/:id/transcript', auth, async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'invalid id' });
+    }
+    const userId = await scopedUserId(req);
+    // Scoped in the QUERY, not checked after the fact: an id belonging to
+    // somebody else must not be readable even for a moment.
+    const event = await EventLog.findOne({
+      _id: req.params.id,
+      user_id: { $in: idFormsOf(userId) },
+    }).lean();
+    if (!event) return res.status(404).json({ error: 'not found' });
+
+    const convo = event.details?.conversation;
+    if (!convo) return res.status(404).json({ error: 'no conversation on this event' });
+
+    if (!convo.transcript) {
+      // Three different nothings, and the reader deserves to know which.
+      const reason = convo.transcript_expired_at ? 'expired'
+        : (convo.summary_status === 'collecting' ? 'collecting' : 'silent');
+      return res.status(410).json({ error: 'no transcript', reason });
+    }
+
+    res.json({
+      id: String(event._id),
+      text: convo.transcript,
+      heard_seconds: convo.heard_seconds || 0,
+      segments: convo.segments || null,
+      at: event.timestamp,
+    });
+  } catch (error) {
+    console.error('Error reading transcript:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/event-logs/keyframes
 // For Keyframe Audit screen (includes unknown_face and medication_intake)
 router.get('/keyframes', auth, async (req, res) => {
   try {
-    let userId = req.user.id;
-    if (req.user.role === 'caregiver') {
-      const User = require('../models/User');
-      const caregiver = await User.findById(req.user.id);
-      if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-        userId = caregiver.monitoring_users[0];
-      }
-    }
+    // Was hard-wired to the first person monitored, so the Keyframe Audit
+    // screen's own person-picker changed the heading and nothing else.
+    const userId = await scopedUserId(req);
 
     const { type, limit = 50 } = req.query;
 

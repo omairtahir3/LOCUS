@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { detectionAPI } from '../services/api';
 import { Scan, Play, Square, Zap, Activity, CheckCircle, XCircle, AlertTriangle, Loader, Clock, Timer } from 'lucide-react';
+import PageHeader from '../components/Layout/PageHeader';
 
 export default function Detection() {
   const [status, setStatus] = useState({ is_running: false, buffer_size: 0, has_result: false, last_result: null });
@@ -98,12 +99,10 @@ export default function Detection() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">AI Detection Pipeline</h2>
-          <p className="page-description">Monitor and control the medication intake detection system</p>
-        </div>
-      </div>
+      <PageHeader
+        title="AI Detection Pipeline"
+        description="Monitor and control the medication intake detection system"
+      />
 
       {/* Active Verification Session */}
       {session && (
@@ -140,7 +139,7 @@ export default function Detection() {
             <div className="stat-card">
               <div className="stat-icon success"><CheckCircle size={18} /></div>
               <div>
-                <div className="stat-value" style={{ color: 'var(--success)' }}>{session.medicines_taken}</div>
+                <div className="stat-value" style={{ color: 'var(--success-text)' }}>{session.medicines_taken}</div>
                 <div className="stat-label">Detected</div>
               </div>
             </div>
@@ -208,7 +207,7 @@ export default function Detection() {
             <div className="stat-card">
               <div className="stat-icon success"><CheckCircle size={18} /></div>
               <div>
-                <div className="stat-value" style={{ color: 'var(--success)' }}>{status.medicines_taken_count || 0}</div>
+                <div className="stat-value" style={{ color: 'var(--success-text)' }}>{status.medicines_taken_count || 0}</div>
                 <div className="stat-label">Medicines Taken</div>
               </div>
             </div>
@@ -259,7 +258,7 @@ export default function Detection() {
           </div>
 
           {error && (
-            <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--danger-light)', color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 12 }}>
+            <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--danger-light)', color: 'var(--danger-text)', fontSize: '0.85rem', marginBottom: 12 }}>
               <AlertTriangle size={14} style={{ display: 'inline', marginRight: 6 }} />{error}
             </div>
           )}
@@ -301,7 +300,7 @@ export default function Detection() {
 
           <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 16 }}>
             <div className="stat-card">
-              <div className="stat-value" style={{ color: 'var(--primary)' }}>
+              <div className="stat-value" style={{ color: 'var(--primary-text)' }}>
                 {((result.final_confidence || 0) * 100).toFixed(0)}%
               </div>
               <div className="stat-label">Confidence</div>
@@ -309,7 +308,7 @@ export default function Detection() {
             {getPhases(result.phase_details).map((p, i) => (
               <div className="stat-card" key={i}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  {p.passed ? <CheckCircle size={14} style={{ color: 'var(--success)' }} /> : <XCircle size={14} style={{ color: 'var(--danger)' }} />}
+                  {p.passed ? <CheckCircle size={14} style={{ color: 'var(--success-text)' }} /> : <XCircle size={14} style={{ color: 'var(--danger-text)' }} />}
                   <span className="text-sm font-bold">{p.name}</span>
                 </div>
                 <div className="stat-value">{(p.score * 100).toFixed(0)}%</div>

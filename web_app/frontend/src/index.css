@@ -1,5 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+/* ponytail: one family at four weights rather than two at six. Only Outfit is
+   ever named in a font-family rule -- Inter sat behind it as a fallback that
+   never applied -- so twelve files were fetched to use four. */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LOCUS Design System — Light Theme
@@ -32,20 +34,68 @@
   --surface-hover: #F1F5F9;
   --border: #E2E8F0;
   --border-light: #F1F5F9;
-  --text-primary: #1E293B;
-  --text-secondary: #64748B;
-  --text-muted: #94A3B8;
+  /* Very dark teal ink rather than slate: it belongs to this palette and
+     measures 15.9:1 on the page ground. */
+  --text-primary: #0E2B29;      /* 15.9:1 */
+  /* #64748B measured 4.55:1 on the OLD near-white ground and drops below 4.5
+     on the tinted one. This clears it with room to spare. */
+  --text-secondary: #4D5A66;    /*  7.4:1 */
+  --text-muted: #5F6B76;        /*  5.6:1 on the ground -- was #94A3B8 at 2.45:1,
+                                   which fails WCAG AA even at large sizes.
+                                   Readers here often have reduced contrast
+                                   sensitivity; muted must still be readable. */
   --text-inverse: #FFFFFF;
 
+  /* Semantic colours as TEXT. The bright values above are mark and fill
+     colours: measured on --bg they are 2.42:1 (success), 2.05:1 (warning)
+     and 3.60:1 (danger), so none of them is legible as a label. Use these
+     when the colour is carrying words; use the bright ones for fills, icons
+     and marks. Each clears 4.6:1 on --bg. */
+  --primary-text: #0b7f75;
+  --success-text: #0b825a;
+  --warning-text: #9d6507;
+  --danger-text:  #ce3a3a;
+  /* #3B82F6 measures 3.68:1 on --info-light, so an informational heading was
+     the least readable line in its own banner. */
+  --info-text:    #1d4ed8;
+
   /* Layout */
-  --sidebar-width: 260px;
-  --sidebar-collapsed: 72px;
-  --topbar-height: 64px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* The floating dock replaced a 260px sidebar and a 64px topbar. Only its
+     own height is a layout constant now; nothing is reserved horizontally. */
+  --dock-height: 64px;
+  /* Type scale. Sizes were ad hoc across the pages -- 1.8rem, 0.85rem, 2rem,
+     0.75rem -- which is what makes a interface look assembled rather than
+     designed. rem so the browser's own text-size setting still works. */
+  /* The root was 15px, which put --text-xs at 11.25px and body at 14px --
+     under the 13px floor and under the 16px body this audience needs. The
+     root is the browser default now, so these are the real pixel sizes and a
+     reader who has set their own text size still gets it. */
+  --text-xs:   0.8125rem;   /* 13px -- the floor, nothing is smaller */
+  --text-sm:   0.875rem;    /* 14px */
+  --text-base: 1rem;        /* 16px -- body */
+  --text-lg:   1.125rem;    /* 18px -- card titles */
+  --text-xl:   1.25rem;     /* 20px */
+  --text-2xl:  1.5rem;      /* 24px */
+  --text-3xl:  2.125rem;    /* 34px -- page titles */
+
+  /* A scale, not one value repeated. Panels are softly rounded, controls less
+     so, pills fully. Previously a page section and a chip shared 16-24px, so
+     shape told the reader nothing about hierarchy. */
+  --radius-sm: 8px;      /* inputs, chips */
+  --radius-md: 12px;     /* buttons, small panels */
+  --radius-lg: 18px;     /* cards */
+  --radius-xl: 24px;     /* feature surfaces */
   --radius-full: 9999px;
+
+  --rule: 1px solid var(--border);
+  --rule-strong: 1px solid #CBD5E1;
+
+  /* Depth, tuned rather than the stock rgba(0,0,0,.1) under everything.
+     Teal-tinted shadow so it belongs to this palette instead of greying the
+     surface, and two layers so edges stay crisp while the cast stays soft. */
+  --lift-1: 0 1px 2px rgba(13, 80, 76, .06), 0 1px 1px rgba(13, 80, 76, .04);
+  --lift-2: 0 2px 4px rgba(13, 80, 76, .06), 0 6px 16px -6px rgba(13, 80, 76, .12);
+  --lift-3: 0 4px 8px rgba(13, 80, 76, .07), 0 18px 32px -12px rgba(13, 80, 76, .16);
 
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -59,7 +109,7 @@
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 
-  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--text-primary);
 }
 
@@ -74,7 +124,8 @@
 }
 
 html {
-  font-size: 15px;
+  /* Was a hard 15px, which overrode whatever the reader had chosen. */
+  font-size: 100%;
 }
 
 body {
@@ -86,7 +137,7 @@ body {
 }
 
 a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: none;
 }
 
@@ -99,149 +150,875 @@ img {
   display: block;
 }
 
-/* ── Layout ─────────────────────────────────────────────────────────────── */
+/* Leaflet's tiles are <img> elements, and the rule above makes every one of
+   them 0px wide.
+   A tile sits inside .leaflet-tile-container, which is absolutely positioned
+   with no width of its own, so its used width is 0. max-width: 100% then
+   resolves to 0, every tile collapses, and the map renders as an empty box --
+   with its zoom control and attribution still visible, because those are not
+   images. Nothing throws and no request fails, which is what makes this so
+   slow to find: the network tab is all 200s and the console is clean.
+   max-width: none is Leaflet's own documented fix. Scoped to the map so the
+   global rule keeps protecting every other image in the app. */
+.leaflet-container img {
+  max-width: none;
+}
 
-.app-layout {
-  display: flex;
+/* Leaflet measures its panes assuming content-box, and the universal
+   box-sizing: border-box reset above applies to them too. Harmless until
+   anything gives a pane a border or padding, at which point tiles land a few
+   pixels off and seams appear between them. Cheaper to exclude now than to
+   diagnose later. */
+.leaflet-container,
+.leaflet-container * {
+  box-sizing: content-box;
+}
+
+/* The map must not outrank the chrome above it.
+   Leaflet gives its panes z-index 400 and its controls 1000, and
+   .leaflet-container is position: relative with NO z-index -- so it creates no
+   stacking context and those numbers compete in the ROOT one. The dock is
+   fixed at z-index 120 and the alerts panel is a child of it, so the panel
+   resolves at 120 however high its own z-index goes: clicking Alerts on the
+   location page opened it behind the map. Raising the panel instead would
+   start an arms race with a library that can renumber itself in any release.
+   isolation makes the map its own stacking context, so 400 and 1000 are
+   scoped inside it and the map takes its place in normal flow -- under the
+   dock, the alerts panel, the chat overlay and a call. */
+.leaflet-container {
+  isolation: isolate;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Shell: floating dock, no sidebar
+
+   The 260px sidebar and the fixed topbar are gone, and so are their layout
+   tokens. Content owns the full width; the dock floats over it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
   min-height: 100vh;
 }
 
 .main-content {
-  flex: 1;
-  margin-left: var(--sidebar-width);
-  padding: 24px 32px;
-
-  transition: margin-left var(--transition-base);
+  /* Clears the floating dock: its height plus the gap it floats by. */
+  padding-top: calc(var(--dock-height) + 22px);
   min-height: 100vh;
 }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
+.page-container {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0 32px 64px;
+}
 
-.sidebar {
+/* ── The bar ─────────────────────────────────────────────────────────────── */
+
+.dock-bar {
   position: fixed;
-  top: 0;
+  top: 14px;
   left: 0;
-  width: var(--sidebar-width);
-  height: 100vh;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  z-index: 100;
-  transition: width var(--transition-base);
-  overflow-y: auto;
-}
-
-.sidebar-logo {
-  padding: 20px 24px;
-  display: flex;
+  right: 0;
+  z-index: 120;
+  height: var(--dock-height);
+  display: grid;
+  /* Three tracks so the pill is centred on the VIEWPORT rather than being
+     pushed off centre by a wide person-chip on one side. */
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--border-light);
+  padding: 0 20px;
+  pointer-events: none;        /* the gaps between clusters stay clickable */
+  transition: top var(--transition-base), height var(--transition-base);
 }
 
-.sidebar-logo img {
-  height: 32px;
+.dock-bar > * { pointer-events: auto; }
+
+.dock-bar.is-shrunk {
+  top: 6px;
+  height: 52px;
+}
+
+.dock-left  { display: flex; align-items: center; gap: 10px; justify-self: start; }
+.dock-right { display: flex; align-items: center; gap: 6px;  justify-self: end; }
+
+.dock-mark { display: flex; align-items: center; }
+
+.dock-mark img {
+  height: 30px;
   width: auto;
-  /* original colors */
+  object-fit: contain;
+  transition: height var(--transition-base);
 }
 
-.sidebar-nav {
-  padding: 12px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.is-shrunk .dock-mark img { height: 24px; }
+
+/* ── The pill ────────────────────────────────────────────────────────────── */
+
+/* Glass on a light ground: 80% white over whatever scrolls beneath, with the
+   blur doing the legibility work. The shadow is teal-tinted like the rest of
+   the depth scale, so the dock belongs to this palette. */
+.dock {
+  justify-self: center;
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 6px rgba(13, 80, 76, .07), 0 14px 32px -14px rgba(13, 80, 76, .22);
+  padding: 6px;
+  transition: padding var(--transition-base), background var(--transition-base);
 }
 
-.sidebar-nav a,
-.sidebar-nav button {
+.is-shrunk .dock {
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.dock ul {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  font-size: 0.9rem;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dock a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
   font-weight: 500;
-  text-decoration: none;
-  border: none;
-  background: none;
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  transition: all var(--transition-fast);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: color var(--transition-fast);
 }
 
-.sidebar-nav a:hover,
-.sidebar-nav button:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
+.dock a:hover { color: var(--text-primary); }
 
-.sidebar-nav a.active {
-  background: var(--primary-light);
+.dock a.is-active {
   color: var(--primary-dark);
   font-weight: 600;
 }
 
-.sidebar-nav a.active svg {
-  color: var(--primary);
+/* The sliding indicator sits behind the label, hence the negative z-index on
+   a positioned parent. */
+.dock-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-full);
+  background: var(--primary-light);
 }
 
-.sidebar-section-label {
-  font-size: 0.7rem;
+.dock a > svg,
+.dock .dock-label { position: relative; }
+
+.is-shrunk .dock a { padding: 6px 12px; }
+
+/* The labels drop and the dock becomes icons before it has any chance to
+   collide with the clusters either side. Each link keeps its text in the DOM,
+   so the accessible name survives.
+
+   TWO THRESHOLDS, BECAUSE THERE ARE TWO DOCKS
+
+   "Recent keyframes" is 16 characters where no other label is more than 10,
+   so the item that carries it costs about 170px. A caregiver pays that on top
+   of eight items and a person-chip: the pill measures ~955px and, with the
+   chip (~178px) and the three round buttons (~132px), needs 1289px of content
+   box -- which the bar only has above ~1353px. Below that the avatar was
+   pushed past the page's own right edge.
+
+   A wearer's dock has one item fewer and no chip, so it needs ~1135px and
+   keeps its words a good deal further down. That matters more here than
+   anywhere: the person reading it is the one the labels are for. */
+@media (max-width: 1240px) {
+  .dock .dock-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .dock a { padding: 9px 11px; }
+}
+
+/* The person-chip is the tell: only a caregiver's bar has one. 1360 rather
+   than 1353 so a 1366px laptop -- the commonest screen this runs on after
+   1920 -- keeps its labels. */
+@media (min-width: 1241px) and (max-width: 1360px) {
+  .dock-bar:has(.person-chip) .dock .dock-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .dock-bar:has(.person-chip) .dock a { padding: 9px 11px; }
+}
+
+/* ── Round icon buttons in the clusters ──────────────────────────────────── */
+
+.dock-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--lift-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.dock-icon-btn:hover { color: var(--text-primary); background: #fff; }
+
+/* ── Alerts bell ─────────────────────────────────────────────────────────── */
+
+/* Emergency changes the GLYPH (a siren) as well as the colour, so it is not
+   merely an unread badge in a louder red. The ring is the second signal. */
+.bell-emergency {
+  color: var(--danger-text);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-light), var(--lift-1);
+}
+
+.bell-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--danger);
+  border: 2px solid var(--surface);
+  color: var(--text-inverse);
+  font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  padding: 16px 14px 6px;
+  line-height: 14px;
+  text-align: center;
 }
 
-.sidebar-spacer {
-  flex: 1;
+/* ── Popovers: bell, person, profile ─────────────────────────────────────── */
+
+.dock-pop-wrap { position: relative; }
+
+.dock-pop {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: 290px;
+  /* A second line of defence behind dock-pop-right: whatever a panel is
+     anchored to, it can never be wider than the window it opens in. The
+     alerts panel was anchored left from a button near the right edge and ran
+     off the page entirely. */
+  max-width: calc(100vw - 24px);
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-3);
+  padding: 8px;
+  z-index: 130;
 }
 
-.sidebar-footer {
-  padding: 12px;
+.dock-pop-right { left: auto; right: 0; }
+
+.dock-pop-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 8px 8px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dock-pop-count { font-weight: 500; color: var(--text-secondary); }
+
+.dock-pop-empty,
+.dock-pop-list { margin: 0; padding: 0; list-style: none; }
+
+.dock-pop-empty {
+  padding: 14px 8px;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+}
+
+.dock-pop-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+}
+
+.dock-pop-list li + li { border-top: 1px solid var(--border-light); }
+
+.dock-pop-list li.is-emergency {
+  background: var(--danger-light);
+  border-left: 3px solid var(--danger);
+}
+
+.dock-pop-title { font-size: var(--text-sm); color: var(--text-primary); }
+.dock-pop-when  { font-size: var(--text-xs); color: var(--text-muted); }
+
+.dock-pop-all {
+  display: block;
+  margin-top: 6px;
+  padding: 9px 8px;
   border-top: 1px solid var(--border-light);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-text);
 }
 
-/* ── Topbar ─────────────────────────────────────────────────────────────── */
-
-.topbar {
-  position: fixed;
-  top: 0;
-  left: var(--sidebar-width);
-  right: 0;
-  height: var(--topbar-height);
-  background: rgba(248, 250, 252, 0.85);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
+.dock-pop-action {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 32px;
-  z-index: 90;
-  transition: left var(--transition-base);
+  gap: 9px;
+  width: 100%;
+  padding: 9px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: var(--text-base);
+  font-family: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
 }
 
-.topbar-title {
-  font-size: 1.2rem;
+.dock-pop-action:hover { background: var(--surface-hover); }
+.dock-pop-action.is-danger { color: var(--danger-text); }
+
+/* ── Person switcher ─────────────────────────────────────────────────────── */
+
+.person-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--lift-1);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.person-chip:hover { background: #fff; }
+
+.person-chip-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--text-inverse);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.person-chip-name {
+  max-width: 11ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Never the only carrier of meaning: every dot is paired with words in the
+   popover, and the chip's aria-label spells the state out. */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+}
+
+.status-dot.is-calm      { background: var(--success); }
+.status-dot.is-attention { background: var(--warning); }
+.status-dot.is-unknown   { background: transparent; border: 1.5px solid var(--text-muted); }
+
+.person-list { list-style: none; margin: 0; padding: 0; }
+
+.person-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-list button:hover { background: var(--surface-hover); }
+.person-list button.is-selected { background: var(--primary-light); }
+
+.person-list-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.person-list-name { font-size: var(--text-base); font-weight: 600; color: var(--text-primary); }
+.person-list-status { font-size: var(--text-xs); color: var(--text-secondary); }
+
+/* ── Profile ─────────────────────────────────────────────────────────────── */
+
+.profile-btn { overflow: hidden; padding: 0; }
+.profile-btn img { width: 100%; height: 100%; object-fit: cover; }
+
+.profile-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: var(--primary);
+  color: var(--text-inverse);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.profile-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 10px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 6px;
+}
+
+.profile-name  { font-size: var(--text-base); font-weight: 600; }
+.profile-email { font-size: var(--text-xs); color: var(--text-muted); }
+.profile-role  { font-size: var(--text-xs); color: var(--primary-text); font-weight: 600; margin-top: 2px; }
+
+/* ── Dock badge ──────────────────────────────────────────────────────────── */
+
+/* --warning carries "something is waiting for you", distinct from the bell's
+   --danger "something is wrong". A face needing a name is work, not an alarm.
+   #3d2800 on #F59E0B measures 7.4:1. */
+.dock-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--warning);
+  border: 2px solid var(--surface);
+  color: #3d2800;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+}
+
+.dock-badge.is-inline { position: static; border: none; }
+
+/* ── Command palette ─────────────────────────────────────────────────────── */
+
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(3px);
+  display: flex;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+}
+
+.palette {
+  width: 100%;
+  max-width: 540px;
+  height: max-content;
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-3);
+  overflow: hidden;
+}
+
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: var(--rule);
+  color: var(--text-muted);
+}
+
+.palette-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+}
+
+.palette-field kbd {
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.palette-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+
+.palette-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.palette-list button.is-active { background: var(--primary-light); color: var(--primary-dark); }
+
+.palette-label { font-size: var(--text-base); font-weight: 600; color: var(--text-primary); }
+.palette-hint  { font-size: var(--text-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-group { margin-left: auto; font-size: var(--text-xs); color: var(--text-muted); }
+
+.palette-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.palette-empty { padding: 20px 16px; font-size: var(--text-base); color: var(--text-secondary); }
+
+/* ── Bottom tab bar, under 900px ─────────────────────────────────────────── */
+
+.tabbar { display: none; }
+.sheet  { display: none; }
+
+.sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 118;
+  background: rgba(15, 23, 42, 0.3);
+  backdrop-filter: blur(3px);
+}
+
+/* ── A family member's own page: AI verification rows ──────────────────── */
+
+/* The row is a surface with a hairline, like a notification. Only the
+   confidence chip carries colour, because the score is the only part of the
+   row that is a judgement -- the medicine's name and the time it was taken
+   are facts and do not need tinting. */
+.verify-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.verify-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.verify-score {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.verify-row.is-verified .verify-score {
+  background: var(--success-light);
+  color: var(--success-text);
+}
+
+.verify-row.is-unverified .verify-score {
+  background: var(--danger-light);
+  color: var(--danger-text);
+}
+
+.verify-main { flex: 1 1 auto; min-width: 0; }
+
+.verify-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verify-when {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.verify-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.verify-action {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  /* The badge column stops fitting beside the name long before the card does. */
+  .verify-row { flex-wrap: wrap; }
+  .verify-side { align-items: flex-start; flex-direction: row; gap: 10px; }
+}
+
+/* ── An empty state that is already inside a card ──────────────────────── */
+
+/* .empty-state draws its own dashed border, its own surface and 44px of
+   padding. That is right when it stands alone on a page; inside a .card it
+   is a box drawn inside a box, and it made "nothing to report" the tallest
+   element on the screen. */
+.empty-state.is-inset {
+  padding: 26px 20px;
+  border: 0;
+  background: transparent;
+}
+
+.empty-state.is-inset svg {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+}
+
+/* Grid rows stretch, so the empty card is as tall as the full one beside it.
+   Without this the message clings to the top of all that space and the card
+   reads as unfinished rather than as empty on purpose. */
+.card:has(> .empty-state.is-inset) {
+  display: flex;
+  flex-direction: column;
+}
+
+.card > .empty-state.is-inset {
+  flex: 1 1 auto;
+  display: grid;
+  place-content: center;
+}
+
+/* ── Whose routine the Routine page is about ───────────────────────────── */
+
+/* Quiet on purpose. This is an orienting line, not an alert: it sits between
+   the page title and the first card and has to be readable at a glance
+   without competing with the findings underneath. Hence the tinted ground
+   rather than a filled one, and the name at list-item weight rather than
+   heading weight. */
+.routine-subject {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-lg);
+  background: var(--primary-light);
+  border: 1px solid var(--border);
+}
+
+.routine-subject-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #FFFFFF;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.routine-subject-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.routine-subject-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--primary-text);
+}
+
+.routine-subject-text strong {
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-primary);
-  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.topbar-right {
+/* Nobody picked yet: the page still loads, but it is showing nothing about
+   nobody, and saying so is better than a name-shaped blank. */
+.routine-subject.is-empty {
+  background: var(--surface);
+}
+.routine-subject.is-empty .routine-subject-avatar {
+  background: var(--border);
+  color: var(--text-muted);
+}
+.routine-subject.is-empty .routine-subject-text strong {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ── The emergency banner on the location page ──────────────────────────── */
+
+/* Read before it is read: the glyph pulses, the fill is a gradient rather
+   than a flat block, and the two actions are plainly unequal -- Message is an
+   option, Mark resolved ends the emergency. The version this replaces was a
+   flat red box whose two buttons looked like a form's Cancel and Submit. */
+.sos-banner {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-left: auto;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--danger) 0%, #B42318 100%);
+  color: #FFFFFF;
+  box-shadow: 0 10px 28px -12px rgba(180, 35, 24, .55);
 }
 
-.topbar-right .form-input {
-  width: 220px;
+.sos-banner-pulse {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+  animation: sos-pulse 1.8s ease-in-out infinite;
+}
+
+/* box-shadow only, so the pulse cannot cost a layout pass while someone reads
+   the sentence next to it. */
+@keyframes sos-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(255 255 255 / 0.45); }
+  70%      { box-shadow: 0 0 0 14px rgb(255 255 255 / 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sos-banner-pulse { animation: none; }
+}
+
+.sos-banner-text { flex: 1 1 260px; min-width: 0; }
+.sos-banner-text h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.sos-banner-text p {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: rgb(255 255 255 / 0.9);
+}
+
+.sos-banner-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.sos-btn-ghost,
+.sos-btn-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.sos-btn-ghost {
+  background: rgb(255 255 255 / 0.14);
+  color: #FFFFFF;
+  border: 1px solid rgb(255 255 255 / 0.55);
+}
+.sos-btn-ghost:hover { background: rgb(255 255 255 / 0.24); }
+.sos-btn-solid {
+  background: #FFFFFF;
+  color: var(--danger-text);
+  border: 1px solid #FFFFFF;
+}
+.sos-btn-solid:hover { background: #FFF5F5; }
+
+/* ── Chat overlay, replacing the full-height side panel ──────────────────── */
+
+.chat-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  /* Was min(390px, 100vw), which on a narrow window is the whole screen -- so
+     opening the chat during an emergency hid the map entirely. Capped at 88vw:
+     wide enough to type in, and the map stays visible beside it, which is the
+     point of being on this page. */
+  width: min(390px, 88vw);
+  z-index: 140;
+  background: var(--surface);
+  border-left: var(--rule);
+  box-shadow: var(--lift-3);
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Cards ──────────────────────────────────────────────────────────────── */
@@ -317,22 +1094,22 @@ img {
 
 .stat-icon.primary {
   background: var(--primary-light);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .stat-icon.success {
   background: var(--success-light);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .stat-icon.warning {
   background: var(--warning-light);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .stat-icon.danger {
   background: var(--danger-light);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .stat-icon.accent {
@@ -399,7 +1176,7 @@ img {
 
 .btn-outline-primary {
   background: transparent;
-  color: var(--primary);
+  color: var(--primary-text);
   border: 1px solid var(--primary);
 }
 
@@ -455,8 +1232,7 @@ img {
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  /* sentence case: an all-caps tracked-out eyebrow is decoration, not information */
 }
 
 .form-input,
@@ -475,7 +1251,7 @@ img {
 
 .form-input:focus,
 .form-select:focus {
-  border-color: var(--primary);
+  border-color: var(--primary-text);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
@@ -493,8 +1269,7 @@ img {
   border-radius: var(--radius-full);
   font-size: 0.72rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  /* sentence case: an all-caps tracked-out eyebrow is decoration, not information */
 }
 
 .badge-primary {
@@ -547,8 +1322,7 @@ img {
   padding: 10px 16px;
   font-size: 0.75rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  /* sentence case: an all-caps tracked-out eyebrow is decoration, not information */
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
 }
@@ -705,7 +1479,7 @@ img {
 }
 
 .auth-footer a {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
@@ -723,21 +1497,40 @@ img {
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 24px;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+  /* A rule under the header, rather than whitespace alone, so the title is
+     visibly a lid on the page and not the first item in it. */
+  border-bottom: var(--rule);
+}
+
+.page-header-text {
+  min-width: 0;
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .page-title {
-  font-size: 1.4rem;
-  font-weight: 700;
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
 }
 
 .page-description {
-  font-size: 0.9rem;
+  font-size: var(--text-base);
   color: var(--text-secondary);
+  margin-top: 4px;
+  max-width: 62ch;
 }
 
 .grid-2 {
@@ -754,29 +1547,39 @@ img {
 
 /* ── Empty State ────────────────────────────────────────────────────────── */
 
+/* An empty screen is a statement of fact, so it is drawn as one: a dashed
+   boundary that shows the shape of the thing that is missing, not a page that
+   looks broken. The icon was at opacity 0.4 over --text-muted, which lands
+   near 1.9:1 -- visible as a shape, which is all it has to be, but it must
+   never be the only carrier of the message, so the heading always says it. */
 .empty-state {
   text-align: center;
-  padding: 48px 24px;
-  color: var(--text-muted);
+  padding: 44px 24px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .empty-state svg {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 16px;
-  opacity: 0.4;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 14px;
+  opacity: 0.45;
+  color: var(--text-muted);
 }
 
 .empty-state h3 {
-  font-size: 1rem;
+  font-size: var(--text-lg);
   font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 .empty-state p {
-  font-size: 0.85rem;
-  max-width: 320px;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  max-width: 44ch;
   margin: 0 auto;
 }
 
@@ -847,7 +1650,7 @@ img {
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
+  /* sentence case: an all-caps tracked-out eyebrow is decoration, not information */
 }
 
 /* ── Modal ──────────────────────────────────────────────────────────────── */
@@ -1002,89 +1805,1908 @@ img {
   background: var(--text-muted);
 }
 
-/* ── Mobile Overlay ─────────────────────────────────────────────────────── */
-
-.mobile-header {
-  display: none;
-  height: 60px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 0 20px;
-  justify-content: space-between;
-  align-items: center;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 90;
-}
-
-.sidebar-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px);
-  z-index: 95;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.sidebar-overlay.open {
-  display: block;
-  opacity: 1;
-}
-
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
-@media (max-width: 768px) {
-  .mobile-header {
-    display: flex;
-    z-index: 105;
-  }
-
-  .sidebar-overlay {
-    z-index: 90;
-  }
-
-  .sidebar {
+/* 900px is where the dock hands over to the bottom bar, as specified. Above
+   it there is one layout; below it there is one layout. The old shell had its
+   only break at 768px, which left 769-1024px with a 260px sidebar eating a
+   quarter of a tablet. Nothing is off-canvas now, so there is no drawer, no
+   overlay and no open/closed state to get wrong. */
+@media (max-width: 900px) {
+  .dock-bar {
+    /* The mark and the clusters stay at the top; the destinations move to the
+       bottom bar. Two tracks, because the centre pill is gone. */
+    grid-template-columns: 1fr auto;
     top: 0;
-    width: var(--sidebar-width);
-    height: 100vh;
-    max-height: none;
-    border-right: 1px solid var(--border);
-    border-bottom: none;
-    transform: translateX(-100%);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 110;
-    box-shadow: 4px 0 6px -1px rgba(0, 0, 0, 0.1);
+    height: 56px;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: var(--rule);
   }
 
-  .sidebar.open {
-    transform: translateX(0);
-  }
+  .dock-bar.is-shrunk { top: 0; height: 56px; }
+
+  /* Hidden rather than unmounted: BottomTabs renders the same destinations,
+     so removing this from the DOM would duplicate the nav landmark. */
+  .dock { display: none; }
 
   .main-content {
-    margin-left: 0;
-    padding: 16px;
-    padding-top: calc(60px + 16px);
+    padding-top: calc(56px + 16px);
+    /* Room for the floating tab bar, plus the iOS home indicator. */
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
   }
 
-  .topbar {
-    display: none;
+  .page-container { padding: 0 20px 24px; }
+
+  .grid-2,
+  .grid-3 { grid-template-columns: 1fr; }
+
+  /* ── The bottom bar ──────────────────────────────────────────────────── */
+
+  .tabbar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 120;
+    display: flex;
+    justify-content: space-around;
+    align-items: stretch;
+    gap: 2px;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 2px 6px rgba(13, 80, 76, .07), 0 16px 36px -14px rgba(13, 80, 76, .26);
   }
 
-  .stat-grid {
-    grid-template-columns: 1fr 1fr;
+  .tabbar a,
+  .tabbar button {
+    flex: 1;
+    /* 44px is the floor for a touch target, and this audience includes people
+       with tremor; nothing here goes below it. */
+    min-width: 0;
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 2px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: none;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
   }
+
+  .tabbar a.is-active,
+  .tabbar button.is-active {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-weight: 600;
+  }
+
+  .tabbar-glyph { position: relative; display: inline-flex; }
+
+  /* ── The More sheet ──────────────────────────────────────────────────── */
+
+  .sheet {
+    display: block;
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    z-index: 125;
+    background: var(--surface);
+    border: var(--rule);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--lift-3);
+    padding: 8px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .sheet ul { list-style: none; margin: 0; padding: 0; }
+
+  .sheet a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+  }
+
+  .sheet a:active { background: var(--surface-hover); }
+
+  .sheet-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .sheet-label { font-size: var(--text-base); font-weight: 600; }
+  .sheet-hint { font-size: var(--text-xs); color: var(--text-muted); }
+
+  /* A popover anchored to a 390px-wide bar must not hang off the edge. */
+  .dock-pop {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 64px;
+    width: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-container { padding: 0 16px 24px; }
+
+  .page-header { align-items: flex-start; }
+
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Clear of the floating tab bar. */
+  .toast-viewport {
+    left: 12px;
+    right: 12px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .toast { max-width: none; }
+
+  /* Full width once a 390px screen has no room for a column beside it. */
+  .chat-overlay { width: 100vw; }
+
+  .palette-scrim { padding: 8vh 12px 12px; }
+}
+
+@media (max-width: 420px) {
+  /* Five labelled tabs at 390px is 70px each; the label is what gives way,
+     not the touch target. The accessible name stays in the DOM. */
+  .tabbar a > span:last-child,
+  .tabbar button > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .tabbar a,
+  .tabbar button { min-height: 52px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Motion
+   The dashboard mounts with a fadeIn and cards lift on hover. Both are fine
+   defaults and both are exactly what a vestibular disorder cannot tolerate.
+   One global rule rather than a block per component.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* A visible focus ring everywhere. Keyboard and switch users are a real part
+   of this audience, and :focus-visible keeps it off mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Shell feedback: waiting, nothing, and confirmation
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Visible to a screen reader, to nobody else. Needed because the loading and
+   bell states carry their meaning in text that must not be drawn. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Loading ────────────────────────────────────────────────────────────── */
+
+.loading {
+  padding: 8px 0;
+}
+
+.loading-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Three widths, cycling, so the block reads as rows of text rather than a
+   progress bar -- it is standing in for content, not reporting completion. */
+.loading-bar {
+  height: 14px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg,
+              var(--border-light) 0%, var(--surface-hover) 50%, var(--border-light) 100%);
+  background-size: 200% 100%;
+  animation: loading-sweep 1.4s ease-in-out infinite;
+}
+
+.loading-bar:nth-child(3n + 1) { width: 100%; }
+.loading-bar:nth-child(3n + 2) { width: 82%; }
+.loading-bar:nth-child(3n + 3) { width: 64%; }
+
+@keyframes loading-sweep {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+/* ── Toasts ─────────────────────────────────────────────────────────────── */
+
+.toast-viewport {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1200;          /* over the dock and the chat panel, under a call */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* The container must not swallow clicks on the page behind it; each toast
+     takes its own pointer events back. */
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: max-content;
+  max-width: 380px;
+  padding: 12px 12px 12px 14px;
+  background: var(--surface);
+  border: var(--rule);
+  /* The status is on the leading edge, where it survives greyscale and sits
+     outside the text it describes. */
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--radius-md);
+  box-shadow: var(--lift-3);
+  animation: toast-in var(--transition-base) both;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+
+.toast-message {
+  flex: 1;
+  font-size: var(--text-base);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.toast-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.toast-close:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The *-text tokens, not the bright marks: these paint an icon sitting next to
+   words on white, so they have to clear 4.5:1 rather than merely be visible. */
+.toast-success { border-left-color: var(--success); }
+.toast-success .toast-icon { color: var(--success-text); }
+
+.toast-error { border-left-color: var(--danger); }
+.toast-error .toast-icon { color: var(--danger-text); }
+
+.toast-warning { border-left-color: var(--warning); }
+.toast-warning .toast-icon { color: var(--warning-text); }
+
+.toast-info { border-left-color: var(--primary); }
+.toast-info .toast-icon { color: var(--primary-text); }
+
+/* A way back, above the title rather than inside it. */
+.page-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+}
+
+.page-back:hover { color: var(--primary-dark); }
+
+/* ── Routine page ───────────────────────────────────────────────────────── */
+
+/* Findings are the only half of that page that comes from learning. They are
+   drawn as a list of statements, not as a chart, because there is no series:
+   a finding either exists or it does not. */
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.finding-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  font-size: var(--text-base);
+}
+
+.finding-list li + li { border-top: 1px solid var(--border-light); }
+
+.finding-list svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--warning-text);
+}
+
+.finding-list span { flex: 1; min-width: 0; }
+.finding-detail { display: block; color: var(--text-secondary); font-size: var(--text-sm); }
+.finding-list time { color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
+
+.insight-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 18px 0 0;
+  padding-top: 18px;
+  border-top: var(--rule);
+}
+
+.insight-list dt {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.insight-list dd { margin: 4px 0 0; }
+
+.insight-value {
+  display: block;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--primary-text);
+}
+
+/* "Not enough data yet" is set in the same slot and the same size as a figure
+   would be, so an absent measure reads as an answer rather than a gap. It is
+   never styled as 0%. */
+.insight-unknown {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.insight-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.pattern-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pattern-list li {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: var(--text-base);
+}
+
+.pattern-list li + li { border-top: 1px solid var(--border-light); }
+
+.pattern-list time { color: var(--text-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.pattern-title { color: var(--text-primary); font-weight: 500; }
+.pattern-detail { color: var(--text-secondary); font-size: var(--text-sm); }
+
+@media (max-width: 640px) {
+  .pattern-list li { grid-template-columns: 64px 1fr; }
+  .pattern-detail { grid-column: 2; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Day summary (the main page)
+
+   A bento grid rather than a row of equal tiles. The day timeline is the one
+   thing someone opens this page to read, so it gets two columns; everything
+   else gets one and is allowed to be small. Medication is one of the small
+   ones on purpose -- it was the whole page before.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 32px;
+}
+
+.bento-head,
+.bento-banner { grid-column: 1 / -1; }
+
+.bento-card.is-wide { grid-column: span 2; }
+
+/* ── The pinned alert ───────────────────────────────────── */
+
+/* Styled under "Item 7" below. The first version of this block set
+   `.bento-banner > span { flex: 1 }`, which was fine when the banner held one
+   span and stretched the icon chip and the action group to full width once it
+   held three. */
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.bento-head { padding: 4px 0 2px; }
+
+.bento-date {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.bento-greeting {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* The one sentence. It is about the day, not about doses -- the old headline
+   had no other sentence available to it. */
+.bento-status {
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  margin-top: 6px;
+}
+
+.bento-where {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+
+.bento-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  padding: 16px 18px 18px;
+  min-width: 0;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.bento-card:hover { box-shadow: var(--lift-2); transform: translateY(-1px); }
+
+.bento-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bento-card-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bento-card-head h3 svg { color: var(--primary-text); flex-shrink: 0; }
+
+.bento-card-head a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-text);
+  white-space: nowrap;
+}
+
+/* The empty state inside a card does not need a second border around it. */
+.bento-card .empty-state {
+  border: none;
+  background: none;
+  padding: 18px 0;
+}
+
+.bento-card .empty-state svg { width: 32px; height: 32px; margin-bottom: 10px; }
+.bento-card .empty-state h3 { font-size: var(--text-base); }
+.bento-card .empty-state p { font-size: var(--text-sm); }
+
+/* ── The day timeline ────────────────────────────────────────────────────── */
+
+/* The hero of the page, so it is drawn as a timeline rather than as rows: a
+   teal rail down the card with a node per event, the clock on the left of it
+   and the event card on the right. Each node carries a glyph for its kind, so
+   the shape of a day can be read before any of the words are. */
+.day-line {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.day-line li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 76px 26px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+}
+
+/* The rail itself: a segment per row, so it stops cleanly at the ends
+   instead of running past the first and last nodes. */
+.day-line li::before {
+  content: '';
+  position: absolute;
+  left: calc(76px + 12px + 13px);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: linear-gradient(180deg, rgba(13,148,136,.22), rgba(13,148,136,.30));
+}
+
+.day-line li:first-child::before { top: 50%; }
+.day-line li:last-child::before  { bottom: 50%; }
+
+.day-line time {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.day-line-node {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(13, 148, 136, .34);
+  color: var(--primary-dark);
+  box-shadow: 0 1px 3px rgba(13, 80, 76, .12);
+}
+
+.day-line-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .72);
+  border: 1px solid rgba(13, 80, 76, .07);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.day-line li:hover .day-line-card {
+  background: #fff;
+  border-color: rgba(13, 148, 136, .22);
+}
+
+.day-line-thumb {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  border: 1px solid rgba(13, 148, 136, .20);
+}
+
+.day-line-text { display: flex; flex-direction: column; min-width: 0; }
+
+.day-line-title {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-line-detail { font-size: var(--text-sm); color: var(--text-secondary); }
+
+/* Medication and anomalies get their own node colour; everything else is
+   teal. Colour is never the only signal -- each node holds its own glyph. */
+.day-line li.is-medication .day-line-node { border-color: rgba(16,185,129,.45); color: var(--success-text); }
+.day-line li.is-anomaly    .day-line-node { border-color: rgba(245,158,11,.5);  color: var(--warning-text); }
+
+/* ── The ghost state ─────────────────────────────────────────────────────── */
+
+/* Not a spinner and not a shrug: the same rail and four muted nodes, so an
+   empty card still shows what it is for. Static -- a shimmer here would
+   suggest something is loading when nothing is. */
+.day-ghost { padding: 6px 0 2px; }
+
+.day-line.is-ghost li::before { background: rgba(13, 148, 136, .14); }
+
+.day-line.is-ghost .day-line-node {
+  border-color: rgba(13, 148, 136, .20);
+  background: #fff;
+}
+
+.day-line.is-ghost .day-line-card {
+  background: rgba(255, 255, 255, .5);
+  border-style: dashed;
+  border-color: rgba(13, 80, 76, .10);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 12px;
+}
+
+.ghost-bar {
+  height: 9px;
+  border-radius: var(--radius-full);
+  background: rgba(13, 148, 136, .13);
+}
+
+.ghost-bar.is-short { background: rgba(13, 148, 136, .09); }
+
+.day-ghost-line {
+  margin-top: 14px;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  max-width: 48ch;
+}
+
+@media (max-width: 720px) {
+  .day-line li { grid-template-columns: 62px 22px 1fr; gap: 9px; }
+  .day-line li::before { left: calc(62px + 9px + 11px); }
+  .day-line-node { width: 22px; height: 22px; }
+  .day-line-thumb { width: 36px; height: 36px; }
+  .day-line-card { padding: 7px 10px; gap: 9px; }
+}
+
+/* ── Shared small bits ───────────────────────────────────────────────────── */
+
+.bento-quiet {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.bento-list { list-style: none; margin: 0; padding: 0; }
+
+.bento-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.bento-list li + li { border-top: 1px solid var(--border-light); }
+.bento-list li svg { flex-shrink: 0; margin-top: 3px; color: var(--text-muted); }
+.bento-list li > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+
+.bento-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.bento-flag {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-light);
+  border-left: 3px solid var(--warning);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.bento-flag svg { flex-shrink: 0; color: var(--warning-text); }
+
+.bento-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-text);
+}
+
+.bento-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.bento-figures dt { font-size: var(--text-xs); color: var(--text-secondary); }
+.bento-figures dd { margin: 1px 0 0; }
+
+.bento-value { font-size: var(--text-lg); font-weight: 600; color: var(--primary-text); }
+
+/* Set in the same slot a figure would occupy, so an absent measure reads as
+   an answer rather than a gap. Never styled as 0%. */
+.bento-unknown { font-size: var(--text-sm); color: var(--text-muted); }
+
+/* ── Location chip ───────────────────────────────────────────────────────── */
+
+.bento-chip-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.bento-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.bento-chip.is-home { background: var(--primary-light); color: var(--primary-dark); }
+.bento-chip.is-away { background: var(--warning-light); color: var(--warning-text); }
+
+/* ── Next dose ───────────────────────────────────────────────────────────── */
+
+.bento-dose { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.bento-dose-name { font-size: var(--text-lg); font-weight: 600; color: var(--text-primary); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .bento { grid-template-columns: repeat(2, 1fr); }
+  .bento-card.is-wide { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  .bento { grid-template-columns: 1fr; gap: 14px; }
+  .bento-card.is-wide { grid-column: auto; }
+  .bento-figures { grid-template-columns: 1fr 1fr; }
+  .day-line li { grid-template-columns: 50px 36px 1fr; gap: 10px; }
+  .day-line-thumb { width: 36px; height: 36px; }
+
+  /* Hover lift is a pointer affordance; on touch it only ever fires after a
+     tap has already happened. */
+  .bento-card:hover { transform: none; box-shadow: var(--lift-1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Camera setup (Settings)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.camera-setup { padding: 4px 0 2px; }
+
+.camera-setup-lead {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  max-width: 62ch;
+}
+
+.camera-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(204, 251, 241, .30), rgba(204, 251, 241, .12));
+}
+
+.camera-url code {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--primary-dark);
+  word-break: break-all;
+  user-select: all;        /* one click selects the whole address */
+}
+
+.camera-url .btn { flex-shrink: 0; }
+
+.camera-setup-note {
+  margin-top: 12px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Dose cards (Medication)
+
+   Today's schedule was a five-column table: Time, Medication, Dosage, Status,
+   Action. A table is right for the history, where somebody scans down one
+   column; it is wrong for today, where each row is a thing you act on. The
+   time leads, because that is how a dose is identified out loud.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dose-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+
+.dose {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: var(--rule);
+  /* The tone lives on the leading edge: visible in greyscale, and outside the
+     text so no label is ever painted in a status colour. */
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dose:hover { box-shadow: var(--lift-1); }
+
+.dose.is-taken   { border-left-color: var(--success); }
+.dose.is-missed  { border-left-color: var(--danger); }
+.dose.is-wait    { border-left-color: var(--warning); }
+.dose.is-unknown { border-left-color: var(--border); background: var(--surface-hover); }
+.dose.is-due     { border-left-color: var(--primary); }
+
+.dose-time {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dose-body { min-width: 0; }
+
+.dose-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dose-dosage { font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary); }
+
+.dose-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.dose-chip.is-taken   { background: var(--success-light); color: var(--success-text); }
+.dose-chip.is-missed  { background: var(--danger-light);  color: var(--danger-text); }
+.dose-chip.is-wait    { background: var(--warning-light); color: var(--warning-text); }
+.dose-chip.is-unknown { background: var(--border-light);  color: var(--text-secondary); }
+.dose-chip.is-due     { background: var(--primary-light); color: var(--primary-dark); }
+
+.dose-verified { margin-top: 4px; font-size: var(--text-xs); color: var(--text-muted); }
+
+.dose-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.dose-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Confirming and refusing a dose are not the same weight of action, so they
+   are not the same button. Both clear 4.5:1 on their own fill. */
+.dose-yes { background: var(--success-light); color: var(--success-text); border: 1px solid var(--success); }
+.dose-no  { background: var(--danger-light);  color: var(--danger-text);  border: 1px solid var(--danger); }
+
+@media (max-width: 720px) {
+  .dose { grid-template-columns: 76px 1fr; gap: 10px; }
+  .dose-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .dose-time { font-size: var(--text-base); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Appeal, on a light theme
+
+   The landing page's layered ground, quieter: two soft teal washes fixed to
+   the viewport with no drift and no parallax. Fixed rather than scrolling so
+   there is nothing to repaint while reading, which is also what keeps it from
+   reading as decoration competing with the content.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(760px 420px at 12% -6%,  rgba(13, 148, 136, .085), transparent 70%),
+    radial-gradient(620px 380px at 92% 2%,   rgba(99, 102, 241, .055), transparent 72%),
+    var(--bg);
+}
+
+/* Cards arrive once, on mount, in reading order. The global reduced-motion
+   rule collapses the duration, which leaves them simply present. */
+@keyframes bento-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.bento > * {
+  animation: bento-rise 420ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.bento > *:nth-child(1) { animation-delay: 0ms; }
+.bento > *:nth-child(2) { animation-delay: 45ms; }
+.bento > *:nth-child(3) { animation-delay: 90ms; }
+.bento > *:nth-child(4) { animation-delay: 135ms; }
+.bento > *:nth-child(5) { animation-delay: 180ms; }
+.bento > *:nth-child(6) { animation-delay: 215ms; }
+.bento > *:nth-child(7) { animation-delay: 250ms; }
+.bento > *:nth-child(8) { animation-delay: 280ms; }
+.bento > *:nth-child(9) { animation-delay: 305ms; }
+.bento > *:nth-child(n + 10) { animation-delay: 330ms; }
+
+/* The hero card earns a little more presence than the rest. */
+.bento-card.is-wide {
+  background:
+    linear-gradient(180deg, rgba(204, 251, 241, .22), rgba(255, 255, 255, 0) 120px),
+    var(--surface);
+  box-shadow: var(--lift-2);
+}
+
+/* Figures and chips shift value often enough that a hard swap reads as a
+   glitch; the colour eases, the number does not move. */
+.bento-value,
+.bento-chip,
+.dose-chip {
+  transition: color var(--transition-base), background var(--transition-base);
+}
+
+/* The one destructive control in the medication list. Quiet until hovered:
+   it sits in every row and must not compete with the data. */
+.med-delete { color: var(--text-muted); }
+.med-delete:hover { color: var(--danger-text); background: var(--danger-light); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Memory search
+
+   The page was one unlabelled box that quietly did two different things:
+   typing filtered the list by title, Enter sent the words to the agent. So a
+   person typed a question, watched the list filter itself to nothing, and
+   concluded the search did not work. Both actions are now named.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.mem-search {
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.mem-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.mem-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.mem-field > svg { flex-shrink: 0; color: var(--text-muted); }
+
+.mem-field input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.mem-field .btn { flex-shrink: 0; }
+
+.mem-mic {
+  width: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Recording is a state worth being unmistakable about. */
+.mem-mic.is-listening {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse);
+}
+
+.mem-hint {
+  margin-top: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.mem-hint strong { color: var(--text-primary); }
+
+.mem-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.mem-examples button {
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-full);
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mem-examples button:hover {
+  border-style: solid;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: var(--primary-light);
+}
+
+.mem-asking { margin-top: 12px; font-size: var(--text-base); color: var(--text-secondary); }
+
+/* ── The agent's answer ──────────────────────────────────────────────────── */
+
+.mem-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--primary-light);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(204, 251, 241, .26), rgba(204, 251, 241, .08));
+}
+
+.mem-answer img {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+.mem-answer-text { flex: 1; min-width: 0; }
+
+.mem-answer-line {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.mem-answer-note { margin-top: 4px; font-size: var(--text-xs); color: var(--text-secondary); }
+
+.mem-answer-close { flex-shrink: 0; width: 28px; padding: 0; }
+
+/* ── Kind filters ───────────────────────────────────────────────────────── */
+
+/* One active style, not a different hue per filter. The old chips painted
+   white on --success (2.42:1) and on --warning (2.05:1), so the label of the
+   selected filter was the least readable text on the page. These also carry
+   aria-pressed, so the selection is not conveyed by colour alone. */
+.mem-filters {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.mem-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mem-filters button:hover { border-color: var(--text-muted); color: var(--text-primary); }
+
+.mem-filters button.is-active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.mem-filter-count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.mem-filters button.is-active .mem-filter-count { color: var(--primary-dark); }
+
+@media (max-width: 640px) {
+  .mem-search { padding: 14px; }
+
+  /* The Ask button and the mic would squeeze the field below usable width, so
+     they wrap underneath it and keep full-size touch targets. */
+  .mem-field { flex-wrap: wrap; padding: 10px 12px; }
+  .mem-field input { flex-basis: 100%; order: -1; }
+  .mem-field > svg { display: none; }
+  .mem-field .btn { flex: 1; min-height: 42px; }
+  .mem-mic { flex: 0 0 48px; }
+
+  .mem-answer { flex-wrap: wrap; }
+  .mem-answer img { width: 100%; height: 160px; }
+}
+
+/* ── Recent frames: filters ─────────────────────────────────────────────── */
+
+/* Four buttons on one unwrapping row ran off the side of a phone, and the
+   page also wrapped itself in its own 20px padding inside .page-container's
+   32px -- 52px of gutter on a 390px screen. */
+.kf-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  /* Each filter takes a full row rather than shrinking to an unreadable
+     stub, and keeps a 44px target. The counts are the point of these
+     labels, so they must not be what gets truncated. */
+  .kf-filters { width: 100%; }
+
+  .kf-filters .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+
+
+/* ── A person as a page title ───────────────────────────────────────────── */
+
+.person-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.person-title .avatar {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-inverse);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .person-title { gap: 10px; }
+  .person-title .avatar { width: 38px; height: 38px; font-size: 1rem; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Item 2: depth and colour
+
+   The page was white cards on #F8FAFC with a wash so faint it may as well not
+   have been there: two radial tints at 5.5-8.5% alpha, over a background only
+   3% off white. Measured against the card surface the whole page spanned about
+   two percent of lightness, so nothing read as sitting on anything.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The ground is now teal-tinted rather than blue-grey, and the washes are
+   strong enough to see: ~7% at the corners over a base that is itself tinted.
+   Fixed, so nothing repaints while reading. */
+.app-shell::before {
+  background:
+    radial-gradient(900px 520px at 10% -8%, rgba(13, 148, 136, .14), transparent 68%),
+    radial-gradient(760px 460px at 94% 0%, rgba(99, 102, 241, .085), transparent 70%),
+    radial-gradient(1100px 700px at 50% 108%, rgba(13, 148, 136, .07), transparent 72%),
+    linear-gradient(180deg, #EEF5F3 0%, #F4F8F7 46%, #F7FAF9 100%);
+}
+
+/* Layered elevation: a teal-tinted cast plus a 1px inner highlight along the
+   top edge, which is what keeps a white card from dissolving into a light
+   ground without resorting to a hard border. */
+.bento-card {
+  border: 1px solid rgba(13, 80, 76, .07);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 1px 2px rgba(13, 80, 76, .05),
+    0 8px 20px -10px rgba(13, 80, 76, .16);
+  transition: box-shadow var(--transition-base), transform var(--transition-base),
+              border-color var(--transition-base);
+}
+
+.bento-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(13, 148, 136, .22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 2px 4px rgba(13, 80, 76, .06),
+    0 16px 34px -12px rgba(13, 80, 76, .24);
+}
+
+/* The primary card is the only tinted surface, so it reads as the centre of
+   the page without being bigger than it already is. */
+.bento-card.is-wide {
+  background:
+    linear-gradient(168deg, rgba(204, 251, 241, .55) 0%, rgba(236, 253, 250, .35) 34%, #fff 76%);
+  border-color: rgba(13, 148, 136, .18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 2px 5px rgba(13, 80, 76, .06),
+    0 18px 40px -14px rgba(13, 80, 76, .22);
+}
+
+/* ── One header pattern everywhere ───────────────────────────────────────── */
+
+.card-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--primary-light), #E6FFFA);
+  border: 1px solid rgba(13, 148, 136, .20);
+  color: var(--primary-dark);
+}
+
+.bento-card-head { align-items: center; margin-bottom: 14px; }
+
+.bento-card-head h3 { gap: 10px; }
+
+.bento-card-head a {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  transition: background var(--transition-fast);
+}
+
+.bento-card-head a:hover { background: #BFF5EC; }
+
+/* Teal on the numbers and the marks, not only in link text. */
+.bento-value { color: var(--primary-dark); }
+.bento-list li svg { color: var(--primary); }
+.day-line-thumb { border-color: rgba(13, 148, 136, .20); }
+
+/* ── Item 3: a scale that is actually applied ───────────────────────────── */
+
+/* Page titles were about 28px against the 32-36 the brief asks for, and card
+   titles were 15px against 18-20. The tokens existed; the headings did not
+   use them. */
+.page-title,
+.bento-greeting {
+  font-size: var(--text-3xl);        /* 34px */
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.bento-card-head h3,
+.card-title {
+  font-size: var(--text-lg);         /* 18px */
+  line-height: 1.3;
+}
+
+.bento-status { font-size: var(--text-lg); }
+.bento-date,
+.bento-where { font-size: var(--text-base); }
+
+/* Nothing under 13px. These were set in raw px and sat at 10 to 12. */
+.bell-count,
+.dock-badge { font-size: 11px; }     /* numerals in a 16px disc, not prose */
+
+.tabbar a,
+.tabbar button { font-size: var(--text-xs); }
+
+.dock a { font-size: var(--text-sm); }   /* 14px, as item 6 asks */
+
+.bento-figures dt,
+.bento-sub,
+.dock-pop-when,
+.profile-email,
+.profile-role,
+.sheet-hint,
+.palette-hint,
+.palette-group,
+.mem-filter-count,
+.dose-chip,
+.dose-verified,
+.insight-detail,
+.finding-detail { font-size: var(--text-xs); }
+
+.bento-value { font-size: var(--text-xl); }
+
+/* 130% text scaling: headings must wrap rather than collide, and no card may
+   clip. Nothing here sets a fixed height on a text box, so the remaining risk
+   was the two-column figure grid, which gets one column once it is tight. */
+@media (max-width: 1500px) {
+  .bento-figures { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
+
+.bento-greeting,
+.page-title,
+.bento-card-head h3 { overflow-wrap: anywhere; }
+
+/* The 76px time column (set with the rail above) keeps "12:03 PM" on one
+   line at 16px body, which a 56px column could not. */
+
+/* ── Item 4: the page header ────────────────────────────────────────────── */
+
+.bento-head { padding: 2px 0 4px; }
+
+.bento-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.bento-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: var(--text-inverse);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px -8px rgba(13,80,76,.5);
+}
+
+.bento-status { margin-top: 2px; }
+
+/* Each pill is shown only when its data exists, so an empty row means the
+   system genuinely knows nothing yet -- not that something failed. */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, .78);
+  border: 1px solid rgba(13, 80, 76, .10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(13,80,76,.05);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.pill svg { flex-shrink: 0; color: var(--text-muted); }
+
+.pill-sub {
+  padding-left: 7px;
+  margin-left: 1px;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Status carries an icon and words; the tint only reinforces them. */
+.pill.is-on    { border-color: rgba(13,148,136,.28); color: var(--primary-dark); }
+.pill.is-on svg { color: var(--primary); }
+
+.pill.is-off   { border-color: var(--border); color: var(--text-secondary); }
+
+.pill.is-away  { border-color: rgba(245,158,11,.4); color: var(--warning-text); background: rgba(254,243,199,.7); }
+.pill.is-away svg { color: var(--warning-text); }
+
+.pill.is-alert { border-color: rgba(245,158,11,.45); color: var(--warning-text); background: rgba(254,243,199,.75); }
+.pill.is-alert svg { color: var(--warning-text); }
+
+@media (max-width: 640px) {
+  .bento-avatar { width: 44px; height: 44px; font-size: var(--text-lg); }
+  .bento-identity { gap: 12px; }
+}
+
+/* ── Item 5: one left edge for everything ───────────────────────────────── */
+
+/* The bar spanned the viewport with 20px of its own padding while the cards
+   sat in a 1360px column with 32px -- so the logo was about 52px left of every
+   card edge and the avatar the same distance right of them. The bar is a
+   fixed-position strip, so it keeps its own centring but takes the content
+   column's width and gutters. */
+.dock-bar {
+  max-width: calc(1360px + 40px);   /* the column, plus room for the pill to breathe */
+  margin: 0 auto;
+  padding: 0 32px;
 }
 
 @media (max-width: 1024px) {
-  .grid-2,
-  .grid-3 {
-    grid-template-columns: 1fr;
-  }
+  .dock-bar { padding: 0 24px; }
+}
+
+@media (max-width: 900px) {
+  /* Edge to edge once it becomes a solid bar with a bottom rule. */
+  .dock-bar { max-width: none; padding: 0 16px; }
+}
+
+@media (max-width: 768px) {
+  .dock-bar { padding: 0 16px; }
+}
+
+/* ── Item 6: dock rhythm ────────────────────────────────────────────────── */
+
+/* Every item the same shape: a fixed 18px icon box, a 14px label, and equal
+   padding, so the dock reads as one control rather than a row of differently
+   sized words. */
+.dock a {
+  padding: 9px 16px;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.dock a > svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.dock a.is-active { font-weight: 600; }
+
+.dock ul { gap: 4px; }
+
+.is-shrunk .dock a { padding: 7px 14px; }
+
+/* The indicator reads as a solid teal lozenge rather than a faint tint. */
+.dock-indicator {
+  background: linear-gradient(160deg, var(--primary-light), #BFF5EC);
+  box-shadow: inset 0 0 0 1px rgba(13, 148, 136, .22);
+}
+
+/* ── Item 7: the alert banner ───────────────────────────────────────────── */
+
+/* Pale amber rather than a solid wash, a thick accent on the leading edge,
+   and the actions visible instead of a chevron. */
+.bento-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid rgba(245, 158, 11, .35);
+  border-left: 5px solid var(--warning);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(254, 243, 199, .80), rgba(255, 251, 235, .92));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 6px 18px -10px rgba(146, 97, 7, .35);
+  color: var(--text-primary);
+}
+
+.bento-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, .18);
+  color: var(--warning-text);
+}
+
+.bento-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bento-banner strong { font-size: var(--text-base); }
+
+.bento-banner-sub {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bento-banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.banner-review {
+  background: var(--warning-text);
+  border: 1px solid var(--warning-text);
+  color: #fff;
+  font-weight: 600;
+}
+
+.banner-review:hover { background: #7d5106; color: #fff; }
+
+.banner-dismiss {
+  background: rgba(255,255,255,.9);
+  border: 1px solid rgba(146, 97, 7, .3);
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.banner-dismiss:hover { background: #fff; }
+
+/* Emergency: a different glyph, a red accent AND the word, never colour alone. */
+.bento-banner.is-emergency {
+  border-color: rgba(239, 68, 68, .45);
+  border-left-color: var(--danger);
+  background: linear-gradient(180deg, rgba(254, 226, 226, .85), rgba(255, 241, 242, .95));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 22px -10px rgba(185, 28, 28, .4);
+}
+
+.bento-banner.is-emergency .bento-banner-icon {
+  background: rgba(239, 68, 68, .2);
+  color: var(--danger-text);
+}
+
+.bento-banner.is-emergency .banner-review {
+  background: var(--danger-text);
+  border-color: var(--danger-text);
+}
+
+@media (max-width: 720px) {
+  .bento-banner { flex-wrap: wrap; }
+  .bento-banner-actions { width: 100%; }
+  .bento-banner-actions .btn { flex: 1; justify-content: center; min-height: 40px; }
+  .bento-banner-sub { white-space: normal; }
+}
+
+/* ── Item 9: one empty state, used everywhere ───────────────────────────── */
+
+/* Each card that has nothing to show still says what it is for, in one
+   sentence, under a teal disc. An action only where there is something
+   useful to do -- "Enrol an item" on Belongings, nothing on People, because
+   recognising somebody is not a thing a reader can go and press. */
+.card-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 0 6px;
+}
+
+.card-empty-disc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(155deg, var(--primary-light), #E9FFFB);
+  border: 1px solid rgba(13, 148, 136, .22);
+  color: var(--primary-dark);
+}
+
+.card-empty p {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 40ch;
+}
+
+.card-empty-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  background: var(--primary-light);
+  border: 1px solid rgba(13, 148, 136, .3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.card-empty-action:hover { background: #BFF5EC; color: var(--primary-dark); }
+
+/* "Coming soon" reads as planned rather than failed, so it keeps the teal
+   treatment and adds a label instead of looking like an error. */
+/* Its own line: inline, the sentence wrapped around it and the first line
+   started half way across the card. */
+.card-empty-badge {
+  display: table;
+  margin-bottom: 8px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.card-empty.is-soon .card-empty-disc {
+  background: linear-gradient(155deg, var(--accent-light), #F5F6FF);
+  border-color: rgba(99, 102, 241, .25);
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   The bottom row of the bento
+
+   Nine cards in a three-column grid left the last row short: a caregiver saw
+   Location and Next dose in the first two columns and an empty third, and a
+   wearer -- who gets no Location card -- saw Next dose alone with two thirds
+   of the row empty. A grid with a hole in it reads as a card that failed to
+   load, so the last card takes whatever is left of its row.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bento-card.is-dose.is-full { grid-column: 1 / -1; }   /* wearer: no Location */
+.bento-card.is-dose.is-rest { grid-column: span 2; }   /* caregiver: beside it */
+
+/* ── What a stretched dose card holds ────────────────────────────────────── */
+
+/* The time leads, which is how the Medication page draws a dose and how one
+   is named out loud -- "the eight o'clock one", not "the Panadol one". The
+   row then has somewhere to put the extra width: the clock on the left, the
+   drug and its dose in the middle, the status against the right edge. */
+.bento-dose {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bento-dose-when {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--primary-dark);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bento-dose-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.bento-dose > .badge { margin-left: auto; }
+
+/* Empty, it is the same shape rather than a tall column of nothing in a card
+   three times as wide as the icon it holds. */
+.bento-card.is-dose .card-empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0 6px;
+}
+
+/* ── Two columns ─────────────────────────────────────────────────────────── */
+
+/* With Location beside it the row is already exact, so the dose card drops
+   back to one column; without Location it still takes the row. */
+@media (max-width: 1100px) {
+  .bento-card.is-dose.is-rest { grid-column: auto; }
+}
+
+@media (max-width: 720px) {
+  .bento-card.is-dose.is-full,
+  .bento-card.is-dose.is-rest { grid-column: auto; }
+
+  .bento-card.is-dose .card-empty { flex-direction: column; align-items: flex-start; }
+  .bento-dose-when { font-size: var(--text-xl); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Conversations
+
+   What the camera heard, summarised. The summary is the content; the verbatim
+   words are a disclosure, styled as a quotation rather than as body text so it
+   is never mistaken for something the app is asserting -- it is a machine
+   transcription of a noisy room, and it reads like one.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.convo-list { list-style: none; margin: 0; padding: 0; }
+
+.convo { padding: 11px 0; }
+.convo + .convo { border-top: 1px solid var(--border-light); }
+
+.convo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.convo-who {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.convo-when {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.convo-summary {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Why there is no summary, which is not the same as there being no
+   conversation. Italic so it reads as the app speaking about the record
+   rather than as a summary of what was said. */
+.convo-quiet {
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.convo-topics {
+  margin-top: 3px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.convo-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--primary-text);
+  cursor: pointer;
+}
+
+.convo-more:hover:not(:disabled) { color: var(--primary-dark); }
+.convo-more:disabled { color: var(--text-muted); cursor: default; }
+
+.convo-transcript {
+  display: block;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(13, 148, 136, .3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-hover);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.convo-note {
+  display: block;
+  margin-top: 7px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* The same words on the day's rail. Teal-tinted so a row that carries a
+   conversation is findable by scanning the rail, and clamped to two lines so
+   one long chat cannot push the rest of the day off the card. */
+.day-line-said {
+  margin-top: 3px;
+  font-size: var(--text-sm);
+  color: var(--primary-dark);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }

@@ -13,7 +13,18 @@ router.use(protect, authorize('caregiver', 'admin'));
 // GET /api/caregiver/users  — list all users this caregiver monitors
 router.get('/users', async (req, res) => {
   try {
-    const caregiver = await User.findById(req.user._id).populate('monitoring_users', 'name email phone');
+    // emergency_status included deliberately.
+    //
+    // Every client learned about an emergency ONLY from the sos_alert and
+    // sos_resolved socket events. Miss one -- app in the background, socket
+    // still reconnecting, phone asleep -- and that client is wrong until the
+    // next event, with no way to find out. That is why the web could show a
+    // resolved emergency as over while the phone still showed it raging, and
+    // why the phone went on saying "EMERGENCY ACTIVE" after somebody else had
+    // resolved it. The events are the fast path; this is the truth they can
+    // be reconciled against on every load.
+    const caregiver = await User.findById(req.user._id)
+      .populate('monitoring_users', 'name email phone emergency_status');
     res.json(caregiver.monitoring_users);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

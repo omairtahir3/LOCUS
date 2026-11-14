@@ -54,7 +54,7 @@ class VoiceCallService extends ChangeNotifier {
   /// life of the app; now that signing in as somebody else rebuilds it, a flag
   /// would leave the listeners on the dead socket and incoming calls would
   /// stop arriving with nothing to show for it.
-  dynamic _wiredTo;
+  bool _wired = false;
 
   bool get inCall =>
       state == CallState.calling ||
@@ -70,11 +70,19 @@ class VoiceCallService extends ChangeNotifier {
   // ── signalling ───────────────────────────────────────────────────────
 
   /// Starts listening for calls. Safe to call repeatedly.
+  ///
+  /// Registered through SocketService, which re-attaches handlers to any
+  /// socket it builds later. Wiring straight onto SocketService().socket --
+  /// as this used to -- left the call listeners on a disposed socket the
+  /// moment the token changed, and calls stopped arriving with no error.
+  ///
+  /// Guarded by a plain bool rather than by socket identity: the registry
+  /// survives rebuilds, so registering once is both sufficient and required.
+  /// Keying on the socket would re-register on every new one and ring twice.
   void init() {
-    final socket = SocketService().socket;
-    if (socket == null) return;
-    if (identical(_wiredTo, socket)) return;
-    _wiredTo = socket;
+    if (_wired) return;
+    _wired = true;
+    final socket = SocketService();
 
     socket.on('call:incoming', (data) async {
       final d = Map<String, dynamic>.from(data as Map);

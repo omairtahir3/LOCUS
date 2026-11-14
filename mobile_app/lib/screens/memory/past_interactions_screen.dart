@@ -201,19 +201,19 @@ class _PastInteractionsScreenState extends State<PastInteractionsScreen> {
                                   color: AppColors.surface,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
-                                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
+                                  boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 4, offset: Offset(0, 2))],
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('Social Interaction', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                                     const SizedBox(height: 4),
-                                    Text(_formatDate(interaction['timestamp']), style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                    Text(_formatDate(interaction['timestamp']), style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                                     
                                     if (interaction['keyframe_id'] != null) ...[
                                       const SizedBox(height: 12),
                                       ClipRRect(
-                                        borderRadius: BorderRadius.circular(8),
+                                        borderRadius: BorderRadius.circular(10),
                                         child: Image.network(
                                           '${ApiService.baseUrl}/detection/keyframes/${interaction['keyframe_id']}/image',
                                           height: 180,

@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/selected_user_service.dart';
 
 class RelationshipsManageScreen extends StatefulWidget {
-  const RelationshipsManageScreen({super.key});
+  const RelationshipsManageScreen({super.key, this.embedded = false});
+
+  /// True when this is a tab inside MainShell, which already provides the
+  /// Scaffold and the app bar.
+  final bool embedded;
 
   @override
   State<RelationshipsManageScreen> createState() => _RelationshipsManageScreenState();
@@ -28,7 +33,13 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final res = await ApiService.getAllRelationships();
+      // A wearer reads their own household; a caregiver reads the person
+      // they have selected. Without the id the server fell back to the first
+      // person they monitor, so People listed the wrong family.
+      final sel = SelectedUserService().selectedUser;
+      final selId = sel?['_id']?.toString();
+      final scoped = ApiService.userRole == 'caregiver' ? selId : null;
+      final res = await ApiService.getAllRelationships(userId: scoped);
       if (res['statusCode'] == 200) {
         setState(() {
           _relationships = res['data'] ?? [];
@@ -77,11 +88,13 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Manage Relationships'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('Manage Relationships'),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+            ),
       body: _isLoading
         ? const Center(child: CircularProgressIndicator())
         : Column(
@@ -97,17 +110,17 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
                           hintText: 'Search names...',
                           prefixIcon: const Icon(Icons.search, size: 20),
                           contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
                       onPressed: () => setState(() => _isMerging = !_isMerging),
-                      icon: Icon(Icons.merge_type, size: 18, color: _isMerging ? Colors.black : Colors.white),
-                      label: Text(_isMerging ? 'Cancel' : 'Merge', style: TextStyle(color: _isMerging ? Colors.black : Colors.white)),
+                      icon: Icon(Icons.merge_type, size: 18, color: _isMerging ? AppColors.textPrimary : AppColors.onPrimary),
+                      label: Text(_isMerging ? 'Cancel' : 'Merge', style: TextStyle(color: _isMerging ? AppColors.textPrimary : AppColors.onPrimary)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _isMerging ? Colors.grey[300] : AppColors.primary,
+                        backgroundColor: _isMerging ? AppColors.surface2 : AppColors.primary,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
@@ -122,21 +135,21 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      border: Border.all(color: Colors.blue[100]!),
+                      color: AppColors.infoLight,
+                      border: Border.all(color: AppColors.info),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Merge Two Records', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                        const Text('Merge Two Records', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.info)),
                         const SizedBox(height: 8),
-                        const Text('Select a source record to delete, and a target record to keep.', style: TextStyle(fontSize: 12, color: Colors.black87)),
+                        const Text('Select a source record to delete, and a target record to keep.', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
                         const SizedBox(height: 16),
                         
                         DropdownButtonFormField<String>(
                           value: _sourceId.isEmpty ? null : _sourceId,
-                          decoration: InputDecoration(labelText: 'Source (Will be deleted)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                          decoration: InputDecoration(labelText: 'Source (Will be deleted)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                           items: _relationships.map<DropdownMenuItem<String>>((r) {
                             return DropdownMenuItem<String>(
                               value: r['_id'],
@@ -148,7 +161,7 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
                           value: _targetId.isEmpty ? null : _targetId,
-                          decoration: InputDecoration(labelText: 'Target (Will be kept)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                          decoration: InputDecoration(labelText: 'Target (Will be kept)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                           items: _relationships.map<DropdownMenuItem<String>>((r) {
                             return DropdownMenuItem<String>(
                               value: r['_id'],
@@ -162,7 +175,7 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: _mergeLoading ? null : _handleMerge,
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[600]),
+                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.info),
                             child: _mergeLoading ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Confirm Merge', style: TextStyle(color: Colors.white)),
                           ),
                         )
@@ -197,11 +210,11 @@ class _RelationshipsManageScreenState extends State<RelationshipsManageScreen> {
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (relation.isNotEmpty) Text('Relation: $relation', style: const TextStyle(fontSize: 12)),
-                            Text('Confirmed by $confirmedBy on ${dt.month}/${dt.day}/${dt.year}', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                            if (relation.isNotEmpty) Text('Relation: $relation', style: const TextStyle(fontSize: 13)),
+                            Text('Confirmed by $confirmedBy on ${dt.month}/${dt.day}/${dt.year}', style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
                           ],
                         ),
-                        trailing: Text('...${r['_id'].substring(r['_id'].length - 4)}', style: const TextStyle(fontSize: 10, color: AppColors.textMuted, fontFamily: 'monospace')),
+                        trailing: Text('...${r['_id'].substring(r['_id'].length - 4)}', style: const TextStyle(fontSize: 13, color: AppColors.textMuted, fontFamily: 'monospace')),
                       ),
                     );
                   },

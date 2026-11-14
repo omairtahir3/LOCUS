@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../theme/app_theme.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../services/api_service.dart';
@@ -162,8 +163,8 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: service.selectedUser?['_id'],
-                    icon: const Icon(Icons.arrow_drop_down, color: Colors.black54),
-                    style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13),
+                    icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                    style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                     onChanged: (String? newValue) {
                       if (newValue != null) {
                         service.setSelectedUser(newValue);
@@ -187,7 +188,7 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
           if (_sosData != null)
             Container(
               padding: const EdgeInsets.all(16),
-              color: Colors.red,
+              color: AppColors.danger,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -220,7 +221,7 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.red),
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.surface, foregroundColor: AppColors.danger),
                           onPressed: () async {
                             try {
                               await http.delete(
@@ -259,9 +260,9 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.location_off, size: 64, color: Colors.grey),
+            const Icon(Icons.location_off, size: 64, color: AppColors.textMuted),
             const SizedBox(height: 16),
-            Text(_error!, style: const TextStyle(color: Colors.red)),
+            Text(_error!, style: const TextStyle(color: AppColors.danger)),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
@@ -317,7 +318,7 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
                   child: Row(
                     children: [
-                      const Icon(Icons.access_time, color: Colors.teal),
+                      const Icon(Icons.access_time, color: AppColors.primary),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(

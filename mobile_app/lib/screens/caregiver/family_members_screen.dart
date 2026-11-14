@@ -82,7 +82,7 @@ class _FamilyMembersScreenState extends State<FamilyMembersScreen> {
                     const SizedBox(height: 12),
                     Text(_search.isNotEmpty ? 'No matching members' : 'No family members linked', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                     const SizedBox(height: 4),
-                    Text('Ask your elderly family members to add your email in their LOCUS app settings.', style: TextStyle(fontSize: 12, color: AppColors.textMuted), textAlign: TextAlign.center),
+                    Text('Ask your elderly family members to add your email in their LOCUS app settings.', style: TextStyle(fontSize: 13, color: AppColors.textMuted), textAlign: TextAlign.center),
                   ],
                 ),
               )
@@ -114,7 +114,7 @@ class _FamilyMembersScreenState extends State<FamilyMembersScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(u['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                                  Text(u['email'] ?? '', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                                  Text(u['email'] ?? '', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                                 ],
                               ),
                             ),
@@ -149,7 +149,7 @@ class _FamilyMembersScreenState extends State<FamilyMembersScreen> {
       child: Column(
         children: [
           Text(value, style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 16)),
-          Text(label, style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+          Text(label, style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
         ],
       ),
     );

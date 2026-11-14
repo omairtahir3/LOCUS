@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Activity, Brain, Home, Package, AlertTriangle, Pill, Footprints, Clock, CalendarDays, ShieldCheck } from 'lucide-react';
-import UserSelector from '../components/Layout/UserSelector';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { eventLogsAPI } from '../services/api';
 import { formatClockTime } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import { NO_DATA } from '../utils/adherence';
 
 // The page used to render a hard-coded array: a plausible-looking day with
 // "Met with neighbor Mrs. Johnson" and "~2,400 steps" that came from nowhere
@@ -11,13 +12,13 @@ import { formatClockTime } from '../utils/dateUtils';
 // recorded, from /api/event-logs/timeline.
 
 const KIND = {
-  routine:    { icon: Home,          color: 'var(--primary)' },
-  medication: { icon: Pill,          color: 'var(--success)' },
+  routine:    { icon: Home,          color: 'var(--primary-text)' },
+  medication: { icon: Pill,          color: 'var(--success-text)' },
   social:     { icon: Brain,         color: 'var(--accent)' },
   items:      { icon: Package,       color: 'var(--info)' },
   activity:   { icon: Activity,      color: 'var(--accent)' },
   moment:     { icon: Clock,         color: 'var(--text-muted, #6b7280)' },
-  anomaly:    { icon: AlertTriangle, color: 'var(--warning)' },
+  anomaly:    { icon: AlertTriangle, color: 'var(--warning-text)' },
 };
 
 const today = () => {
@@ -76,30 +77,29 @@ export default function ActivityFeed() {
 
   const SEVERITY = {
     urgent:  { color: 'var(--danger, #dc2626)', label: 'Needs attention now' },
-    warning: { color: 'var(--warning)',         label: 'Worth a look' },
+    warning: { color: 'var(--warning-text)',         label: 'Worth a look' },
     info:    { color: 'var(--info)',            label: 'Just so you know' },
   };
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h2 className="page-title">Activity Feed</h2>
-          <p className="page-description">What the camera recorded, hour by hour</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CalendarDays size={16} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="date" value={date} max={today()}
-              onChange={(e) => setDate(e.target.value)}
-              className="form-input"
-              style={{ padding: '6px 10px', fontSize: '0.9rem', height: 32, borderRadius: 8 }}
-            />
-          </label>
-          <UserSelector />
-        </div>
-      </div>
+      <PageHeader
+        title="Activity Feed"
+        description="What the camera recorded, hour by hour"
+        actions={
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CalendarDays size={16} style={{ color: 'var(--text-muted)' }} />
+              <input
+                type="date" value={date} max={today()}
+                onChange={(e) => setDate(e.target.value)}
+                className="form-input"
+                style={{ padding: '6px 10px', fontSize: '0.9rem', height: 32, borderRadius: 8 }}
+              />
+            </label>
+          </>
+        }
+      />
 
       <div className="grid-2">
         <div className="card">
@@ -112,7 +112,7 @@ export default function ActivityFeed() {
             </div>
           </div>
 
-          {error && <div className="text-sm" style={{ color: 'var(--warning)' }}>{error}</div>}
+          {error && <div className="text-sm" style={{ color: 'var(--warning-text)' }}>{error}</div>}
 
           {!loading && !error && items.length === 0 && (
             <div style={{ padding: '28px 4px', textAlign: 'center' }}>
@@ -219,7 +219,7 @@ export default function ActivityFeed() {
             </div>
             {anomalies.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <ShieldCheck size={18} style={{ color: 'var(--success)' }} />
+                <ShieldCheck size={18} style={{ color: 'var(--success-text)' }} />
                 <span className="text-sm text-muted">
                   The day matched the usual pattern. Missed doses, long stretches without
                   movement and items left behind would appear here.
@@ -259,7 +259,7 @@ export default function ActivityFeed() {
                 {s.rooms.map((room) => (
                   <span key={room} style={{
                     padding: '6px 12px', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600,
-                    background: 'var(--primary)20', color: 'var(--primary)', textTransform: 'capitalize',
+                    background: 'var(--primary)20', color: 'var(--primary-text)', textTransform: 'capitalize',
                   }}>{room}</span>
                 ))}
               </div>
@@ -287,7 +287,7 @@ export default function ActivityFeed() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
                     <span className="text-sm">{m.label}</span>
                     <span className="text-sm font-bold" style={{ flexShrink: 0, color: m.value == null ? 'var(--text-muted)' : undefined }}>
-                      {m.value == null ? 'No data' : `${m.value}%`}
+                      {m.value == null ? NO_DATA : `${m.value}%`}
                     </span>
                   </div>
                   <div style={{ height: 8, background: 'var(--border-light)', borderRadius: 4, overflow: 'hidden' }}>

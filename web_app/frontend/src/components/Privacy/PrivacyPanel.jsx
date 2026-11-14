@@ -122,7 +122,7 @@ export default function PrivacyPanel() {
       {p.auto_dead && (
         <div style={{
           marginTop: 10, padding: '10px 12px', borderRadius: 8,
-          background: 'var(--primary-light)', color: 'var(--primary)',
+          background: 'var(--primary-light)', color: 'var(--primary-text)',
           fontSize: '0.85rem', fontWeight: 600,
           display: 'flex', alignItems: 'center', gap: 8,
         }}>
@@ -131,7 +131,7 @@ export default function PrivacyPanel() {
         </div>
       )}
 
-      {err && <div className="text-xs" style={{ color: 'var(--danger)', marginTop: 8 }}>{err}</div>}
+      {err && <div className="text-xs" style={{ color: 'var(--danger-text)', marginTop: 8 }}>{err}</div>}
 
           <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 6 }}>
             Rooms to never record in
@@ -181,7 +181,7 @@ export default function PrivacyPanel() {
               display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
               paddingBottom: 8, borderBottom: '1px solid var(--border)',
             }}>
-              <MapPin size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+              <MapPin size={15} style={{ color: 'var(--primary-text)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '0.88rem', fontWeight: 600 }}>
                   {pl.label || 'Unnamed place'}

@@ -3,7 +3,8 @@ import { medicationAPI, caregiverAPI } from '../services/api';
 import { Pill, Plus, Calendar, Clock, Edit2, Trash2, CheckCircle, XCircle, SkipForward } from 'lucide-react';
 import { formatSmartDate, formatTime12Hour } from '../utils/dateUtils';
 import { useSelectedUser } from '../context/SelectedUserContext';
-import UserSelector from '../components/Layout/UserSelector';
+import PageHeader from '../components/Layout/PageHeader';
+import { doseLabel } from '../utils/doseStatus';
 
 export default function Medications() {
   const selectedUserContext = useSelectedUser();
@@ -102,9 +103,9 @@ export default function Medications() {
 
   const statusIcon = (s) => {
     switch (s) {
-      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
-      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger)' }} />;
-      case 'snoozed': return <Clock size={14} style={{ color: 'var(--warning)' }} />;
+      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success-text)' }} />;
+      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger-text)' }} />;
+      case 'snoozed': return <Clock size={14} style={{ color: 'var(--warning-text)' }} />;
       case 'camera_off': return <SkipForward size={14} style={{ color: 'var(--text-muted)' }} />;
       default: return <Clock size={14} style={{ color: 'var(--text-muted)' }} />;
     }
@@ -121,20 +122,17 @@ export default function Medications() {
         displayStatus === 'camera_off' ? 'badge-neutral' :
         displayStatus === 'snoozed' ? 'badge-secondary' : 'badge-neutral'
       }`}>
-        {statusIcon(displayStatus)} {(displayStatus || '').toUpperCase().replace('_', ' ')}
+        {statusIcon(displayStatus)} {doseLabel(displayStatus)}
       </span>
     );
   };
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 className="page-title">Medication Management</h2>
-          <p className="page-description">Schedules, adherence tracking, and history</p>
-        </div>
-        <UserSelector />
-      </div>
+      <PageHeader
+        title="Medication Management"
+        description="Schedules, adherence tracking, and history"
+      />
 
       {!selectedUser ? (
         <div className="card">

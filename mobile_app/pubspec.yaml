@@ -78,6 +78,7 @@ dependencies:
   # already holds, so no calling service and no second server are involved, and
   # the audio never passes through the backend at all.
   flutter_webrtc: ^1.6.2+hotfix.3
+  flutter_animate: ^4.5.2
 
 dev_dependencies:
   flutter_test:

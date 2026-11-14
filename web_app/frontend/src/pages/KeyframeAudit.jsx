@@ -4,8 +4,10 @@ import { eventLogsAPI, relationshipsAPI, detectionAPI, caregiverAPI } from '../s
 import { useAuth } from '../context/AuthContext';
 import { useSelectedUser } from '../context/SelectedUserContext';
 import { Camera, Eye, Activity, Clock, Image, ChevronDown, ChevronUp, Zap, Pill, CheckCircle, User, AlertTriangle } from 'lucide-react';
-import UserSelector from '../components/Layout/UserSelector';
 import { formatDateTime12h } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
+import { NO_DATA } from '../utils/adherence';
 
 const PHASE_LABELS = {
   phase1_pill_visible: { label: 'Phase 1 — Pill Visible', short: 'P1', color: '#3b82f6' },
@@ -71,7 +73,12 @@ export default function KeyframeAudit() {
         detectionAPI.getKeyframes(queryParams),
         detectionAPI.getMedicationFrames(queryParams).catch(() => ({ data: [] })),
         detectionAPI.getStatus(),
-        eventLogsAPI.getKeyframes({ type: 'unknown_face', limit: 40 }).catch(() => ({ data: [] })),
+        // Scoped like the call above it. Unscoped, the unnamed faces came
+        // from the first person monitored rather than the one selected.
+        eventLogsAPI.getKeyframes({
+          type: 'unknown_face', limit: 40,
+          ...(currentSelectedUser?._id ? { userId: currentSelectedUser._id } : {}),
+        }).catch(() => ({ data: [] })),
       ]);
       
       let allFrames = kfRes.data || [];
@@ -100,14 +107,14 @@ export default function KeyframeAudit() {
   };
 
   const getBlurLabel = (score) => {
-    if (score >= 100) return { label: 'Sharp', color: 'var(--success)' };
-    if (score >= 50) return { label: 'Soft', color: 'var(--warning)' };
-    return { label: 'Blurry', color: 'var(--danger)' };
+    if (score >= 100) return { label: 'Sharp', color: 'var(--success-text)' };
+    if (score >= 50) return { label: 'Soft', color: 'var(--warning-text)' };
+    return { label: 'Blurry', color: 'var(--danger-text)' };
   };
 
   const getMotionLabel = (score) => {
-    if (score >= 15) return { label: 'High', color: 'var(--danger)' };
-    if (score >= 5) return { label: 'Medium', color: 'var(--warning)' };
+    if (score >= 15) return { label: 'High', color: 'var(--danger-text)' };
+    if (score >= 5) return { label: 'Medium', color: 'var(--warning-text)' };
     return { label: 'Low', color: 'var(--text-muted)' };
   };
 
@@ -159,39 +166,38 @@ export default function KeyframeAudit() {
   const displayFrames = filter === 'medicine_only' ? [] : keyframes;
 
   if (loading) {
-    return <div className="empty-state"><p>Loading keyframe data...</p></div>;
+    return <Loading rows={5} label="Loading keyframe data" />;
   }
 
   return (
-    <div style={{ padding: '0 20px', maxWidth: '1400px', margin: '0 auto', marginBottom: '80px' }}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 className="page-title">Keyframe Confidence Audit</h2>
-          <p className="page-description">Per-frame AI evidence for medication intake verification</p>
-        </div>
-        <UserSelector />
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+    <div>
+      <PageHeader
+        title="Recent frames"
+        description="Captured frames, medication evidence and unnamed faces"
+        actions={<>
+          <div className="kf-filters">
           <button
             className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('all')}
-          >All Frames ({keyframes.length})</button>
+          >All frames ({keyframes.length})</button>
           <button
             className={`btn btn-sm ${filter === 'medicine_only' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('medicine_only')}
           >
-            <Pill size={14} /> Medicine Evidence ({evidenceFrames.length})
+            <Pill size={14} /> Medicine evidence ({evidenceFrames.length})
           </button>
           <button
             className={`btn btn-sm ${filter === 'unknown_faces' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter('unknown_faces')}
           >
-            <User size={14} /> Unknown Faces ({unknownFaces.length})
+            <User size={14} /> Unknown faces ({unknownFaces.length})
           </button>
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
             <Eye size={16} /> Refresh
           </button>
-        </div>
-      </div>
+          </div>
+        </>}
+      />
 
       {/* Latest Detection Result Summary */}
       {lastResult && (
@@ -218,7 +224,7 @@ export default function KeyframeAudit() {
 
           <div className="stat-grid">
             <div className="stat-card">
-              <div className="stat-value" style={{ color: 'var(--primary)' }}>
+              <div className="stat-value" style={{ color: 'var(--primary-text)' }}>
                 {((lastResult.final_confidence || 0) * 100).toFixed(0)}%
               </div>
               <div className="stat-label">Overall Confidence</div>
@@ -287,7 +293,7 @@ export default function KeyframeAudit() {
                     </div>
                     <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
                     {user?.role === 'caregiver' && (
-                      <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary-text)' }}>
                         <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
                       </div>
                     )}
@@ -365,7 +371,7 @@ export default function KeyframeAudit() {
                       </div>
                       <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 2 }}>{phaseInfo.label}</div>
                       {user?.role === 'caregiver' && (
-                        <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary)' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, color: 'var(--primary-text)' }}>
                           <User size={12} /> {userMap[ev.user_id] || 'Unknown User'}
                         </div>
                       )}
@@ -385,13 +391,14 @@ export default function KeyframeAudit() {
                           alt={`Evidence ${evId}`}
                           style={{ width: '100%', maxHeight: 400, objectFit: 'contain', borderRadius: 'var(--radius-md)', background: '#000' }}
                         />
-                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'grid', gap: 8,
+                                      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
                           <div><strong>ID:</strong> {evId?.slice(0, 8)}...</div>
                           <div><strong>Phase:</strong> {phaseInfo.label}</div>
                           <div><strong>Medicine:</strong> {ev.medication_name}</div>
                           <div><strong>Status:</strong> {ev.detection_status}</div>
-                          <div><strong>Confidence:</strong> {((ev.detection_confidence || 0) * 100).toFixed(1)}%</div>
-                          <div><strong>Phase Score:</strong> {((ev.phase_score || 0) * 100).toFixed(1)}%</div>
+                          <div><strong>Confidence:</strong> {ev.detection_confidence == null ? NO_DATA : `${(ev.detection_confidence * 100).toFixed(1)}%`}</div>
+                          <div><strong>Phase score:</strong> {ev.phase_score == null ? NO_DATA : `${(ev.phase_score * 100).toFixed(1)}%`}</div>
                         </div>
                       </div>
                     )}
@@ -499,7 +506,7 @@ export default function KeyframeAudit() {
                         <Clock size={12} />
                         {kf.saved_at ? formatDateTime12h(kf.saved_at) : 'Unknown time'}
                         {user?.role === 'caregiver' && (
-                          <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
+                          <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary-text)', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center' }}>
                             <User size={10} style={{ marginRight: 4 }} />
                             {userMap[kf.user_id] || 'Unknown User'}
                           </span>
@@ -512,7 +519,7 @@ export default function KeyframeAudit() {
                         )}
                         {kf.type === 'face_crop' && (
                           <span className="badge" style={{
-                            background: 'var(--primary-light)', color: 'var(--primary)',
+                            background: 'var(--primary-light)', color: 'var(--primary-text)',
                             fontSize: '0.65rem', fontWeight: 700
                           }}>Face Crop</span>
                         )}
@@ -562,7 +569,8 @@ export default function KeyframeAudit() {
                       />
                       <div style={{
                         marginTop: 12, fontSize: '0.8rem', color: 'var(--text-secondary)',
-                        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12
+                        display: 'grid', gap: 12,
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))'
                       }}>
                         <div><strong>ID:</strong> {kf.keyframe_id?.slice(0, 8)}...</div>
                         <div><strong>Blur Score:</strong> {(kf.blur_score || 0).toFixed(1)}</div>

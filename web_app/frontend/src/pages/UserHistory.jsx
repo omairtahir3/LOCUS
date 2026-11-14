@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { userAPI } from '../services/api';
 import { Clock, CheckCircle, XCircle, AlertTriangle, TrendingUp, Calendar, Filter } from 'lucide-react';
 import { formatClockTime } from '../utils/dateUtils';
+import PageHeader from '../components/Layout/PageHeader';
+import Loading from '../components/Feedback/Loading';
 
 export default function UserHistory() {
   const [history, setHistory] = useState([]);
@@ -74,25 +76,23 @@ export default function UserHistory() {
 
   const statusIcon = (s) => {
     switch (s) {
-      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success)' }} />;
-      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger)' }} />;
+      case 'taken': return <CheckCircle size={14} style={{ color: 'var(--success-text)' }} />;
+      case 'missed': return <XCircle size={14} style={{ color: 'var(--danger-text)' }} />;
       case 'skipped':
-      case 'camera_off': return <XCircle size={14} style={{ color: 'var(--warning)' }} />;
-      case 'needs_verification': return <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />;
+      case 'camera_off': return <XCircle size={14} style={{ color: 'var(--warning-text)' }} />;
+      case 'needs_verification': return <AlertTriangle size={14} style={{ color: 'var(--warning-text)' }} />;
       default: return <Clock size={14} style={{ color: 'var(--text-muted)' }} />;
     }
   };
 
-  if (loading) return <div className="empty-state"><p>Loading history...</p></div>;
+  if (loading) return <Loading rows={5} label="Loading history" />;
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">Medication History</h2>
-          <p className="page-description">Your complete medication intake record</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Medication History"
+        description="Your complete medication intake record"
+      />
 
       {/* Adherence Summary Stats */}
       {adherence && (
@@ -244,7 +244,7 @@ export default function UserHistory() {
                   )}
                   {log.confidence_score != null && (
                     <span style={{
-                      fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)',
+                      fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary-text)',
                       background: 'var(--primary-light)', padding: '2px 8px',
                       borderRadius: 'var(--radius-full)',
                     }}>

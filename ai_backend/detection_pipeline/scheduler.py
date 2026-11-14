@@ -17,7 +17,6 @@ from bson import ObjectId
 from database import get_db
 from ai.pipeline import MedicationDetectionPipeline
 from db_config import get_client, get_db_name
-from service_config import get_locus_api_url
 
 # Optional GoPro auto-control via Open GoPro API
 _gopro_session = None
@@ -349,26 +348,22 @@ async def _start_pipeline_for_session(session, user_id):
         session.pipeline_started = False
 
 
-import aiohttp
-
-async def _fire_system_alert(user_id, medication_id, status, notes):
-    """Fire-and-forget alert to Node.js backend to trigger emails/push notifications."""
-    try:
-        # Use short timeout to avoid blocking or piling up
-        timeout = aiohttp.ClientTimeout(total=3)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            payload = {
-                "user_id": str(user_id),
-                "medication_id": str(medication_id),
-                "status": status,
-                "notes": notes
-            }
-            # Fire and forget; if it fails, we just log and move on
-            async with session.post(f"{get_locus_api_url()}/api/notifications/system-alert", json=payload) as response:
-                if response.status not in (200, 201):
-                    print(f"[Scheduler] Warning: Failed to send system alert. Status {response.status}")
-    except Exception as e:
-        print(f"[Scheduler] Warning: Could not reach Node.js for system alert: {e}")
+# Missed, camera_off and skipped doses are NOT announced from here. Node's
+# notificationScheduler sweeps for exactly those three statuses every minute
+# (utils/notificationScheduler.js, "Catch missed/skipped doses that were set by
+# the AI pipeline directly"), bounded to the last 48 hours and claimed with an
+# atomic findOneAndUpdate on medication_logs.caregiver_notified, so each row
+# reaches the wearer and their caregivers exactly once.
+#
+# This file used to POST every row to /api/notifications/system-alert as well.
+# That route does not set caregiver_notified, so with Node up a row was
+# announced TWICE -- once by the POST, once by the sweep a minute later. With
+# Node down, one start printed 25 identical "Could not reach Node.js" warnings
+# for backfilled rows the sweep would have picked up anyway, and buried the
+# scheduler's real output.
+#
+# Writing the row is the notification request. The collection is the queue, and
+# a queue does not need a doorbell.
 
 async def _log_session_result(session):
     """Log taken/missed for each medication in the session."""
@@ -454,15 +449,6 @@ async def _log_session_result(session):
 
         await db.medication_logs.insert_one(log_doc)
         print(f"[Scheduler] Logged '{status}' for {med['name']} at {session.time_slot}")
-        
-        # Fire email/push notification asynchronously
-        import asyncio
-        asyncio.create_task(_fire_system_alert(
-            user_id=user_id,
-            medication_id=med_id,
-            status=status,
-            notes=log_doc["notes"]
-        ))
 
 
 async def _backfill_expired_slots():
@@ -586,15 +572,6 @@ async def _backfill_expired_slots():
                 day_label = "yesterday" if day_offset == 1 else "today"
                 print(f"[Scheduler] [Backfill] Auto-logged 'camera_off' for {med['name']} at {sched_time} {day_label} "
                       f"(window ended at {window_end.strftime('%H:%M')})")
-                
-                # Fire email/push notification asynchronously
-                import asyncio
-                asyncio.create_task(_fire_system_alert(
-                    user_id=med["user_id"],
-                    medication_id=med["_id"],
-                    status="camera_off",
-                    notes=log_doc["notes"]
-                ))
 
 
 async def _ensure_stream_pipelines():

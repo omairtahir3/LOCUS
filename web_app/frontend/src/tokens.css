@@ -1,0 +1,112 @@
+/* LOCUS design tokens. The one source for colour, type, spacing, radii,
+   shadows and motion; mobile_app/lib/theme/app_theme.dart (LocusTokens)
+   carries the same values.
+
+   Prefixed --lc- so they sit beside the older variables in index.css without
+   replacing them; pages move over one phase at a time.
+
+   Every text/background pair below was checked at >= 4.5:1. The amber
+   --lc-accent is a fill colour only: text on light surfaces uses
+   --lc-accent-text. Light theme only; there is no dark set. Status
+   colours are never meant to stand alone; pair each with its icon and
+   label. */
+/* Type (ui-ux-pro-max typography data, "Tech Startup" pairing): Space Grotesk
+   for display, DM Sans for body. Both have plain zeros, so times read cleanly. */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400..700&family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap');
+
+:root {
+  /* Primary: teal, for actions (buttons, links, focus). White on it 5.5:1. */
+  --lc-primary: #0F766E;
+  --lc-primary-hover: #115E59;
+  --lc-on-primary: #FFFFFF;
+
+  /* Aurora: the light background's colour fields (teal family plus one warm). */
+  --lc-aurora-teal: #5EEAD4;
+  --lc-aurora-mint: #A7F3D0;
+  --lc-aurora-sky: #7DD3FC;
+  --lc-aurora-peach: #FDBA74;
+
+  /* Accent: amber, the one warm highlight. Light theme only. */
+  --lc-accent: #E9A23B;
+  --lc-on-accent: #1C1A17;
+
+  /* App surfaces, light */
+  --lc-bg: #F7F3EC;
+  --lc-ground: #E2ECE7;      /* website ground: soft mint (text-2 on it 6.8:1) */
+  --lc-band: #D3E4DB;        /* deeper mint for bands (text-2 on it 6.2:1) */
+  --lc-surface: #FFFDF9;
+  --lc-surface-2: #EFE8DC;
+  --lc-border: #E1D8C9;
+  --lc-text: #1C1A17;
+  --lc-text-2: #544E46;
+  --lc-text-muted: #6B645A;
+  --lc-accent-text: #8A5508;
+  --lc-focus: #0F766E;
+
+  /* Status: colour + tint. Always with an icon and a word. */
+  --lc-taken: #23704A;        --lc-taken-bg: #E3F1E8;
+  --lc-verify: #2A5F94;       --lc-verify-bg: #E3ECF6;
+  --lc-missed: #8A3874;       --lc-missed-bg: #F4E4EF;
+  --lc-camera-off: #535C68;   --lc-camera-off-bg: #E8EAEE;
+  --lc-danger: #B42318;       --lc-danger-bg: #FBE5E1;
+
+  /* Capabilities: one hue each, for icons and accents on the landing page */
+  --lc-cap-dose: #1E6B57;     --lc-cap-dose-bg: #E2F0EA;
+  --lc-cap-face: #8A5508;     --lc-cap-face-bg: #F8EBD5;
+  --lc-cap-item: #2B5C9E;     --lc-cap-item-bg: #E3EBF6;
+  --lc-cap-talk: #7A3A8C;     --lc-cap-talk-bg: #F1E5F4;
+  --lc-cap-place: #A3431C;    --lc-cap-place-bg: #F8E6DD;
+
+  /* Type */
+  --lc-font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --lc-font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --lc-text-xs: 0.8125rem;   /* 13 */
+  --lc-text-sm: 0.9375rem;   /* 15 */
+  --lc-text-base: 1.0625rem; /* 17 */
+  --lc-text-lg: 1.25rem;     /* 20 */
+  --lc-text-xl: 1.5rem;      /* 24 */
+  --lc-text-2xl: 2rem;       /* 32 */
+  --lc-text-3xl: 2.75rem;    /* 44 */
+  --lc-text-display: clamp(3rem, 2rem + 5vw, 6.5rem);
+  --lc-leading-tight: 1.1;
+  --lc-leading-body: 1.55;
+
+  /* Spacing: 4px base */
+  --lc-space-1: 4px;
+  --lc-space-2: 8px;
+  --lc-space-3: 12px;
+  --lc-space-4: 16px;
+  --lc-space-5: 24px;
+  --lc-space-6: 32px;
+  --lc-space-7: 48px;
+  --lc-space-8: 72px;
+  --lc-space-9: 120px;
+  --lc-tap: 48px; /* minimum touch target */
+
+  /* Radii */
+  --lc-radius-sm: 10px;
+  --lc-radius-md: 16px;
+  --lc-radius-lg: 24px;
+  --lc-radius-pill: 999px;
+
+  /* Shadows: warm-tinted, soft */
+  --lc-shadow-1: 0 1px 2px rgb(60 40 15 / 0.06), 0 1px 1px rgb(60 40 15 / 0.04);
+  --lc-shadow-2: 0 4px 12px rgb(60 40 15 / 0.08), 0 1px 3px rgb(60 40 15 / 0.05);
+  --lc-shadow-3: 0 16px 40px rgb(60 40 15 / 0.12), 0 4px 10px rgb(60 40 15 / 0.06);
+
+  /* Motion: short, ease-out */
+  --lc-dur-fast: 140ms;
+  --lc-dur-base: 220ms;
+  --lc-dur-slow: 420ms;
+  --lc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Reduced motion: durations collapse, so anything built on these tokens
+   obeys without its own media query. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lc-dur-fast: 1ms;
+    --lc-dur-base: 1ms;
+    --lc-dur-slow: 1ms;
+  }
+}

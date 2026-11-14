@@ -1,8 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { User, Mail, Lock, UserCheck, Heart, ArrowRight, Users, Activity } from 'lucide-react';
+import { User, Mail, Lock, UserCheck, Heart, ArrowRight, AlertCircle } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
+import AuthShell from '../components/Auth/AuthShell';
+import { GoogleRoleDialog } from './Login';
+
+// Google's button takes a fixed pixel width; keep it inside the card on phones.
+const googleWidth = () => Math.min(350, window.innerWidth - 80);
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -13,211 +18,6 @@ export default function Register() {
   const navigate = useNavigate();
 
   const [googleRoleModal, setGoogleRoleModal] = useState({ show: false, token: null, name: '', picture: '', selectedRole: 'caregiver' });
-
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
-
-      .reg-container {
-        min-height: 100vh;
-        background-color: #F8FAFC;
-        font-family: 'Outfit', sans-serif;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 40px 20px;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .reg-mesh {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 0;
-        background-image: 
-          radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.1) 0px, transparent 50%),
-          radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.1) 0px, transparent 50%);
-        pointer-events: none;
-      }
-
-      .reg-card {
-        background: rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-        border-radius: 32px;
-        width: 100%;
-        max-width: 500px;
-        padding: 48px;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08);
-        position: relative;
-        z-index: 1;
-      }
-
-      .reg-logo {
-        height: 32px;
-        margin-bottom: 24px;
-      }
-
-      .reg-title {
-        font-size: 2rem;
-        font-weight: 800;
-        color: #1E293B;
-        margin-bottom: 8px;
-        letter-spacing: -0.02em;
-      }
-
-      .reg-subtitle {
-        color: #64748B;
-        margin-bottom: 32px;
-        font-size: 1rem;
-      }
-
-      .reg-form-group {
-        margin-bottom: 20px;
-        text-align: left;
-      }
-
-      .reg-label {
-        display: block;
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: #475569;
-        margin-bottom: 8px;
-        padding-left: 4px;
-      }
-
-      .reg-input-wrapper {
-        position: relative;
-      }
-
-      .reg-input-icon {
-        position: absolute;
-        left: 14px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #94A3B8;
-      }
-
-      .reg-input {
-        width: 100%;
-        padding: 12px 14px 12px 42px;
-        background: white;
-        border: 1px solid #E2E8F0;
-        border-radius: 14px;
-        font-size: 0.95rem;
-        font-family: inherit;
-        transition: all 0.2s;
-        color: #1E293B;
-      }
-
-      .reg-input:focus {
-        outline: none;
-        border-color: #0D9488;
-        box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.1);
-      }
-
-      .role-selector {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-bottom: 24px;
-      }
-
-      .role-btn {
-        padding: 16px;
-        border-radius: 18px;
-        border: 2px solid #E2E8F0;
-        background: white;
-        cursor: pointer;
-        transition: all 0.2s;
-        text-align: left;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .role-btn.active {
-        border-color: #0D9488;
-        background: rgba(13, 148, 136, 0.03);
-        box-shadow: 0 4px 12px rgba(13, 148, 136, 0.08);
-      }
-
-      .role-btn h4 {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #1E293B;
-      }
-
-      .role-btn.active h4 {
-        color: #0D9488;
-      }
-
-      .role-btn p {
-        font-size: 0.75rem;
-        color: #64748B;
-        line-height: 1.3;
-      }
-
-      .reg-submit-btn {
-        width: 100%;
-        padding: 14px;
-        background: #0D9488;
-        color: white;
-        border: none;
-        border-radius: 14px;
-        font-size: 1rem;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.3s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        box-shadow: 0 10px 15px -3px rgba(13, 148, 136, 0.3);
-      }
-
-      .reg-submit-btn:hover {
-        background: #0F766E;
-        transform: translateY(-2px);
-        box-shadow: 0 20px 25px -5px rgba(13, 148, 136, 0.4);
-      }
-
-      .reg-submit-btn:disabled {
-        opacity: 0.7;
-        cursor: not-allowed;
-        transform: none;
-      }
-
-      .reg-footer {
-        margin-top: 24px;
-        color: #64748B;
-        font-size: 0.9rem;
-      }
-
-      .reg-footer a {
-        color: #0D9488;
-        font-weight: 700;
-        text-decoration: none;
-      }
-
-      .reg-error {
-        background: #FEF2F2;
-        color: #991B1B;
-        padding: 12px 16px;
-        border-radius: 12px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        margin-bottom: 24px;
-        border-left: 4px solid #EF4444;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -232,218 +32,146 @@ export default function Register() {
   };
 
   return (
-    <div className="reg-container">
-      <div className="reg-mesh"></div>
-      
-      <div className="reg-card">
-        <Link to="/">
-          <img src="/logo.png" alt="LOCUS" className="reg-logo" />
-        </Link>
-        
-        <h1 className="reg-title">Join LOCUS</h1>
-        <p className="reg-subtitle">Start monitoring with intelligence and compassion.</p>
+    <AuthShell wide>
+      <h1 className="auth-title">Join LOCUS</h1>
+      <p className="auth-subtitle">Start monitoring with intelligence and compassion.</p>
 
-        {error && <div className="reg-error">{error}</div>}
+      {error && <div className="auth-alert auth-alert--error" role="alert"><AlertCircle size={18} /><span>{error}</span></div>}
 
-        <form onSubmit={handleSubmit}>
-          <div className="reg-form-group">
-            <label className="reg-label">Full Name</label>
-            <div className="reg-input-wrapper">
-              <User className="reg-input-icon" size={18} />
-              <input
-                type="text"
-                className="reg-input"
-                placeholder="Enter your name"
-                value={name}
-                onChange={(e) => { setName(e.target.value); setError(null); }}
-                required
-              />
-            </div>
+      <form onSubmit={handleSubmit}>
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="reg-name">Full Name</label>
+          <div className="auth-input-wrap">
+            <User className="auth-input-icon" size={20} aria-hidden="true" />
+            <input
+              id="reg-name"
+              type="text"
+              autoComplete="name"
+              className="auth-input"
+              placeholder="Enter your name"
+              value={name}
+              onChange={(e) => { setName(e.target.value); setError(null); }}
+              required
+            />
           </div>
-
-          <div className="reg-form-group">
-            <label className="reg-label">Email Address</label>
-            <div className="reg-input-wrapper">
-              <Mail className="reg-input-icon" size={18} />
-              <input
-                type="email"
-                className="reg-input"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); setError(null); }}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="reg-form-group">
-            <label className="reg-label">Password</label>
-            <div className="reg-input-wrapper">
-              <Lock className="reg-input-icon" size={18} />
-              <input
-                type="password"
-                className="reg-input"
-                placeholder="Create a strong password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(null); }}
-                required
-                minLength={6}
-              />
-            </div>
-          </div>
-
-          <div className="reg-form-group">
-            <label className="reg-label">I want to</label>
-            <div className="role-selector">
-              <button
-                type="button"
-                className={`role-btn ${role === 'caregiver' ? 'active' : ''}`}
-                onClick={() => setRole('caregiver')}
-              >
-                <UserCheck size={20} style={{ marginBottom: 4 }} />
-                <h4>Be a Caregiver</h4>
-                <p>Monitor family and handle alerts.</p>
-              </button>
-              <button
-                type="button"
-                className={`role-btn ${role === 'user' ? 'active' : ''}`}
-                onClick={() => setRole('user')}
-              >
-                <Heart size={20} style={{ marginBottom: 4 }} />
-                <h4>Track Myself</h4>
-                <p>Manage my own meds and health.</p>
-              </button>
-            </div>
-          </div>
-
-          <button type="submit" className="reg-submit-btn" disabled={loading}>
-            {loading ? 'Creating Account...' : 'Create Account'}
-            {!loading && <ArrowRight size={18} />}
-          </button>
-        </form>
-
-        <div style={{ display: 'flex', alignItems: 'center', margin: '24px 0 16px 0' }}>
-          <div style={{ flex: 1, height: '1px', background: '#E2E8F0' }}></div>
-          <span style={{ padding: '0 12px', color: '#94A3B8', fontSize: '0.85rem', fontWeight: '500' }}>or sign up with</span>
-          <div style={{ flex: 1, height: '1px', background: '#E2E8F0' }}></div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-          <GoogleLogin
-            onSuccess={async (credentialResponse) => {
-              const res = await googleLogin(credentialResponse.credential, role, false);
-              if (res && res.requiresRole) {
-                setGoogleRoleModal({ show: true, token: res.token, name: res.name, picture: res.picture, selectedRole: role });
-                return;
-              }
-              if (res === true) {
-                const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
-                if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
-                  navigate('/dashboard');
-                } else {
-                  navigate('/my-dashboard');
-                }
-              }
-            }}
-            onError={() => setError('Google Sign-In failed or was cancelled')}
-            theme="outline"
-            shape="pill"
-            size="large"
-            width="350"
-          />
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="reg-email">Email Address</label>
+          <div className="auth-input-wrap">
+            <Mail className="auth-input-icon" size={20} aria-hidden="true" />
+            <input
+              id="reg-email"
+              type="email"
+              autoComplete="email"
+              className="auth-input"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(null); }}
+              required
+            />
+          </div>
         </div>
 
-        <p className="reg-footer">
-          Already have an account? <Link to="/login">Sign in</Link>
-        </p>
-      </div>
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="reg-password">Password</label>
+          <div className="auth-input-wrap">
+            <Lock className="auth-input-icon" size={20} aria-hidden="true" />
+            <input
+              id="reg-password"
+              type="password"
+              autoComplete="new-password"
+              className="auth-input"
+              placeholder="Create a strong password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(null); }}
+              required
+              minLength={6}
+            />
+          </div>
+        </div>
 
-      {googleRoleModal.show && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(8px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px'
-        }}>
-          <div style={{
-            background: '#ffffff', borderRadius: '24px', padding: '32px',
-            width: '100%', maxWidth: '440px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-            textAlign: 'center'
-          }}>
-            {googleRoleModal.picture && (
-              <img 
-                src={googleRoleModal.picture} 
-                alt="" 
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
-                style={{ width: '70px', height: '70px', borderRadius: '50%', margin: '0 auto 16px auto', border: '3px solid #3B82F6', objectFit: 'cover' }} 
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-            )}
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1E293B', marginBottom: '8px' }}>
-              Welcome, {googleRoleModal.name}!
-            </h2>
-            <p style={{ color: '#64748B', fontSize: '0.95rem', marginBottom: '24px' }}>
-              To complete your Google registration, please select your role in LOCUS:
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px', textAlign: 'left' }}>
-              <button
-                type="button"
-                onClick={() => setGoogleRoleModal(prev => ({ ...prev, selectedRole: 'caregiver' }))}
-                style={{
-                  padding: '16px', borderRadius: '16px', border: `2px solid ${googleRoleModal.selectedRole === 'caregiver' ? '#3B82F6' : '#E2E8F0'}`,
-                  background: googleRoleModal.selectedRole === 'caregiver' ? '#EFF6FF' : '#ffffff',
-                  cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >
-                <div style={{ fontWeight: '600', fontSize: '1.05rem', color: '#1E293B', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Users size={18} color="#3B82F6" /> Be a Caregiver
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Monitor family members and handle medication alerts.</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setGoogleRoleModal(prev => ({ ...prev, selectedRole: 'user' }))}
-                style={{
-                  padding: '16px', borderRadius: '16px', border: `2px solid ${googleRoleModal.selectedRole === 'user' ? '#3B82F6' : '#E2E8F0'}`,
-                  background: googleRoleModal.selectedRole === 'user' ? '#EFF6FF' : '#ffffff',
-                  cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >
-                <div style={{ fontWeight: '600', fontSize: '1.05rem', color: '#1E293B', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Activity size={18} color="#EC4899" /> Track Myself
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Manage my own health, prescriptions, and daily schedule.</div>
-              </button>
-            </div>
-
+        <div className="auth-field">
+          <span className="auth-label" id="reg-role-label">I want to</span>
+          <div className="auth-roles" role="group" aria-labelledby="reg-role-label" style={{ marginBottom: 6 }}>
             <button
               type="button"
-              disabled={!googleRoleModal.selectedRole || loading}
-              onClick={async () => {
-                const ok = await googleLogin(googleRoleModal.token, googleRoleModal.selectedRole, true);
-                if (ok === true) {
-                  const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
-                  if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
-                    navigate('/dashboard');
-                  } else {
-                    navigate('/my-dashboard');
-                  }
-                }
-              }}
-              style={{
-                width: '100%', padding: '14px', borderRadius: '14px',
-                background: !googleRoleModal.selectedRole ? '#94A3B8' : '#3B82F6',
-                color: '#ffffff', fontWeight: '600', fontSize: '1rem', border: 'none', cursor: !googleRoleModal.selectedRole ? 'not-allowed' : 'pointer',
-                boxShadow: !googleRoleModal.selectedRole ? 'none' : '0 10px 15px -3px rgba(59, 130, 246, 0.3)'
-              }}
+              aria-pressed={role === 'caregiver'}
+              className={`auth-role ${role === 'caregiver' ? 'is-active' : ''}`}
+              onClick={() => setRole('caregiver')}
             >
-              {loading ? 'Creating Account...' : 'Confirm & Complete Registration'}
+              <UserCheck size={20} aria-hidden="true" />
+              <h4>Be a Caregiver</h4>
+              <p>Monitor family and handle alerts.</p>
+            </button>
+            <button
+              type="button"
+              aria-pressed={role === 'user'}
+              className={`auth-role ${role === 'user' ? 'is-active' : ''}`}
+              onClick={() => setRole('user')}
+            >
+              <Heart size={20} aria-hidden="true" />
+              <h4>Track Myself</h4>
+              <p>Manage my own meds and health.</p>
             </button>
           </div>
         </div>
+
+        <button type="submit" className="auth-submit" disabled={loading}>
+          {loading ? 'Creating Account...' : 'Create Account'}
+          {!loading && <ArrowRight size={18} />}
+        </button>
+      </form>
+
+      <div className="auth-divider">or sign up with</div>
+
+      <div className="auth-google">
+        <GoogleLogin
+          onSuccess={async (credentialResponse) => {
+            const res = await googleLogin(credentialResponse.credential, role, false);
+            if (res && res.requiresRole) {
+              setGoogleRoleModal({ show: true, token: res.token, name: res.name, picture: res.picture, selectedRole: role });
+              return;
+            }
+            if (res === true) {
+              const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
+              if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
+                navigate('/dashboard');
+              } else {
+                navigate('/my-dashboard');
+              }
+            }
+          }}
+          onError={() => setError('Google Sign-In failed or was cancelled')}
+          theme="outline"
+          shape="pill"
+          size="large"
+          width={googleWidth()}
+        />
+      </div>
+
+      <p className="auth-footer">
+        Already have an account? <Link to="/login">Sign in</Link>
+      </p>
+
+      {googleRoleModal.show && (
+        <GoogleRoleDialog
+          modal={googleRoleModal}
+          setModal={setGoogleRoleModal}
+          loading={loading}
+          onConfirm={async () => {
+            const ok = await googleLogin(googleRoleModal.token, googleRoleModal.selectedRole, true);
+            if (ok === true) {
+              const savedUser = JSON.parse(localStorage.getItem('locus_user') || '{}');
+              if (savedUser?.role === 'caregiver' || savedUser?.role === 'admin') {
+                navigate('/dashboard');
+              } else {
+                navigate('/my-dashboard');
+              }
+            }
+          }}
+        />
       )}
-    </div>
+    </AuthShell>
   );
 }

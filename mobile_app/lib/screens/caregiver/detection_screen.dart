@@ -109,7 +109,7 @@ class _DetectionScreenState extends State<DetectionScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('AI Detection Pipeline', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      const Text('AI Detection Pipeline', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 2),
                       Text(
                         _isRunning ? 'Actively Monitoring' : 'Pipeline Stopped',
@@ -203,7 +203,7 @@ class _DetectionScreenState extends State<DetectionScreen> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
             ),
             child: Column(
@@ -220,7 +220,7 @@ class _DetectionScreenState extends State<DetectionScreen> {
                   '2. The AI monitors for medication intake\n'
                   '3. 3-phase verification: Pill detection → Gesture tracking → Confirmation\n'
                   '4. Results are automatically logged to the dashboard',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.6),
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.6),
                 ),
               ],
             ),
@@ -236,7 +236,7 @@ class _DetectionScreenState extends State<DetectionScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
         child: Row(
@@ -251,7 +251,7 @@ class _DetectionScreenState extends State<DetectionScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                Text(label, style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                Text(label, style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
               ],
             ),
           ],

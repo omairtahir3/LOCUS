@@ -1,4 +1,5 @@
 const express = require('express');
+const { scopedUserId } = require('../utils/scope');
 
 // How many photographs an enrolment needs. See the enrol route for why ten.
 const MIN_ENROLL_FRAMES = Number(process.env.MIN_ENROLL_FRAMES || 10);
@@ -123,14 +124,8 @@ function galleryCoherence(embeddings, sources = []) {
 }
 
 async function resolveUserId(req) {
-  let userId = req.user.id;
-  if (req.user.role === 'caregiver') {
-    const caregiver = await User.findById(req.user.id);
-    if (caregiver.monitoring_users && caregiver.monitoring_users.length > 0) {
-      userId = caregiver.monitoring_users[0];
-    }
-  }
-  return userId;
+  // One rule for every route: see utils/scope.js.
+  return scopedUserId(req);
 }
 
 // POST /api/user-items/enroll
